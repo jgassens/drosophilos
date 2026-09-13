@@ -43,11 +43,15 @@ def add_and_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) ->
     return g, l
 
 
-def add_and_gate(net: Netlist, drive: Drive, name: str, inputs: list[int]) -> int:
+def add_and_gate(net: Netlist, drive: Drive, name: str, inputs: list[int], fraction: float | None = None) -> int:
+    """Unlatched rate-mode AND. `fraction` overrides drive.and_in (as a fraction of the
+    sustained-train need); the fault gates use 0.6 so that one rail plus noise never trips
+    them, while completion ANDs use 0.75 so that two inputs fire under -10 % weights."""
     assert len(inputs) == 2
     g = net.neuron(f"{name}.and")
+    q = drive.and_in if fraction is None else int(round(fraction * drive.rate_need))
     for x in inputs:
-        net.synapse(x, g, drive.and_in)
+        net.synapse(x, g, q)
     return g
 
 

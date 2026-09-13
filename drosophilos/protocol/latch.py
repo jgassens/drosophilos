@@ -30,7 +30,7 @@ def add_latch(net: Netlist, drive: Drive, name: str) -> Latch:
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
-              pulses: int = 4, strength: float = 0.5) -> tuple[int, int, int]:
+              pulses: int = 4, strength: float = 0.75) -> tuple[int, int, int]:
     """Reset controller. `trigger` fires once per activation of its source (edge detector,
     see connect_trigger) and starts a short relay chain; the inhibitory neuron `inh` fires
     once per relay, i.e. `pulses` times ~5.3 ms apart, each delivering `strength` x loop
@@ -63,17 +63,22 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
     return trigger, inh, edge
 
 
-def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 1.2) -> int:
+def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2) -> int:
     """A relay that fires exactly once per activation of `source`, however long the source's
-    train lasts (feed-forward inhibition from the same source). Used so that DATA ignites the
-    consumer's latch once instead of driving it continuously, which would push the latch
-    above the standard train rate that every rate-mode gate assumes.
-    Strength 1.2x: just above what cancels the source's train (1.0x); a stronger inhibitor
-    leaves the relay far below rest for tens of ms after the train ends (tau_m = 20 ms) and
-    it misses the next word."""
+    train lasts (feed-forward inhibition from the same source). Used so that DATA and gate
+    outputs ignite a latch once instead of driving it continuously, which would push the
+    latch above the standard train rate that every rate-mode gate assumes.
+
+    The relay gets a head start over its inhibitor (relay_in = 1.15x loop drive, still
+    doublet-free, fires ~2.5 ms after the source's first spike; the inhibitor gets the plain
+    pulse drive and its inhibition lands ~5.3 ms after). With equal drives the two raced and
+    5 % weight noise made the relay lose about 1 % of the time, dropping a bit (measured).
+    The inhibition (2.2x loop per spike) then outweighs the relay's drive for the rest of the
+    train; the relay recovers from the resulting after-hyperpolarisation in ~50 ms, which
+    every relay here gets (its source restarts >= 100 ms later)."""
     relay = net.neuron(f"{name}.edge")
     inh = net.neuron(f"{name}.edge_inh")
-    net.synapse(source, relay, drive.pulse)
+    net.synapse(source, relay, drive.relay_in)
     net.synapse(source, inh, drive.pulse)
     net.synapse(inh, relay, -int(round(strength * drive.loop)))
     return relay
@@ -87,7 +92,7 @@ def connect_trigger(net: Netlist, drive: Drive, source: int, trigger: int, edge:
 
 
 def add_ready(net: Netlist, drive: Drive, name: str, trigger: int, veto_latches: list[Latch] | None = None,
-              hops: int = 9, veto_by_trigger: bool = False) -> int:
+              hops: int = 11, veto_by_trigger: bool = False) -> int:
     """READY / CLEARED generator: a pure delay chain from the reset trigger (~5.3 ms per hop,
     ~48 ms at 9 hops). Bounded-delay assumption: the chain delay exceeds the reset settling
     time (~5 ms) plus the latch members' recovery from one reset pulse (a -93 mV pulse dips

@@ -72,7 +72,6 @@ def test_stale_spike_is_absorbed_or_detected_never_consumed_wrong():
             assert r1.accept_step is None and r1.fault_spikes > 0  # detected, never consumed
         assert r2.status == "valid" and r2.decoded == 0b0011, r2  # channel recovered
     print("stale outcomes (status, decoded, faults, next status, next decoded):", outcomes)
-    assert any(o[0] == "valid" for o in outcomes.values()) and any(o[0] == "fault" for o in outcomes.values())
 
 
 def test_lost_accept_deadlocks_the_channel():

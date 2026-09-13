@@ -5,8 +5,9 @@ H0 report), not from assumptions:
   single-pulse need  : one synchronous input that just reaches threshold
   loop               : 1.4x that, regenerates a circulating spike (period ~4.7 ms)
   pulse              : same as loop; "each spike alone fires the target"
-  and_in             : 0.65x the sustained-train need; one 213 Hz latch train stays below
-                       threshold, two cross it (rate-mode AND)
+  and_in             : 0.75x the sustained-train need; one 213 Hz latch train stays below
+                       threshold (75 % of the gap), two cross it with margin for -10 % weights
+                       and -10 % rate (0.65x failed the 5 % weight-noise campaign)
   or_in              : 2x the sustained-train need; one train suffices
   reset              : -1.5x loop, delivered to BOTH latch members by a single spike
   ignite             : 2x loop; a latch just reset sits several mV below rest for tens of
@@ -34,9 +35,10 @@ class Drive:
     reset: int
     loop_period_steps: int
     ignite: int = 0  # 2x loop: ignition pulse that reaches threshold even ~10 mV below rest
+    relay_in: int = 0  # 1.15x loop (~1.6x need): edge relays fire ~1 ms before their own inhibitor
 
     @classmethod
-    def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.65, or_margin=2.0, reset_factor=1.5) -> "Drive":
+    def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.75, or_margin=2.0, reset_factor=1.5) -> "Drive":
         from ..connectome.embed_h0 import loop_period_steps, needed_quanta
 
         nq = needed_quanta(params)
@@ -46,7 +48,7 @@ class Drive:
         rate_need = gap * (period * params.dt) / (params.w_unit * params.tau_s)
         return cls(nq, rate_need, loop, loop, int(math.ceil(and_fraction * rate_need)),
                    int(math.ceil(or_margin * rate_need)), -int(math.ceil(reset_factor * loop)), period,
-                   ignite=2 * loop)
+                   ignite=2 * loop, relay_in=int(math.ceil(1.15 * loop)))
 
 
 @dataclass

@@ -50,7 +50,7 @@ def add_register(net: Netlist, drive: Drive, name: str, width: int, with_complet
             g, lv = add_or_latched(net, drive, f"{name}.valid{i}", [rails[i][0].u, rails[i][1].u])
             valid.append(lv)
             gates.append(g)
-            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", [rails[i][0].u, rails[i][1].u]))
+            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", [rails[i][0].u, rails[i][1].u], fraction=0.6))
         completion, internal = add_completion_tree(net, drive, f"{name}.comp", valid)
         gates += [x for x, role in enumerate(net.roles) if role.startswith(f"{name}.comp.") and role.endswith(".and")]
         if completion in valid:  # width 1: the valid latch is the completion latch
@@ -99,8 +99,13 @@ def build_channel(params: Params, width: int, drive: Drive | None = None) -> Cha
     # FAULT (both rails of a bit active): block the completion latch so the word is never
     # consumed, and raise FAULT-ACCEPT so the four phases still complete and the channel
     # does not deadlock (spec.md §3). A fault after completion is a flag only.
+    root = net.roles[Q.completion.u][: -len(".L.u")]
+    root_gate_and_relay = [x for x, role in enumerate(net.roles) if role in (f"{root}.and", f"{root}.ign.edge")]
     for f in Q.fault:
-        for x in Q.completion.members:
+        # block the completion latch, its AND gate and its ignition relay: without the last
+        # two, one ignition pulse still slips through before the inhibition builds up and the
+        # latch emits a single spike that the producer takes as ACCEPT (observed)
+        for x in list(Q.completion.members) + root_gate_and_relay:
             net.synapse(f, x, drive.reset)
         connect_trigger(net, drive, f, P.reset_trigger, P.reset_edge)
     net.group("accept", [Q.completion.u])
