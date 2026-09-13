@@ -78,3 +78,27 @@ def test_search_finds_planted_motif_and_circuit_computes_and():
         assert r["correct"], (a, b, r)
         assert r["reset_ok"], (a, b, r)
         assert r["completion_latency_ms"] < 60, (a, b, r)
+
+
+def test_timestep_refinement_leaves_transactions_unchanged():
+    """Stage 0 exit criterion: dt 0.1 ms -> 0.02 ms must not change decoded transactions.
+    Uses the H0-style circuit (latches, rate-mode AND, OR, completion, reset)."""
+    m = synthetic_mcns()
+    policy = Policy()
+    coarse, fine = Params(), Params().with_dt(0.02)
+    outcomes = {}
+    for params in (coarse, fine):
+        sols, _ = find_embeddings(m, params, policy, max_solutions=1, verbose=False)
+        assert sols
+        emb = best_embedding(sols)
+        tg = Targets.from_policy(params, policy)
+        topo, idx = isolated_topology(m, emb, params, policy)
+        steps_per_ms = int(round(1.0 / params.dt))
+        row = []
+        for a, b in ((0, 0), (0, 1), (1, 0), (1, 1)):
+            tx = Transaction(a, b, n_steps=150 * steps_per_ms, t_data=5 * steps_per_ms)
+            r, _ = run_transaction(topo, params, emb, idx, tx, tg)
+            row.append((r["fired_y1"], r["fired_y0"], r["completion"], r["reset_ok"]))
+        outcomes[params.dt] = row
+    assert outcomes[0.1] == outcomes[0.02], outcomes
+    assert all(r[2] for r in outcomes[0.1])

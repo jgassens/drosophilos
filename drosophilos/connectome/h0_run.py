@@ -123,7 +123,7 @@ def run_transaction(
     correct = (fired_y1 == expect_y1) and (fired_y0 == (not expect_y1)) and len(comp) > 0
     data_step = tx.t_data + max(0, tx.offset_steps)
     completion_latency = (comp[0] - data_step) * params.dt if comp else None
-    reset_ok = last_loop is not None and comp and last_loop < tx.n_steps - 300
+    reset_ok = last_loop is not None and comp and last_loop < tx.n_steps - int(round(30.0 / params.dt))
     ready_latency = ((last_loop - data_step) * params.dt) if (reset_ok and last_loop is not None) else None
     circ = set(idx.values())
     ev = tr.events

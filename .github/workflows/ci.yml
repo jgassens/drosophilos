@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: CPU test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --no-group dev && uv pip install pytest hypothesis
+      - run: uv run pytest -q -p no:warnings --ignore=tests/test_brian2_parity.py
+  brian2:
+    name: Brian2 cross-simulator parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync
+      - run: uv run pytest -q -p no:warnings tests/test_brian2_parity.py
