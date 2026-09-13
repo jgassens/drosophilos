@@ -44,8 +44,9 @@ class Perturbation:
                 f"stray {self.stray_rate_hz} Hz×{self.stray_quanta} q, arrival jitter ≤{self.arrival_jitter_steps} steps")
 
 
-def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window):
-    """Classify every transaction of one node from its (sorted) spike arrays."""
+def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None):
+    """Classify every transaction of one node from its (sorted) spike arrays. `debug`, if a
+    list, receives (class, details) tuples for every non-ok transaction."""
     out = []
     n_tx = len(loads)
     for k in range(n_tx):
@@ -84,13 +85,19 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
                     cls = "no_ready"
                 else:
                     s_rd = int(rd[0])
-                    late = np.isin(nu[st > s_rd], list(consumer_set)).sum()
+                    late_mask = np.isin(nu[st > s_rd], list(consumer_set))
+                    late = late_mask.sum()
                     cls = "late_activity" if late else "ok"
+                    if late and debug is not None:
+                        win = (st > s_rd - 600) & (st < s_rd + 300)
+                        debug.append((cls, [(int(s_ - s_rd), int(n_)) for s_, n_ in zip(st[win], nu[win])]))
         if cls == "ok" and (nu[(st >= lo)] == -1).any():
             pass
         n_fault = int(np.isin(nu, faults).sum())
         if cls == "ok" and n_fault:
             cls = "fault"
+        if cls not in ("ok", "late_activity") and debug is not None:
+            debug.append((cls, {"n_spikes_in_window": int(m.sum()), "accept": acc_lat}))
         out.append((cls, acc_lat, int(m.sum())))
     return out
 
@@ -98,7 +105,7 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
 def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 200, tx_per_chunk: int = 20,
                  tx_period_steps: int = 3200, pert: Perturbation = Perturbation(), seed: int = 0,
                  out_path: Path | None = None, expected_fn=None, word_fn=None, device: str = "cpu",
-                 dtype=torch.float64, verbose: bool = True) -> dict:
+                 dtype=torch.float64, verbose: bool = True, debug: bool = False) -> dict:
     ch: Channel = build_fn()
     net, drive = ch.net, ch.drive
     topo = net.topology()
@@ -159,8 +166,15 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
         lats, spk = [], []
         for b in range(B):
             sl = slice(node_bounds[b], node_bounds[b + 1])
+            dbg = [] if debug else None
             res = _decode_node(ev["step"][sl], ev["neuron"][sl], taps, comp, cleared, ready, faults, consumer_set,
-                               loads.tolist(), expected[b].tolist(), window)
+                               loads.tolist(), expected[b].tolist(), window, dbg)
+            if dbg:
+                for cls_, det in dbg:
+                    if isinstance(det, list):
+                        det = [(round(d * params.dt, 1), net.roles[n_]) for d, n_ in det
+                               if net.roles[n_].startswith(("P.reset", "P.ready", "Q.reset", "Q.ready", "Q.faultL", "Q.comp.c1", "Q.fault")) and not net.roles[n_].startswith(("P.ready_delay", "Q.ready_delay"))]
+                    print(f"[campaign-debug] chunk {chunk_id} node {b} {cls_}: {det}", flush=True)
             for cls, lat, nsp in res:
                 chunk_counts[cls] += 1
                 if lat is not None:

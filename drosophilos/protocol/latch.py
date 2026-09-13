@@ -59,7 +59,10 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
             net.synapse(inh, x, q)
     for g in gates:
         net.synapse(inh, g, q)
-    net.synapse(edge, trigger, drive.reset)
+    # the edge inhibitor must outweigh the trigger's (head-started, 1.29x loop) drive for the
+    # whole source train under +-8 % weight noise: 2.2x loop, as for edge relays. At 1.5x the
+    # trigger fired at the train's rate in ~1 node per 1000 and CLEARED became a train.
+    net.synapse(edge, trigger, -int(round(2.2 * drive.loop)))
     return trigger, inh, edge
 
 

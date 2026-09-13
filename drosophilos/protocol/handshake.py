@@ -51,7 +51,7 @@ def add_register(net: Netlist, drive: Drive, name: str, width: int, with_complet
             g, lv = add_or_latched(net, drive, f"{name}.valid{i}", [rails[i][0].u, rails[i][1].u])
             valid.append(lv)
             gates.append(g)
-            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", [rails[i][0].u, rails[i][1].u], fraction=0.6))
+            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", [rails[i][0].u, rails[i][1].u], fraction=0.55))
         completion, internal = add_completion_tree(net, drive, f"{name}.comp", valid)
         gates += [x for x, role in enumerate(net.roles) if role.startswith(f"{name}.comp.") and role.endswith(".and")]
         if completion in valid:  # width 1: the valid latch is the completion latch
