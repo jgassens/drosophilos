@@ -43,7 +43,10 @@ class TxRecord:
 
 def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps_per_tx: int = 8000,
                      gap_steps: int = 0, bit_offsets: list[list[int]] | None = None,
-                     faults: dict[int, list[tuple]] | None = None, sim=None) -> tuple[list[TxRecord], RefSim, dict]:
+                     faults: dict[int, list[tuple]] | None = None, sim=None,
+                     expected: list[int] | None = None) -> tuple[list[TxRecord], RefSim, dict]:
+    """`expected[k]` is the value the consumer should decode for word k (defaults to the word
+    itself; an adder channel expects the sum)."""
     net, drive = ch.net, ch.drive
     sim = sim or RefSim(net.topology(), params)
     P, Q = ch.producer, ch.consumer
@@ -117,7 +120,8 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
         if status == "valid" and fault_spikes and accept_step is not None:
             # a fault after acceptance is flagged, the value stands (spec.md: flag only)
             pass
-        records.append(TxRecord(w, load_step, accept_step, cleared_step, ready_step, decoded, status,
+        exp = expected[k] if expected is not None else w
+        records.append(TxRecord(exp, load_step, accept_step, cleared_step, ready_step, decoded, status,
                                 fault_spikes, reset_step, injected))
         step = (ready_step if ready_step is not None else sim.step_index) + gap_steps
         if ready_step is None:
