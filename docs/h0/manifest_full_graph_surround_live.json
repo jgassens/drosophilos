@@ -1,0 +1,1317 @@
+{
+ "connectome": {
+  "id": "MCNS",
+  "version": "v1.0",
+  "neuron_rule": "superclass is not null",
+  "edge_rule": "both endpoints are neurons and syn_count >= min_syn (weights table, minconf 0.5)",
+  "sign_rule": "presynaptic consensus_nt in {gaba, glutamate, histamine} -> -1, else +1",
+  "delay_rule": "all edges: default_delay_ms"
+ },
+ "profile": 2,
+ "params": {
+  "dt": 0.1,
+  "E_L": -52.0,
+  "V_th": -45.0,
+  "V_reset": -52.0,
+  "tau_m": 20.0,
+  "tau_s": 5.0,
+  "t_ref": 2.2,
+  "w_syn": 0.275,
+  "default_delay_ms": 1.8,
+  "sha256": "eb68b59422d4d2168b9211f9846d1ff761a2eba94365b3f80c6e289e17277c7d"
+ },
+ "circuit_bodies": [
+  10643,
+  10864,
+  10881,
+  11127,
+  11429,
+  14160,
+  14210,
+  26764,
+  32461,
+  37111,
+  512079,
+  520816,
+  523040,
+  523983,
+  555296
+ ],
+ "graphs": {
+  "original": {
+   "n_neurons": 166700,
+   "n_edges": 25582938,
+   "total_synapses": 124177617,
+   "min_syn": 1,
+   "sha256": "b08a0dc0044f60e2df5a50603cc943f2bbae716fccc1fa3abfb2061db22100d6"
+  },
+  "retained": {
+   "n_neurons": 166700,
+   "n_edges": 25582938,
+   "total_synapses": 124177617,
+   "min_syn": 1,
+   "sha256": "b08a0dc0044f60e2df5a50603cc943f2bbae716fccc1fa3abfb2061db22100d6"
+  },
+  "active_nonzero": {
+   "n_neurons": 166700,
+   "n_edges": 25582831,
+   "total_synapses": 124177617,
+   "min_syn": 1,
+   "sha256": "b08a0dc0044f60e2df5a50603cc943f2bbae716fccc1fa3abfb2061db22100d6",
+   "note": "original minus zeroed parasitic edges; designed edges rescaled"
+  }
+ },
+ "silencing": [],
+ "parameter_edits": [
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 10864,
+   "anatomical": 2576,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 32461,
+   "anatomical": 1712,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 11127,
+   "anatomical": 1056,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 11127,
+   "post": 523040,
+   "anatomical": 1952,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 10643,
+   "anatomical": 1568,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 10643,
+   "post": 26764,
+   "anatomical": 3376,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 555296,
+   "anatomical": 1712,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 37111,
+   "anatomical": 1472,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "loop_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 10881,
+   "anatomical": 432,
+   "new": 249,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "and_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 10881,
+   "anatomical": 2416,
+   "new": 249,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "and_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 512079,
+   "anatomical": 1024,
+   "new": 766,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "or_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 512079,
+   "anatomical": 384,
+   "new": 766,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "or_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 11429,
+   "anatomical": 1040,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "completion_y1"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 11429,
+   "anatomical": 1120,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "completion_y0"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 14160,
+   "anatomical": 1312,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 14210,
+   "anatomical": 3488,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 10864,
+   "anatomical": -2608,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 32461,
+   "anatomical": -4064,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_a1"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 520816,
+   "anatomical": 1008,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 523983,
+   "anatomical": 992,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 11127,
+   "anatomical": -2656,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 523040,
+   "anatomical": -3312,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_b1"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 520816,
+   "anatomical": 1008,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 14210,
+   "anatomical": 3488,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 10643,
+   "anatomical": -2032,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 26764,
+   "anatomical": -3680,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_a0"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 523983,
+   "anatomical": 992,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 14160,
+   "anatomical": 1312,
+   "new": 3621,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_drive_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 37111,
+   "anatomical": -3280,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 555296,
+   "anatomical": -1808,
+   "new": -5432,
+   "bound": "0 <= |q| <= 4.0 * count * 16, sign preserved",
+   "reason": "reset_b0"
+  },
+  {
+   "kind": "weight",
+   "pre": 10643,
+   "post": 11127,
+   "anatomical": 144,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10643,
+   "post": 14160,
+   "anatomical": 112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10643,
+   "post": 32461,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10643,
+   "post": 520816,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 10643,
+   "anatomical": 7360,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 10881,
+   "anatomical": 416,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 11127,
+   "anatomical": 5072,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 14160,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 14210,
+   "anatomical": 1568,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 26764,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 37111,
+   "anatomical": 1200,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 520816,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 523983,
+   "anatomical": 704,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10864,
+   "post": 555296,
+   "anatomical": 176,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 10643,
+   "anatomical": 128,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 11127,
+   "anatomical": 192,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 14160,
+   "anatomical": 176,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 14210,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 26764,
+   "anatomical": 112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 32461,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 37111,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 512079,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 520816,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 523040,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 10881,
+   "post": 523983,
+   "anatomical": 64,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 11127,
+   "post": 32461,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 11127,
+   "post": 37111,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 10643,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 10881,
+   "anatomical": 272,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 11429,
+   "post": 512079,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 10881,
+   "anatomical": -48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 14210,
+   "anatomical": -48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 32461,
+   "anatomical": -112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 37111,
+   "anatomical": -16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14160,
+   "post": 523983,
+   "anatomical": -48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 10643,
+   "anatomical": -1728,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 10864,
+   "anatomical": -16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 10881,
+   "anatomical": -3744,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 11127,
+   "anatomical": -864,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 11429,
+   "anatomical": -544,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 37111,
+   "anatomical": -320,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 512079,
+   "anatomical": -112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 14210,
+   "post": 523040,
+   "anatomical": -112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 10864,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 10881,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 11127,
+   "anatomical": 1840,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 14210,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 32461,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 37111,
+   "anatomical": 160,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 520816,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 523040,
+   "anatomical": 288,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 26764,
+   "post": 555296,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 10643,
+   "anatomical": 336,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 11127,
+   "anatomical": 160,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 14160,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 14210,
+   "anatomical": 512,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 26764,
+   "anatomical": 496,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 520816,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 523040,
+   "anatomical": 528,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 523983,
+   "anatomical": 64,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 32461,
+   "post": 555296,
+   "anatomical": 1936,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 10643,
+   "anatomical": 144,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 10864,
+   "anatomical": 1056,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 11127,
+   "anatomical": 80,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 14210,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 26764,
+   "anatomical": 144,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 523040,
+   "anatomical": 80,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 37111,
+   "post": 523983,
+   "anatomical": 608,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 10643,
+   "anatomical": 1392,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 11127,
+   "anatomical": 2768,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 26764,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 37111,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 520816,
+   "anatomical": 16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 523040,
+   "anatomical": 5280,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 512079,
+   "post": 523983,
+   "anatomical": 432,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 10864,
+   "anatomical": -1392,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 10881,
+   "anatomical": -2768,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 14210,
+   "anatomical": -144,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 26764,
+   "anatomical": -32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 512079,
+   "anatomical": -16,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 523983,
+   "anatomical": -48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 520816,
+   "post": 555296,
+   "anatomical": -1312,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 10643,
+   "anatomical": 1024,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 14160,
+   "anatomical": 48,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 26764,
+   "anatomical": 272,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 32461,
+   "anatomical": 432,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 37111,
+   "anatomical": 64,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 512079,
+   "anatomical": 720,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 523983,
+   "anatomical": 80,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523040,
+   "post": 555296,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 10643,
+   "anatomical": -656,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 10881,
+   "anatomical": -640,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 11127,
+   "anatomical": -1280,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 11429,
+   "anatomical": -480,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 26764,
+   "anatomical": -128,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 32461,
+   "anatomical": -400,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 523983,
+   "post": 512079,
+   "anatomical": -1216,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 10643,
+   "anatomical": 5088,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 10864,
+   "anatomical": 960,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 10881,
+   "anatomical": 112,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 11127,
+   "anatomical": 4704,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 14160,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 14210,
+   "anatomical": 1472,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 32461,
+   "anatomical": 1072,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 520816,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 523040,
+   "anatomical": 32,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  },
+  {
+   "kind": "weight",
+   "pre": 555296,
+   "post": 523983,
+   "anatomical": 2032,
+   "new": 0,
+   "bound": "documented zero weight",
+   "reason": "parasitic edge among circuit neurons"
+  }
+ ],
+ "structural_edits": [],
+ "ports": {
+  "inputs": [
+   32461,
+   26764,
+   523040,
+   37111
+  ],
+  "outputs": [
+   10881,
+   512079,
+   11429
+  ]
+ },
+ "execution_mode": "full-graph",
+ "isolation_classification": "robust within a measured boundary-input envelope (see results.json)",
+ "notes": []
+}

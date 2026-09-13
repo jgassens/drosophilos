@@ -1,0 +1,42 @@
+[project]
+name = "drosophilos"
+version = "0.0.1"
+description = "DrosophilOS: a connectome-constrained asynchronous neural computer built on the Drosophila male CNS connectome, targeting a Doom-like engine executed entirely in the neural substrate."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "torch>=2.4",
+    "pyarrow>=17",
+    "pandas>=2.2",
+    "pycparser>=2.22",
+    "pyyaml>=6",
+    "matplotlib>=3.9",
+    "imageio>=2.35",
+    "imageio-ffmpeg>=0.5",
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6",
+    "brian2>=2.7",
+]
+
+[project.scripts]
+dros = "drosophilos.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["drosophilos"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
