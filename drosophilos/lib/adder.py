@@ -4,7 +4,7 @@ completion tree. Adder-internal latches and gates belong to the consumer's reset
 
 from __future__ import annotations
 
-from ..protocol.handshake import Channel, add_register
+from ..protocol.handshake import Channel, add_register, wire_fault_path
 from ..protocol.latch import add_edge_relay, connect_trigger
 from ..sim.model import Params
 from .gates import Gates, Rail2
@@ -43,9 +43,6 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None) 
     extend_reset(net, drive, Q, G.latches, G.gates)
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     connect_trigger(net, drive, P.ready, Q.reset_trigger, Q.reset_edge)  # CLEARED
-    for f in Q.fault:
-        for x in Q.completion.members:
-            net.synapse(f, x, drive.reset)
-        connect_trigger(net, drive, f, P.reset_trigger, P.reset_edge)
+    wire_fault_path(net, drive, P, Q)
     net.group("adder_latches", [x for l in G.latches for x in l.members])
     return Channel(net, drive, 2 * width + 1, P, Q)

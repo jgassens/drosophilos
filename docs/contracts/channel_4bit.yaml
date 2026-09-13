@@ -1,0 +1,67 @@
+primitive: channel_4bit
+profile: 3
+model:
+  dt_ms: 0.1
+  tau_m_ms: 20.0
+  tau_s_ms: 5.0
+  delay_ms: 1.8
+  w_syn_mv: 0.275
+drive_quanta:
+  single_need: 2586.0434707264194
+  rate_need: 382.8363636363636
+  loop: 3621
+  pulse: 3621
+  and_in: 288
+  or_in: 766
+  reset: -5432
+  loop_period_steps: 47
+  ignite: 7242
+  relay_in: 4165
+resources:
+  neurons: 123
+  synapses: 251
+  excitatory_synapses: 163
+  inhibitory_synapses: 88
+  total_abs_quanta: 949378
+latency:
+  accept_ms_mean: 113.9
+  accept_ms_max: 116.2
+initiation_interval:
+  cycle_ms_mean: 251.7
+  cycle_ms_max: 254.0
+activity:
+  spikes_per_transaction_total: 1245.4
+  spikes_per_transaction_by_class:
+    latch: 942.1
+    gate: 56.6
+    control: 246.6
+  output_port_spikes_per_transaction: 177.4
+  latch_member_rate_hz_while_holding: 212.8
+  sustained_duty_cycle: a held latch fires continuously at the rate above until reset
+  quiescent_spikes_between_ready_and_next_load: 0
+reset_energy:
+  producer:
+    pulses: 4
+    quanta_per_pulse: 43456
+    quanta_per_reset: 173824
+    mv_equivalent_per_reset: 2987.6
+  consumer:
+    pulses: 4
+    quanta_per_pulse: 105924
+    quanta_per_reset: 423696
+    mv_equivalent_per_reset: 7282.3
+fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source nothing
+  (no load); measured on the real connectome as isolation cost instead (H0)'
+delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
+  backend'
+stray_input_tolerance: null
+campaign: null
+timing_assumptions:
+- READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed
+  reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition
+- 'edge relays: relay fires ~2.5 ms after the source''s first spike, its inhibitor''s
+  pulse lands ~5.3 ms after; ordering margin ~2.8 ms nominal'
+- loads (upstream DATA) arrive only after READY
+notes:
+- four-phase dual-rail word transport, producer register -> consumer register with
+  completion tree

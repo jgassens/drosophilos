@@ -69,10 +69,11 @@ def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength:
     outputs ignite a latch once instead of driving it continuously, which would push the
     latch above the standard train rate that every rate-mode gate assumes.
 
-    The relay gets a head start over its inhibitor (relay_in = 1.15x loop drive, still
-    doublet-free, fires ~2.5 ms after the source's first spike; the inhibitor gets the plain
-    pulse drive and its inhibition lands ~5.3 ms after). With equal drives the two raced and
-    5 % weight noise made the relay lose about 1 % of the time, dropping a bit (measured).
+    The relay gets a head start over its inhibitor (relay_in = 1.8x single-pulse need, the
+    largest doublet-free drive, fires ~1.8 ms after the source's first spike; the inhibitor
+    gets the plain 1.4x pulse drive and its inhibition lands ~5.3 ms after). With equal
+    drives the two raced and 5 % weight noise made the relay lose ~1 % of the time; at 1.15x
+    loop it still lost ~0.1 % of the time at 4 % noise (campaign), dropping a bit each time.
     The inhibition (2.2x loop per spike) then outweighs the relay's drive for the rest of the
     train; the relay recovers from the resulting after-hyperpolarisation in ~50 ms, which
     every relay here gets (its source restarts >= 100 ms later)."""
@@ -86,8 +87,11 @@ def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength:
 
 def connect_trigger(net: Netlist, drive: Drive, source: int, trigger: int, edge: int) -> None:
     """Edge detector: the source's first spike fires the trigger; from the second spike on,
-    `edge` (driven by the same source) holds the trigger down for as long as the train lasts."""
-    net.synapse(source, trigger, drive.pulse)
+    `edge` (driven by the same source) holds the trigger down for as long as the train lasts.
+    The trigger gets the relay_in head start (1.8x need) so that it always beats its own
+    inhibitor: with equal drives, a trigger whose threshold came out +0.5 mV lost the race
+    and the consumer never reset (campaign failure class no_ready)."""
+    net.synapse(source, trigger, drive.relay_in)
     net.synapse(source, edge, drive.pulse)
 
 

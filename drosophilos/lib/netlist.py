@@ -35,7 +35,7 @@ class Drive:
     reset: int
     loop_period_steps: int
     ignite: int = 0  # 2x loop: ignition pulse that reaches threshold even ~10 mV below rest
-    relay_in: int = 0  # 1.15x loop (~1.6x need): edge relays fire ~1 ms before their own inhibitor
+    relay_in: int = 0  # 1.8x need (~1.29x loop): edge relays fire ~1.8 ms after the source, >= 2 ms before their inhibitor lands; doublet-free below ~1.9x
 
     @classmethod
     def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.75, or_margin=2.0, reset_factor=1.5) -> "Drive":
@@ -48,7 +48,7 @@ class Drive:
         rate_need = gap * (period * params.dt) / (params.w_unit * params.tau_s)
         return cls(nq, rate_need, loop, loop, int(math.ceil(and_fraction * rate_need)),
                    int(math.ceil(or_margin * rate_need)), -int(math.ceil(reset_factor * loop)), period,
-                   ignite=2 * loop, relay_in=int(math.ceil(1.15 * loop)))
+                   ignite=2 * loop, relay_in=int(math.ceil(1.8 * nq)))
 
 
 @dataclass

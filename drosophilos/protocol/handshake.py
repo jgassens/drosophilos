@@ -30,6 +30,7 @@ class Register:
     completion: Latch | None = None
     internal: list = field(default_factory=list)
     reset_edge: int = -1
+    fault_latch: Latch | None = None
 
     @property
     def rail_taps(self) -> list[list[int]]:
@@ -85,6 +86,28 @@ class Channel:
         return self.consumer.ready
 
 
+def wire_fault_path(net: Netlist, drive: Drive, P: Register, Q: Register) -> Latch:
+    """FAULT as a state (spec.md §3): any fault gate ignites one shared fault latch F, which
+    (a) holds the completion latch, its AND gate and its ignition relay down so the word is
+    never consumed, and (b) raises FAULT-ACCEPT once through the producer's edge-detected
+    reset trigger so the four phases still complete. F is reset with the consumer.
+    Unlatched fault-gate spikes (~every 36 ms while both rails hold) re-armed the edge
+    detector and fired a second reset that wiped the next word (observed)."""
+    F = add_latch(net, drive, "Q.faultL")
+    for f in Q.fault:
+        net.synapse(f, F.u, drive.ignite)
+    root = net.roles[Q.completion.u][: -len(".L.u")]
+    held = list(Q.completion.members) + [x for x, role in enumerate(net.roles) if role in (f"{root}.and", f"{root}.ign.edge")]
+    for x in held:
+        net.synapse(F.u, x, drive.reset)
+    connect_trigger(net, drive, F.u, P.reset_trigger, P.reset_edge)
+    q = -int(round(0.75 * drive.loop))
+    for x in F.members:
+        net.synapse(Q.reset_inh, x, q)
+    Q.fault_latch = F
+    return F
+
+
 def build_channel(params: Params, width: int, drive: Drive | None = None) -> Channel:
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
@@ -99,15 +122,7 @@ def build_channel(params: Params, width: int, drive: Drive | None = None) -> Cha
     # FAULT (both rails of a bit active): block the completion latch so the word is never
     # consumed, and raise FAULT-ACCEPT so the four phases still complete and the channel
     # does not deadlock (spec.md §3). A fault after completion is a flag only.
-    root = net.roles[Q.completion.u][: -len(".L.u")]
-    root_gate_and_relay = [x for x, role in enumerate(net.roles) if role in (f"{root}.and", f"{root}.ign.edge")]
-    for f in Q.fault:
-        # block the completion latch, its AND gate and its ignition relay: without the last
-        # two, one ignition pulse still slips through before the inhibition builds up and the
-        # latch emits a single spike that the producer takes as ACCEPT (observed)
-        for x in list(Q.completion.members) + root_gate_and_relay:
-            net.synapse(f, x, drive.reset)
-        connect_trigger(net, drive, f, P.reset_trigger, P.reset_edge)
+    wire_fault_path(net, drive, P, Q)
     net.group("accept", [Q.completion.u])
     net.group("cleared", [P.ready])
     net.group("ready", [Q.ready])
