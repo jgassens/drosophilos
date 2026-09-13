@@ -8,6 +8,7 @@ equations, transports spike events, transduces input, loads the program image, a
 displays already-computed pixels.
 
 Design document: `docs/spec.md`. Plan and milestone order: `docs/plan.md`.
+Results record (what was done, what worked, what did not): `RESULTS.md`.
 
 Sub-systems: FlyISA (instruction set), FlyASM (assembler), FlyLink (inter-node transport),
 DrosoC (restricted C subset compiled to neural circuits), `minidoom` (the workload).
