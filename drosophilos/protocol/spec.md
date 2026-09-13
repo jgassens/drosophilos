@@ -75,6 +75,20 @@ Rules:
 - A stale spike cannot arrive later than `T_stale` after RESET; `T_stale` is measured and
   READY is delayed by more than it (timing-bound variant).
 
+## 4a. What the neural implementation measured (M1, `tests/test_faults.py`)
+
+- Same-rail duplicates are absorbed; a corrupted bit (both rails) blocks the completion
+  latch, raises FAULT-ACCEPT, the four phases complete, the next word transacts cleanly.
+- A late opposite-rail spike after ACCEPT is flagged only; the consumed value stands.
+- A stale full-strength spike after the consumer's reset trigger is **not prevented**: it
+  rides through the half-strength reset train (< ~20 ms), is absorbed only while the reset
+  after-hyperpolarisation blocks ignition (~20–30 ms), and ignites a stale latch later. It
+  is always **detected** (both rails → fault → never consumed → FAULT-ACCEPT → recovery on
+  the next word). The timing-bound variant holds by construction (the producer is cleared
+  ≥ 48 ms before the consumer resets, so no stale source exists); the fault path is the
+  safety net, at the cost of one lost transaction per stale spike.
+- A lost ACCEPT stalls the channel (no timeout is implemented yet).
+
 ## 5. Properties checked exhaustively on the abstract machine (`explore.py`)
 
 1. **No deadlock**: from every reachable state, in the absence of lost tokens, both

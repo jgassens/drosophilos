@@ -1,12 +1,23 @@
-"""Drive a channel through repeated transactions and decode each one.
+"""Drive a channel through repeated transactions, with asynchronous operand arrival and
+runtime fault injection, and decode each transaction.
 
 The host's only actions are transduction: inject the next word into the producer when the
-consumer has signalled READY (or at t=0), and read spikes. Everything else is neural.
+consumer has signalled READY (or at t=0), inject the requested fault spikes, and read
+spikes. Everything else is neural.
+
+Fault specs (per transaction, list of tuples):
+    ("late_opposite", bit, delay_steps)   a pulse on the consumer's opposite rail of `bit`,
+                                          `delay_steps` after ACCEPT
+    ("duplicate", bit, delay_steps)       an extra pulse on the consumer's same rail,
+                                          `delay_steps` after load
+    ("corrupt", bit)                      both rails of `bit` ignited at load
+    ("stale", bit, rail, delay_steps)     a pulse on consumer rail (bit, rail) `delay_steps`
+                                          after the consumer's reset trigger fires
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -24,49 +35,90 @@ class TxRecord:
     cleared_step: int | None
     ready_step: int | None
     decoded: int | None
-    status: str
+    status: str  # valid | fault | incomplete
     fault_spikes: int
+    reset_step: int | None = None
+    injected: list = field(default_factory=list)
 
 
-def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps_per_tx: int = 6000,
-                     gap_steps: int = 0, sim=None) -> tuple[list[TxRecord], RefSim, dict]:
+def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps_per_tx: int = 8000,
+                     gap_steps: int = 0, bit_offsets: list[list[int]] | None = None,
+                     faults: dict[int, list[tuple]] | None = None, sim=None) -> tuple[list[TxRecord], RefSim, dict]:
     net, drive = ch.net, ch.drive
-    topo = net.topology()
-    sim = sim or RefSim(topo, params)
+    sim = sim or RefSim(net.topology(), params)
     P, Q = ch.producer, ch.consumer
-    accept_n, cleared_n, ready_n = Q.completion.u, P.ready, Q.ready
+    accept_n, cleared_n, ready_n, qreset_n = Q.completion.u, P.ready, Q.ready, Q.reset_trigger
+    fault_set = set(Q.fault)
     rail_taps = Q.rail_taps
     window = 2 * drive.loop_period_steps
+    faults = faults or {}
     records: list[TxRecord] = []
     step = sim.step_index
-    for w in words:
-        # load the producer: one pulse per active rail
+    for k, w in enumerate(words):
         load_step = max(step, sim.step_index)
+        offsets = bit_offsets[k] if bit_offsets else [0] * ch.width
         for i, r in rails_for(w, ch.width):
-            sim.add_events(0, [load_step], [P.rails[i][r].u], [drive.ignite])
-        accept_step = cleared_step = ready_step = None
+            sim.add_events(0, [load_step + offsets[i]], [P.rails[i][r].u], [drive.ignite])
+        specs = faults.get(k, [])
+        injected = []
+        for spec in specs:
+            if spec[0] == "corrupt":
+                i = spec[1]
+                r = 1 - ((w >> i) & 1)
+                t = load_step + offsets[i] + 100  # 10 ms after the real bit
+                sim.add_events(0, [t], [Q.rails[i][r].u], [drive.ignite])
+                injected.append(("corrupt", i, t))
+            elif spec[0] == "duplicate":
+                i, d = spec[1], spec[2]
+                r = (w >> i) & 1
+                t = load_step + offsets[i] + d
+                sim.add_events(0, [t], [Q.rails[i][r].u], [drive.ignite])
+                injected.append(("duplicate", i, t))
+        accept_step = cleared_step = ready_step = reset_step = None
+        first_fault = None
         decoded, status = None, "incomplete"
-        deadline = load_step + max_steps_per_tx
+        pending_late = [s for s in specs if s[0] == "late_opposite"]
+        pending_stale = [s for s in specs if s[0] == "stale"]
+        deadline = load_step + max(offsets) + max_steps_per_tx
         while sim.step_index < deadline:
             sim.step()
             s = sim.step_index - 1
-            if not sim._spk_step:
+            if not sim._spk_step or sim._spk_step[-1][0] != s:
                 continue
-            last_neurons = sim._spk_neuron[-1] if sim._spk_step[-1][0] == s else None
-            if last_neurons is None:
-                continue
-            fired = set(last_neurons.tolist())
+            fired = set(sim._spk_neuron[-1].tolist())
+            if first_fault is None and fired & fault_set:
+                first_fault = s
             if accept_step is None and accept_n in fired:
                 accept_step = s
                 decoded, status = decode_at(sim.trace, rail_taps, s, window)
-            if accept_step is not None and cleared_step is None and cleared_n in fired:
+                for spec in pending_late:
+                    i, d = spec[1], spec[2]
+                    r = 1 - ((w >> i) & 1)
+                    sim.add_events(0, [s + d], [Q.rails[i][r].u], [drive.ignite])
+                    injected.append(("late_opposite", i, s + d))
+                pending_late = []
+            if accept_step is None and first_fault is not None and cleared_n in fired:
+                # FAULT-ACCEPT: the consumer never completed; the producer was cleared by the fault path
+                status = "fault"
+            if (accept_step is not None or first_fault is not None) and cleared_step is None and cleared_n in fired:
                 cleared_step = s
+            if reset_step is None and qreset_n in fired:
+                reset_step = s
+                for spec in pending_stale:
+                    i, r, d = spec[1], spec[2], spec[3]
+                    sim.add_events(0, [s + d], [Q.rails[i][r].u], [drive.ignite])
+                    injected.append(("stale", i, r, s + d))
+                pending_stale = []
             if cleared_step is not None and ready_n in fired:
                 ready_step = s
                 break
         tr = sim.trace
-        fault_spikes = int(sum(len(tr.neuron_steps(f)) for f in Q.fault))
-        records.append(TxRecord(w, load_step, accept_step, cleared_step, ready_step, decoded, status, fault_spikes))
+        fault_spikes = int(sum(((tr.events["neuron"] == f) & (tr.events["step"] >= load_step)).sum() for f in Q.fault))
+        if status == "valid" and fault_spikes and accept_step is not None:
+            # a fault after acceptance is flagged, the value stands (spec.md: flag only)
+            pass
+        records.append(TxRecord(w, load_step, accept_step, cleared_step, ready_step, decoded, status,
+                                fault_spikes, reset_step, injected))
         step = (ready_step if ready_step is not None else sim.step_index) + gap_steps
         if ready_step is None:
             break

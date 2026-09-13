@@ -96,6 +96,13 @@ def build_channel(params: Params, width: int, drive: Drive | None = None) -> Cha
             net.synapse(relay, Q.rails[i][r].u, drive.ignite)  # DATA: one ignition pulse per rail
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT (edge)
     connect_trigger(net, drive, P.ready, Q.reset_trigger, Q.reset_edge)  # CLEARED (edge)
+    # FAULT (both rails of a bit active): block the completion latch so the word is never
+    # consumed, and raise FAULT-ACCEPT so the four phases still complete and the channel
+    # does not deadlock (spec.md §3). A fault after completion is a flag only.
+    for f in Q.fault:
+        for x in Q.completion.members:
+            net.synapse(f, x, drive.reset)
+        connect_trigger(net, drive, f, P.reset_trigger, P.reset_edge)
     net.group("accept", [Q.completion.u])
     net.group("cleared", [P.ready])
     net.group("ready", [Q.ready])
