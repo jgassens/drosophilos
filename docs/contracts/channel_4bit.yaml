@@ -22,7 +22,7 @@ resources:
   synapses: 241
   excitatory_synapses: 163
   inhibitory_synapses: 78
-  total_abs_quanta: 914562
+  total_abs_quanta: 919478
 latency:
   accept_ms_mean: 111.6
   accept_ms_max: 114.7
@@ -54,8 +54,125 @@ fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source
   (no load); measured on the real connectome as isolation cost instead (H0)'
 delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
   backend'
-stray_input_tolerance: null
-campaign: null
+stray_input_tolerance:
+  w0.06:
+    perturbation: w~LN(0,0.06), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0017
+    counts:
+      ok: 9983
+      wrong_value: 0
+      fault: 1
+      no_accept: 4
+      no_cleared: 0
+      no_ready: 0
+      late_activity: 12
+  w0.08:
+    perturbation: w~LN(0,0.08), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0173
+    counts:
+      ok: 9827
+      wrong_value: 1
+      fault: 2
+      no_accept: 63
+      no_cleared: 1
+      no_ready: 21
+      late_activity: 85
+  w0.10:
+    perturbation: w~LN(0,0.1), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0703
+    counts:
+      ok: 9297
+      wrong_value: 3
+      fault: 10
+      no_accept: 326
+      no_cleared: 14
+      no_ready: 92
+      late_activity: 258
+  th0.5:
+    perturbation: w~LN(0,0.04), Vth±0.5 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0026
+    counts:
+      ok: 9974
+      wrong_value: 0
+      fault: 0
+      no_accept: 11
+      no_cleared: 0
+      no_ready: 0
+      late_activity: 15
+  th1.0:
+    perturbation: w~LN(0,0.04), Vth±1.0 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.2886
+    counts:
+      ok: 7114
+      wrong_value: 33
+      fault: 196
+      no_accept: 1791
+      no_cleared: 85
+      no_ready: 297
+      late_activity: 484
+  stray20:
+    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 20.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0002
+    counts:
+      ok: 9998
+      wrong_value: 0
+      fault: 2
+      no_accept: 0
+      no_cleared: 0
+      no_ready: 0
+      late_activity: 0
+  stray50:
+    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 50.0 Hz×150 q, arrival
+      jitter ≤100 steps
+    error_rate: 0.0087
+    counts:
+      ok: 9913
+      wrong_value: 0
+      fault: 67
+      no_accept: 20
+      no_cleared: 0
+      no_ready: 0
+      late_activity: 0
+  jitter400:
+    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+      jitter ≤400 steps
+    error_rate: 0.0
+    counts:
+      ok: 10000
+      wrong_value: 0
+      fault: 0
+      no_accept: 0
+      no_cleared: 0
+      no_ready: 0
+      late_activity: 0
+campaign:
+  transactions: 1000000
+  counts:
+    ok: 999978
+    wrong_value: 0
+    fault: 3
+    no_accept: 11
+    no_cleared: 0
+    no_ready: 0
+    late_activity: 8
+  errors: 22
+  error_rate_upper_95: 2.2e-05
+  accept_latency_ms:
+    mean: 109.45042015462171
+    max: 130.9
+    p99: 119.4
+  spikes_per_tx:
+    mean: 1197.894356
+    max: 1853
+  perturbation_text: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
+    jitter ≤100 steps
+  wall_minutes: 327.3533274849256
 timing_assumptions:
 - READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed
   reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition
@@ -65,3 +182,5 @@ timing_assumptions:
 notes:
 - four-phase dual-rail word transport, producer register -> consumer register with
   completion tree
+- 'campaign: 10^6 transactions at mix B, 0 wrong values consumed, 2.2e-5 detected
+  refusals/hangs'

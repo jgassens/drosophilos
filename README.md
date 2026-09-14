@@ -53,4 +53,10 @@ uv run pytest
   conclusions in `docs/h0_findings.md`. Rerun: `uv run python -m drosophilos.connectome.h0_run`
   then `uv run python -m drosophilos.bench.h0_report`.
 
+- **M1 (Stage A1) done.** Four-phase dual-rail token protocol (spec, executable abstract
+  machine, exhaustive checker) and its neural implementation: latches, latched completion
+  tree, reset train, READY chain, edge relays, latched FAULT path; gates, 1-bit full adder,
+  4-bit ripple adder, all exact. 10⁶ perturbed 4-bit transactions: 0 wrong values consumed,
+  2.2 × 10⁻⁵ detected refusals/hangs. Report `docs/m1_report.md`, contracts `docs/contracts/`.
+
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

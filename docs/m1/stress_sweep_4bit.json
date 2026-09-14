@@ -1,0 +1,114 @@
+{
+ "w0.06": {
+  "perturbation": "w~LN(0,0.06), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9983,
+   "wrong_value": 0,
+   "fault": 1,
+   "no_accept": 4,
+   "no_cleared": 0,
+   "no_ready": 0,
+   "late_activity": 12
+  },
+  "error_rate": 0.0017,
+  "accept_ms_max": 128.1
+ },
+ "w0.08": {
+  "perturbation": "w~LN(0,0.08), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9827,
+   "wrong_value": 1,
+   "fault": 2,
+   "no_accept": 63,
+   "no_cleared": 1,
+   "no_ready": 21,
+   "late_activity": 85
+  },
+  "error_rate": 0.0173,
+  "accept_ms_max": 161.5
+ },
+ "w0.10": {
+  "perturbation": "w~LN(0,0.1), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9297,
+   "wrong_value": 3,
+   "fault": 10,
+   "no_accept": 326,
+   "no_cleared": 14,
+   "no_ready": 92,
+   "late_activity": 258
+  },
+  "error_rate": 0.0703,
+  "accept_ms_max": 249.60000000000002
+ },
+ "th0.5": {
+  "perturbation": "w~LN(0,0.04), Vth\u00b10.5 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9974,
+   "wrong_value": 0,
+   "fault": 0,
+   "no_accept": 11,
+   "no_cleared": 0,
+   "no_ready": 0,
+   "late_activity": 15
+  },
+  "error_rate": 0.0026,
+  "accept_ms_max": 136.9
+ },
+ "th1.0": {
+  "perturbation": "w~LN(0,0.04), Vth\u00b11.0 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 7114,
+   "wrong_value": 33,
+   "fault": 196,
+   "no_accept": 1791,
+   "no_cleared": 85,
+   "no_ready": 297,
+   "late_activity": 484
+  },
+  "error_rate": 0.2886,
+  "accept_ms_max": 315.70000000000005
+ },
+ "stray20": {
+  "perturbation": "w~LN(0,0.04), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 20.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9998,
+   "wrong_value": 0,
+   "fault": 2,
+   "no_accept": 0,
+   "no_cleared": 0,
+   "no_ready": 0,
+   "late_activity": 0
+  },
+  "error_rate": 0.0002,
+  "accept_ms_max": 124.0
+ },
+ "stray50": {
+  "perturbation": "w~LN(0,0.04), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 50.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+  "counts": {
+   "ok": 9913,
+   "wrong_value": 0,
+   "fault": 67,
+   "no_accept": 20,
+   "no_cleared": 0,
+   "no_ready": 0,
+   "late_activity": 0
+  },
+  "error_rate": 0.0087,
+  "accept_ms_max": 315.90000000000003
+ },
+ "jitter400": {
+  "perturbation": "w~LN(0,0.04), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264400 steps",
+  "counts": {
+   "ok": 10000,
+   "wrong_value": 0,
+   "fault": 0,
+   "no_accept": 0,
+   "no_cleared": 0,
+   "no_ready": 0,
+   "late_activity": 0
+  },
+  "error_rate": 0.0,
+  "accept_ms_max": 151.0
+ }
+}

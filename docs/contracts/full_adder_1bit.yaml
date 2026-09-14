@@ -22,7 +22,7 @@ resources:
   synapses: 307
   excitatory_synapses: 205
   inhibitory_synapses: 102
-  total_abs_quanta: 1088114
+  total_abs_quanta: 1093106
 latency:
   accept_ms_mean: 169.0
   accept_ms_max: 169.9
@@ -65,3 +65,6 @@ timing_assumptions:
 notes:
 - 'dual-rail full adder: sum = XOR(XOR(a,b),c) with latched stages, carry = 2-of-3
   majority'
+- campaign and stress sweep were run on the 4-bit channel; the adder is built from
+  the same latch, relay, gate and reset primitives and inherits their measured margins
+  but has not had its own 10^6 run

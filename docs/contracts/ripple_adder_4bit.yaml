@@ -22,7 +22,7 @@ resources:
   synapses: 946
   excitatory_synapses: 610
   inhibitory_synapses: 336
-  total_abs_quanta: 3275768
+  total_abs_quanta: 3280646
 latency:
   accept_ms_mean: 244.0
   accept_ms_max: 248.7
@@ -65,3 +65,6 @@ timing_assumptions:
 notes:
 - '4-bit ripple-carry adder as a channel: producer (A,B,cin) -> latched adder -> 5-bit
   consumer register'
+- campaign and stress sweep were run on the 4-bit channel; the adder is built from
+  the same latch, relay, gate and reset primitives and inherits their measured margins
+  but has not had its own 10^6 run

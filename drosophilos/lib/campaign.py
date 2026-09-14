@@ -172,8 +172,10 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
             if dbg:
                 for cls_, det in dbg:
                     if isinstance(det, list):
+                        # control signals before READY, everything after it
                         det = [(round(d * params.dt, 1), net.roles[n_]) for d, n_ in det
-                               if net.roles[n_].startswith(("P.reset", "P.ready", "Q.reset", "Q.ready", "Q.faultL", "Q.comp.c1", "Q.fault")) and not net.roles[n_].startswith(("P.ready_delay", "Q.ready_delay"))]
+                               if d > 0 or (net.roles[n_].startswith(("P.reset", "P.ready", "Q.reset", "Q.ready", "Q.faultL", "Q.comp.c1", "Q.fault"))
+                                            and not net.roles[n_].startswith(("P.ready_delay", "Q.ready_delay")))]
                     print(f"[campaign-debug] chunk {chunk_id} node {b} {cls_}: {det}", flush=True)
             for cls, lat, nsp in res:
                 chunk_counts[cls] += 1

@@ -1,0 +1,38 @@
+{
+ "transactions": 1000000,
+ "counts": {
+  "ok": 999978,
+  "wrong_value": 0,
+  "fault": 3,
+  "no_accept": 11,
+  "no_cleared": 0,
+  "no_ready": 0,
+  "late_activity": 8
+ },
+ "errors": 22,
+ "error_rate_upper_95": 2.2e-05,
+ "accept_latency_ms": {
+  "mean": 109.45042015462171,
+  "max": 130.9,
+  "p99": 119.4
+ },
+ "spikes_per_tx": {
+  "mean": 1197.894356,
+  "max": 1853
+ },
+ "perturbation": {
+  "weight_sigma": 0.04,
+  "th_sigma_mv": 0.2,
+  "bias_sigma_mv": 0.2,
+  "stray_rate_hz": 5.0,
+  "stray_quanta": 150,
+  "arrival_jitter_steps": 100
+ },
+ "perturbation_text": "w~LN(0,0.04), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+ "neurons": 125,
+ "synapses": 241,
+ "tx_period_ms": 320.0,
+ "wall_minutes": 327.3533274849256,
+ "device": "cpu",
+ "dtype": "torch.float64"
+}

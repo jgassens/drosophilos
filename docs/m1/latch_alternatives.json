@@ -1,0 +1,83 @@
+{
+ "loop2_1.4x": {
+  "neurons": 2,
+  "drive_x_need": 1.4,
+  "delay_ms": 1.8,
+  "self_sustaining": true,
+  "period_ms": 4.6000000000000005,
+  "member_rate_hz": 217.4,
+  "spikes_per_100ms_hold": 44,
+  "survives_100ms_sigma5pct": 100,
+  "survives_100ms_sigma10pct": 100,
+  "minimal_reset": {
+   "pulses": 1,
+   "strength_x_loop": 1.5,
+   "quanta_per_member_total": 5431
+  },
+  "recovery_after_reset_ms_1.4x_ignition": 15.0
+ },
+ "loop2_1.05x": {
+  "neurons": 2,
+  "drive_x_need": 1.05,
+  "delay_ms": 1.8,
+  "self_sustaining": true,
+  "period_ms": 6.9,
+  "member_rate_hz": 144.9,
+  "spikes_per_100ms_hold": 29,
+  "survives_100ms_sigma5pct": 100,
+  "survives_100ms_sigma10pct": 95,
+  "minimal_reset": {
+   "pulses": 1,
+   "strength_x_loop": 0.75,
+   "quanta_per_member_total": 2715
+  },
+  "recovery_after_reset_ms_1.4x_ignition": 35.0
+ },
+ "loop2_1.4x_delay10ms": {
+  "neurons": 2,
+  "drive_x_need": 1.4,
+  "delay_ms": 10.0,
+  "self_sustaining": true,
+  "period_ms": 5.2,
+  "member_rate_hz": 192.3,
+  "spikes_per_100ms_hold": 38,
+  "survives_100ms_sigma5pct": 100,
+  "survives_100ms_sigma10pct": 100,
+  "minimal_reset": {
+   "pulses": 4,
+   "strength_x_loop": 0.75,
+   "quanta_per_member_total": 10863
+  },
+  "recovery_after_reset_ms_1.4x_ignition": 40.0
+ },
+ "ring4_1.4x": {
+  "neurons": 4,
+  "drive_x_need": 1.4,
+  "delay_ms": 1.8,
+  "self_sustaining": true,
+  "period_ms": 4.7,
+  "member_rate_hz": 212.8,
+  "spikes_per_100ms_hold": 86,
+  "survives_100ms_sigma5pct": 100,
+  "survives_100ms_sigma10pct": 100,
+  "minimal_reset": {
+   "pulses": 4,
+   "strength_x_loop": 0.75,
+   "quanta_per_member_total": 10863
+  },
+  "recovery_after_reset_ms_1.4x_ignition": 10.0
+ },
+ "ring8_1.4x": {
+  "neurons": 8,
+  "drive_x_need": 1.4,
+  "delay_ms": 1.8,
+  "self_sustaining": true,
+  "period_ms": 4.6000000000000005,
+  "member_rate_hz": 217.4,
+  "spikes_per_100ms_hold": 140,
+  "survives_100ms_sigma5pct": 100,
+  "survives_100ms_sigma10pct": 100,
+  "minimal_reset": null,
+  "recovery_after_reset_ms_1.4x_ignition": null
+ }
+}

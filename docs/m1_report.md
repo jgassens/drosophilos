@@ -82,7 +82,7 @@ for the 4-bit channel (7,282 mV-equivalent), 4 × 437,164 for the 4-bit adder.
 
 ## 5. Perturbation campaign
 
-### 5.1 Stress sweep (`data/m1/stress_sweep_4bit.json`)
+### 5.1 Stress sweep (`docs/m1/stress_sweep_4bit.json`)
 
 Each level changes one knob from mix B (weights log-normal σ = 4 %, threshold and bias
 ±0.2 mV, stray 5 Hz × 2.6 mV pulses on every neuron, arrival jitter ≤ 10 ms).
@@ -103,9 +103,43 @@ per neuron and then produces false faults (detected refusals) before anything el
 noise is the real limit, with silent wrong values appearing only at ≥ 8 % and threshold
 drift only at ±1 mV. The transition is sharp, as expected of margins set at ±10–15 %.
 
-### 5.2 Million-transaction campaign at mix B (`data/m1/campaign_4bit_B_summary.json`)
+### 5.2 Million-transaction campaign at mix B (`docs/m1/campaign_4bit_B_summary.json`)
 
-(filled in when the run completes)
+1,000,000 four-bit transactions, 250 independent channel copies at a time, each copy with
+its own weight noise (log-normal σ = 4 %), threshold and bias drift (±0.2 mV), stray input
+(5 Hz × 2.6 mV on every neuron), random words and per-bit arrival jitter (≤ 10 ms); one
+word every 320 ms; every transaction decoded from the spike trace after the fact.
+Reference-exact float64 CPU backend; 5.5 h wall on the M1 Pro.
+
+| class | count | meaning |
+|---|---|---|
+| ok | 999,978 | correct value consumed, CLEARED and READY seen, consumer quiet until the next load |
+| **wrong value consumed** | **0** | the only silent failure class |
+| false fault (detected refusal) | 3 | fault gate tripped without corruption; word refused, channel recovered |
+| no accept (hang) | 11 | completion never fired |
+| no cleared / no ready | 0 / 0 | |
+| stale activity | 8 | a consumer latch survived the reset train |
+| total non-ok | 22 | 2.2e-05 per transaction |
+
+ACCEPT latency: mean 109.5 ms, p99 119.4 ms, max 130.9 ms.
+Spikes per transaction: mean 1198, max 1853.
+
+**Against the M1 exit criterion** ("a four-bit word completes a full four-phase handshake
+10⁶ times under perturbation with zero decoded errors"):
+
+- Zero wrong values were ever consumed, in 10⁶ transactions at mix B and in the 10⁴-per-level
+  sweep up to 6 % weight noise and ±0.5 mV threshold drift. With zero observed silent
+  failures in 10⁶ trials the 95 % upper bound on the silent-error rate is 3 × 10⁻⁶ — an
+  observed bound, not the 10⁻¹⁰ objective, which remains analytical and unproven.
+- The channel is not yet fully available at this perturbation level: 2.2 × 10⁻⁵ of
+  transactions end in a detected refusal or a hang. A second 2 × 10⁵ run at another seed
+  gave 2 in 2 × 10⁵, the same order. The one hang caught with a timeline was a completion
+  latch still firing late in the reset train, i.e. a reset-margin case, not a protocol
+  case. Timeouts (which the abstract machine already needs for lost tokens) would convert
+  hangs into detected refusals; the reset margin can be raised at the cost of longer
+  recovery. Both are recorded as A2 work, not hidden.
+- At mix A (3 % / ±0.15 mV / 5 Hz / ≤ 10 ms) every sample so far has been clean; a 10⁶ run
+  there was not made because it would only move the observed bound, not the mechanism.
 
 ## 6. What did not work, in the order it happened
 
@@ -139,7 +173,7 @@ fix was measured before it was kept.
 
 ## 7. Storage primitive comparison
 
-See `docs/m1_latches.md`. In this neuron model there is no low-activity storage: the
+See `docs/m1_latches.md` (data `docs/m1/latch_alternatives.json`). In this neuron model there is no low-activity storage: the
 two-neuron loop at 1.4× is the production register (44 spikes per 100 ms held); weaker
 drive lowers activity but loses robustness; longer rings and long delays hold several
 circulating spikes and broadcast more.

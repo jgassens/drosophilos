@@ -387,3 +387,73 @@ Architecture specification and review: Jeremiah Gassensmith. Implementation, exp
 and this record: Claude Fable 5.1 (Anthropic) working in Claude Code, directed by the
 author. Connectome: MCNS v1.0, HHMI Janelia FlyEM project team and collaborators
 (CC BY 4.0). Model parameters: Shiu et al., *Nature* 2024.
+
+---
+
+# M1 (Stage A1) — reliable neural word transport and arithmetic
+
+**Date:** 2026-09-13/14. Full report with all tables: `docs/m1_report.md`; contracts:
+`docs/contracts/`; storage comparison: `docs/m1_latches.md`; raw data: `docs/m1/`.
+
+## What was built
+
+- A four-phase, dual-rail, self-timed token protocol written as a spec and as an
+  executable abstract machine, with an exhaustive checker (every interleaving, with fault
+  injection). It proves the protocol's properties and demonstrates the one hazard it
+  cannot remove by itself (stale tokens need a timing bound or phase rails).
+- The neural implementation of that protocol: two-neuron loop latches, latched rate-mode
+  gates, a latched completion tree (a state-holding C-element with explicit
+  return-to-empty), edge relays for one-pulse ignition, an edge-detected reset trigger
+  with a 4-pulse inhibitory train, an 11-hop READY/CLEARED delay chain, and a latched
+  FAULT path that refuses corrupted words without deadlocking the channel.
+- Gates (NOT, AND, OR, XOR, 2-of-3 majority), a 1-bit full adder and a 4-bit ripple-carry
+  adder, all exact.
+- A perturbation-campaign harness (batched independent channel copies; weight noise,
+  threshold and bias drift, stray input, arrival jitter; post-hoc decode into error
+  classes), a failure hunter that dumps the failing stage, and contract measurement.
+
+## What worked
+
+| circuit | neurons | ACCEPT latency | cycle | spikes / transaction |
+|---|---|---|---|---|
+| 4-bit channel | 125 | 112 ms | 247 ms | 1,221 |
+| 1-bit full adder channel | 153 | 169 ms | 305 ms | ~1,300 |
+| 4-bit ripple adder channel | 444 | 244–249 ms | 380–384 ms | 5,288 |
+
+- 10⁶ four-bit transactions under perturbation (4 % weight noise, ±0.2 mV threshold and
+  bias, 5 Hz × 2.6 mV stray input on every neuron, ≤ 10 ms arrival jitter): **0 wrong
+  values consumed**; 22 transactions (2.2 × 10⁻⁵) were refused or hung and were detected
+  (3 false faults, 11 no-accept, 8 stale-activity). ACCEPT latency p99 119 ms.
+- Stress sweep (10⁴ per level): arrival jitter to 40 ms is free; stray input to 20 Hz costs
+  2 × 10⁻⁴ (false faults only); silent wrong values appear only at ≥ 8 % weight noise or
+  ±1 mV threshold drift.
+- Fault injection: duplicates absorbed; corrupted bits detected, refused, recovered; late
+  opposite rail flagged only; stale spikes never consumed wrong.
+
+## What did not work
+
+Ten designs were rejected on measurement, in this order: an output-side READY veto (its
+own pulses hyperpolarised READY); a self-inhibiting one-shot (deep after-hyperpolarisation);
+a single strong reset pulse (5 ms window, tree latches re-ignited); half-strength reset
+pulses (+10 % loops survived); continuous DATA drive (consumer latches above the standard
+rate, false faults); gates driving latches directly (re-ignition during reset); a 0.65×
+rate-mode AND (failed at −10 % weights); edge relays and reset triggers racing their own
+inhibitor with equal drives (bits dropped, then CLEARED became a train); unlatched fault
+gates (a second reset wiped the next word). Each is in `docs/m1_report.md` §6 with the
+measurement that condemned it.
+
+Still open: the residual 2 × 10⁻⁵ availability failures at mix B (one caught timeline shows a
+completion latch surviving the reset train); timeouts for lost tokens; the 10⁻¹⁰ objective
+remains analytical (the observed 95 % bound on silent errors is 3 × 10⁻⁶).
+
+## The design rules M1 settled
+
+1. Every gate reads only latch trains (a standard 213 Hz rate); every gate output that
+   feeds another gate is latched through an edge relay.
+2. The membrane's 20 ms recovery from inhibition is the dominant timing constraint; the
+   READY chain length and the total reset charge are set by it.
+3. A relay or trigger and its own inhibitor must never race: the relay gets 1.8× the
+   single-pulse need (the largest doublet-free drive), the inhibitor 2.2× the loop drive.
+4. FAULT is a state, held in a latch, not a pulse.
+5. There is no low-activity register in this neuron model (`docs/m1_latches.md`); the
+   two-neuron loop at 1.4× is the production register, at 44 spikes per 100 ms per bit.
