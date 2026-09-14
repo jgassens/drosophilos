@@ -115,7 +115,7 @@ def run_block_campaign(a, params, pert, out: Path) -> None:
         errors = sum(v for k, v in totals.items() if k != "ok")
         silent = totals.get("wrong_value", 0)
     else:
-        m = build_machine(params, a.width)
+        m = build_machine(params, a.width, mul=True, watchdog_hops=300)
         neurons = m.net.n
         while done < a.n:  # a.n counts programs
             B = min(a.batch, a.n - done)
@@ -166,8 +166,8 @@ def main():
         run_block_campaign(a, params, pert, out)
         return
     if a.block == "alu":
-        build = lambda: build_alu_channel(params, a.width)
-        period = a.period or 8000
+        build = lambda: build_alu_channel(params, a.width, mul=True, watchdog_hops=300)
+        period = a.period or 14000
         s = run_campaign(build, params, a.n, batch=a.batch, tx_per_chunk=a.tx_per_chunk, tx_period_steps=period, pert=pert,
                          seed=a.seed, out_path=out, word_fn=alu_word_fn(a.width), expected_fn=alu_expected_fn(a.width), debug=a.debug, device=a.device)
     elif a.block == "adder":  # the ordered (veto-relay) ripple adder, random operands and carry-in

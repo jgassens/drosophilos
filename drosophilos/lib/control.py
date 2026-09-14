@@ -10,7 +10,7 @@
     DMEM   data RAM (lib/ram.py) with a read port into the ALU's B rails and a write port
            from the accumulator
 
-Instruction word (IMEM bit order): B[n] | U[5] one-hot | SUB | LOAD | STORE | JZ | JNZ | ADDR[a]
+Instruction word (IMEM bit order): B[n] | U[6] one-hot | SUB | flags... | ADDR[a]
     MOV/ADD/SUB/AND/OR/XOR imm     the ALU op on (acc, imm)
     ADDM/SUBM/ANDM/ORM/XORM [a]     the ALU op on (acc, DMEM[a])  (the LOAD flag routes B)
     LOAD [a]                        acc <- DMEM[a]   (U = PASSB, B from the read port)
@@ -19,6 +19,7 @@ Instruction word (IMEM bit order): B[n] | U[5] one-hot | SUB | LOAD | STORE | JZ
     JZ t / JNZ t                    PC <- t if Z / if not Z  (U = OR, B = 0)
     IRET                            PC <- the link ring (return from the interrupt handler)
     CLR [a]                         DMEM[a] emptied (STORE with the copy vetoed; NEXT on the word's READY)
+    LOADI / ADDI.. / STOREI         acc <- DMEM[X] / op with DMEM[X] / DMEM[X] <- acc  (X = the index word)
     HALT                            JZ self and JNZ self
 Every instruction runs the ALU and commits the accumulator.
 
@@ -61,7 +62,7 @@ from .ram import Memory, add_memory, add_read_port, add_write_port, address_veto
 from .staged import StagedChannel, build_accumulator
 
 # ------------------------------------------------------------------------------ ISA
-FLAGS = ("LOAD", "STORE", "JZ", "JNZ", "IRET", "CLR")
+FLAGS = ("LOAD", "STORE", "JZ", "JNZ", "IRET", "CLR", "LOADI", "STOREI")
 
 
 def encode(instr: tuple, n: int, a: int) -> int:
@@ -91,6 +92,15 @@ def encode(instr: tuple, n: int, a: int) -> int:
         unit, sub = ALU_OPS["OR"]
         flags["STORE"] = flags["CLR"] = 1
         addr = arg
+    elif op == "LOADI":  # acc <- DMEM[X]  (X = the index word; arg unused)
+        unit, sub = ALU_OPS["MOV"]
+        flags["LOADI"] = 1
+    elif op.endswith("I") and op[:-1] in ALU_OPS:  # ADDI etc.: the ALU op on (acc, DMEM[X])
+        unit, sub = ALU_OPS[op[:-1]]
+        flags["LOADI"] = 1
+    elif op == "STOREI":  # DMEM[X] <- acc
+        unit, sub = ALU_OPS["OR"]
+        flags["STOREI"] = 1
     elif op == "STORE":
         unit, sub = ALU_OPS["OR"]
         flags["STORE"], addr = 1, arg
@@ -115,7 +125,7 @@ def word_bits(n: int, a: int) -> int:
 
 
 def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None, max_steps: int = 64,
-                  interrupts_after: list[int] = (), handler_pc: int | None = None) -> dict:
+                  interrupts_after: list[int] = (), handler_pc: int | None = None, x_word: int | None = None) -> dict:
     """Executes the program in Python: returns the trace of (pc, acc word) after each committed
     instruction, the final DMEM, and whether it halted. `interrupts_after`: execution indices
     after which an interrupt is taken at the safe point (PC saved, jump to `handler_pc`; the
@@ -134,6 +144,11 @@ def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None
             if arg not in dmem:
                 return {"trace": trace, "dmem": dmem, "halted": False, "fault": ("unwritten read", pc)}
             ref = alu_reference(a_val, dmem[arg], "MOV" if op == "LOAD" else op[:-1], n)
+        elif op == "LOADI" or (op.endswith("I") and op[:-1] in ALU_OPS and op != "STOREI"):
+            xa = dmem.get(x_word)
+            if xa is None or xa not in dmem:
+                return {"trace": trace, "dmem": dmem, "halted": False, "fault": ("unwritten indexed read", pc)}
+            ref = alu_reference(a_val, dmem[xa], "MOV" if op == "LOADI" else op[:-1], n)
         else:  # STORE, JZ, JNZ, JMP, HALT: OR 0
             ref = alu_reference(a_val, 0, "OR", n)
         acc = ref["word"]
@@ -141,6 +156,8 @@ def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None
         z = ref["z"]
         if op == "STORE":
             dmem[arg] = ref["r"]
+        elif op == "STOREI":
+            dmem[dmem[x_word]] = ref["r"]
         elif op == "CLR":
             dmem.pop(arg, None)
         taken = op in ("HALT", "JMP") or (op == "JZ" and z) or (op == "JNZ" and not z)
@@ -250,18 +267,21 @@ class Machine:
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
                   ir_hops: int = 15, p_hops: int = 31, rd_hops: int = 35, act_hops: int = 17, next_hops: int = 12,
                   watchdog_hops: int = 170, handler_pc: int | None = None, port_out_word: int | None = None,
-                  port_in_word: int | None = None, timer_hops: int | None = None, status_word: int | None = None) -> Machine:
+                  port_in_word: int | None = None, timer_hops: int | None = None, status_word: int | None = None,
+                  x_word: int | None = None, mul: bool = False) -> Machine:
     """`handler_pc`: enables safe-point interrupts with the handler at that program word.
     `port_out_word`: a data word whose rails' rises are exported as FlyLink events (one relay
     per rail, taps in Machine.link_out_taps). `port_in_word`: a data word whose completion
     raises the interrupt (a message arrived); the transport ignites its rails.
+    `x_word`: the index register: a data word whose value addresses LOADI/STOREI/ADDI... (a second
+    read port and write port over the bank, with that word's rails as the address taps).
     `timer_hops` + `status_word`: a send timer started by the output word's completion and
     cancelled by the input word's completion; on expiry it writes the constant 1 into the
     status word (all bits) and raises the interrupt, so a handler can tell a timeout (status
     != 0) from an arrival and retransmit (STORE the output word again)."""
     drive = drive or Drive.from_params(params)
     a = max(1, (max(n_prog, n_data) - 1).bit_length())
-    acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True)
+    acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True, mul=mul)
     net = acc.net
     P, S, M, R = acc.producer, acc.reg.stage, acc.reg.master, acc.reg
     nb = word_bits(n, a)
@@ -273,8 +293,8 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     # instruction register: control fields
     n_ctrl = len(FLAGS) + a
     ir = [add_kill_pair(net, drive, f"IR.b{k}") for k in range(n_ctrl)]
-    ir_load, ir_store, ir_jz, ir_jnz, ir_iret, ir_clr = ir[:6]
-    ir_addr = ir[6:]
+    ir_load, ir_store, ir_jz, ir_jnz, ir_iret, ir_clr, ir_loadi, ir_storei = ir[:8]
+    ir_addr = ir[8:]
     addr_taps = [[l.u for l in pair] for pair in ir_addr]
     jt = add_latch(net, drive, "JT")
     sp = add_kill_pair(net, drive, "SP")  # [r0 = no store pending, r1 = pending]: a pair, so both states are rails
@@ -294,7 +314,7 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         for i in range(nb):
             for r in (0, 1):
                 if i < n + N_UNITS + 1:  # B, U, SUB -> P
-                    extra = [ir_load[1].u] if i < n else []  # a LOAD takes B from DMEM, not the immediate
+                    extra = [ir_load[1].u, ir_loadi[1].u] if i < n else []  # a LOAD/LOADI takes B from DMEM
                     add_veto_relay(net, drive, f"IM.w{w}.f{i}r{r}", f_p, [imem[w][i][1 - r].u] + extra, P.rails[i][r],
                                    veto_neurons=[notw])
                 else:  # control fields -> IR
@@ -303,6 +323,9 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     # data memory: read port into P's B rails for LOAD; write port from the master for STORE
     dmem = add_memory(net, drive, "DM", n_data, n)
     add_read_port(net, drive, "LD", dmem, f_rd, addr_taps, [P.rails[i] for i in range(n)], extra_vetoes=[ir_load[0].u])
+    if x_word is not None:  # indexed ports: the address taps are the index word's rails
+        x_taps = [[dmem.words[x_word].rails[j][0].u, dmem.words[x_word].rails[j][1].u] for j in range(a)]
+        add_read_port(net, drive, "LDI", dmem, f_rd, x_taps, [P.rails[i] for i in range(n)], extra_vetoes=[ir_loadi[0].u])
     # FETCH -> COMMIT on the stage's completion; COMMIT lights the register's COMMIT token
     rl = add_edge_relay(net, drive, "FSM.ws", S.completion.u)
     net.synapse(rl, COMMIT.u, drive.ignite)
@@ -324,6 +347,15 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u, sp[0].u], NEXT)
     for w, word in enumerate(dmem.words):  # a CLR is done when the word's READY fires (it stays empty)
         add_veto_relay(net, drive, f"FSM.wclr{w}", word.ready, [FETCH.u, NEXT.u, sp[0].u, ir_clr[0].u], NEXT)
+    if x_word is not None:  # indexed store: the same trigger, the index word's rails as the address
+        wpi = add_write_port(net, drive, "STI", dmem, R.done_relay, x_taps, [[M.rails[i][0].u, M.rails[i][1].u] for i in range(n)],
+                             extra_vetoes=[ir_storei[0].u], copy_vetoes=[S.fault_latch.u])
+        for w, d in enumerate(wpi.done):
+            add_veto_relay(net, drive, f"FSM.widone{w}", d, [FETCH.u, NEXT.u, sp[0].u], NEXT)
+        for l in wpi.domain_latches:
+            for x in l.members:
+                net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
+        add_veto_relay(net, drive, "SP.seti", f_rd, [ir_storei[0].u], sp[1])  # a STOREI is a pending store too
     for l in wp.domain_latches:  # COPY_w: cleared with the stage
         for x in l.members:
             net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
@@ -479,10 +511,11 @@ def run_machine(m: Machine, params: Params, program: list[tuple], dmem: dict | N
 
 
 # ------------------------------------------------------------------------------ programs and campaigns
-def random_program(rng, n: int = 4, a: int = 3, n_prog: int = 8, max_exec: int = 20) -> tuple[list[tuple], dict]:
+def random_program(rng, n: int = 4, a: int = 3, n_prog: int = 8, max_exec: int = 20, mul: bool = False) -> tuple[list[tuple], dict]:
     """A random n_prog-word program that the reference halts within `max_exec` instructions,
-    with a data image so that every LOAD reads a written word. The last word is HALT."""
-    ops = ["MOV", "ADD", "SUB", "AND", "OR", "XOR", "STORE", "LOAD", "JZ", "JNZ"]
+    with a data image so that every LOAD reads a written word. The last word is HALT.
+    `mul`: include MUL (only for machines built with a multiplier)."""
+    ops = ["MOV", "ADD", "SUB", "AND", "OR", "XOR", "STORE", "LOAD", "JZ", "JNZ"] + (["MUL"] if mul else [])
     while True:
         dmem = {int(rng.integers(0, 1 << a)): int(rng.integers(0, 1 << n)) for _ in range(3)}
         prog = []

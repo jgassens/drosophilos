@@ -8,6 +8,7 @@ The machine is an accumulator machine: every IR op becomes a short sequence
     JMP L                 JMP L
     IN dst                LOAD [port_in] ; STORE dst
     OUT src               LOAD src ; STORE [port_out]
+    LOADX/STOREX          LOADI ; STORE dst   /   LOAD src ; STOREI   (X = the __x data word)
     CALL f                the callee's body inlined (no recursion: checked by the front end)
     HALT                  JMP self
 The program starts with MOV 0: the accumulator is dark at power-up and a dark operand lights
@@ -43,7 +44,7 @@ def lower(prog: Program) -> list[tuple]:
                 emit("MOV", ins.imm & ((1 << prog.width) - 1)); emit("STORE", addr(ins.dst))
             elif op == "MOV":
                 emit("LOAD", addr(ins.srcs[0])); emit("STORE", addr(ins.dst))
-            elif op in ("ADD", "SUB", "AND", "OR", "XOR"):
+            elif op in ("ADD", "SUB", "AND", "OR", "XOR", "MUL"):
                 emit("LOAD", addr(ins.srcs[0]))
                 if ins.imm is not None:
                     emit(op, ins.imm & ((1 << prog.width) - 1))
@@ -54,6 +55,10 @@ def lower(prog: Program) -> list[tuple]:
                 emit("LOAD", addr(ins.srcs[0])); emit(op, f"{ins.target}{suffix}")
             elif op == "JMP":
                 emit("JMP", f"{ins.target}{suffix}")
+            elif op == "LOADX":
+                emit("LOADI", 0); emit("STORE", addr(ins.dst))
+            elif op == "STOREX":
+                emit("LOAD", addr(ins.srcs[0])); emit("STOREI", 0)
             elif op == "IN":
                 emit("LOAD", prog.ports["in"]); emit("STORE", addr(ins.dst))
             elif op == "OUT":

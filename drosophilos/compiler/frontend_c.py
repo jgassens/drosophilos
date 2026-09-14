@@ -24,7 +24,7 @@ WIDTHS = {"u8": 8, "u16": 16, "u32": 32, "i8": 8, "i16": 16, "i32": 32}
 PRELUDE = "typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32;\n" \
           "typedef signed char i8; typedef short i16; typedef int i32;\n" \
           "u8 in_read(void); void out_pixel(u8 v);\n"
-BINOPS = {"+": "ADD", "-": "SUB", "&": "AND", "|": "OR", "^": "XOR"}
+BINOPS = {"+": "ADD", "-": "SUB", "&": "AND", "|": "OR", "^": "XOR", "*": "MUL"}
 
 
 class Unsupported(Exception):
@@ -45,9 +45,12 @@ class Compiler:
         source = re.sub(r"//[^\n]*", "", source)
         ast = c_parser.CParser().parse(PRELUDE + source)
         globals_, funcs = [], []
+        arrays = []
         for ext in ast.ext:
             if isinstance(ext, c_ast.Decl) and isinstance(ext.type, c_ast.TypeDecl):
                 globals_.append(ext)
+            elif isinstance(ext, c_ast.Decl) and isinstance(ext.type, c_ast.ArrayDecl):
+                arrays.append(ext)
             elif isinstance(ext, c_ast.FuncDef):
                 funcs.append(ext)
             elif isinstance(ext, (c_ast.Typedef, c_ast.Decl)):
@@ -57,6 +60,8 @@ class Compiler:
         widths = set()
         for d in globals_:
             widths.add(self._width(d.type))
+        for d in arrays:
+            widths.add(self._width(d.type.type))
         width = width_hint or (widths.pop() if len(widths) == 1 else 8)
         widths.discard(width)
         if widths and any(w_ != width for w_ in widths):
@@ -69,9 +74,22 @@ class Compiler:
             addr += 1
             if d.init is not None:
                 inits.append((d.name, self._const(d.init)))
+        self.arrays = {}
+        for d in arrays:  # an array is a range of data words; its base is a compile-time address
+            length = self._const(d.type.dim)
+            self.arrays[d.name] = (addr, length)
+            for k in range(length):
+                self.prog.variables[f"{d.name}[{k}]"] = addr + k
+            addr += length
+            if d.init is not None:
+                for k, e in enumerate(d.init.exprs):
+                    inits.append((f"{d.name}[{k}]", self._const(e)))
         self.prog.ports = {"in": addr, "out": addr + 1}
         self.prog.variables["__in"] = addr
         self.prog.variables["__out"] = addr + 1
+        if self.arrays:
+            self.prog.variables["__x"] = addr + 2  # the index register word
+            self.prog.ports["x"] = addr + 2
         for f in funcs:
             self.body, name = [], f.decl.name
             self.calls[name] = set()
@@ -130,9 +148,16 @@ class Compiler:
             for item in node.block_items or []:
                 self._stmt(item, fn)
         elif isinstance(node, c_ast.Assignment):
-            if node.op != "=" or not isinstance(node.lvalue, c_ast.ID):
+            if node.op != "=":
                 raise Unsupported(f"assignment {node.op}")
-            self._expr_into(node.rvalue, node.lvalue.name)
+            if isinstance(node.lvalue, c_ast.ArrayRef):  # a[i] = e: address -> X, value -> temp, STOREX
+                val = self._expr(node.rvalue)
+                self._index_into_x(node.lvalue)
+                self.body.append(Instr("STOREX", srcs=(val,)))
+            elif isinstance(node.lvalue, c_ast.ID):
+                self._expr_into(node.rvalue, node.lvalue.name)
+            else:
+                raise Unsupported("assignment target")
         elif isinstance(node, c_ast.FuncCall):
             name = node.name.name
             if name == "out_pixel":
@@ -206,8 +231,20 @@ class Compiler:
         self._expr_into(node, t)
         return t
 
+    def _index_into_x(self, ref):
+        """X <- base + index for a[i] (a constant index folds to a constant address)."""
+        base, length = self.arrays[ref.name.name]
+        if isinstance(ref.subscript, c_ast.Constant):
+            self.body.append(Instr("CONST", "__x", imm=base + self._const(ref.subscript)))
+        else:
+            idx = self._expr(ref.subscript)
+            self.body.append(Instr("ADD", "__x", srcs=(idx,), imm=base))
+
     def _expr_into(self, node, dst: str):
-        if isinstance(node, c_ast.Constant):
+        if isinstance(node, c_ast.ArrayRef):
+            self._index_into_x(node)
+            self.body.append(Instr("LOADX", dst))
+        elif isinstance(node, c_ast.Constant):
             self.body.append(Instr("CONST", dst, imm=self._const(node)))
         elif isinstance(node, c_ast.ID):
             self.body.append(Instr("MOV", dst, srcs=(node.name,)))

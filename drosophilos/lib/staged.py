@@ -168,7 +168,7 @@ def build_staged_register(params: Params, width: int, drive: Drive | None = None
 
 
 def build_accumulator(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                      watchdog_hops: int = 150, act_hops: int = 11, ordered_grant: bool = False) -> StagedChannel:
+                      watchdog_hops: int = 150, act_hops: int = 11, ordered_grant: bool = False, mul: bool = False) -> StagedChannel:
     """P(B, U, SUB) + master[0:n] as A -> ALU -> stage(R, C, Z, V) -> commit -> master."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
@@ -181,7 +181,7 @@ def build_accumulator(params: Params, width: int, drive: Drive | None = None, li
     U = [Rail2(*P.rails[width + k]) for k in range(N_UNITS)]
     SUB = Rail2(*P.rails[width + N_UNITS])
     G = Gates(net, drive)
-    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh, act_hops=act_hops)
+    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh, act_hops=act_hops, mul=mul)
     wire_alu(net, drive, R, C, V, S)
     extend_reset(net, drive, S, G.latches, G.gates)
     connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT

@@ -797,3 +797,25 @@ How it is known to have worked, with nothing taken on trust from the machine:
    rail (decoded as `?`), a missing completion (a shorter string), or a wrong byte.
 4. The timing is consistent with the measured instruction cycle: 28 instructions in 29.8 s
    is 1.06 s each.
+
+
+---
+
+# Toward Stage D: multiplier, indexed addressing, arrays, exact channel
+
+**Date:** 2026-09-15.
+
+- **Multiplier**: an n × n array of ordered ripple-adder rows on veto relays; each row's output
+  re-timed through its completion so the next row's operand bits rise together (the first
+  build refused every product: a low-stage generate overtook a late high bit). 4-bit ALU with
+  MUL: 2,451 neurons, products correct, ACCEPT ~1 s. `*` in DrosoC.
+- **Indexed addressing**: an index word X feeds a second read and write port (LOADI, ADDI…,
+  STOREI); `static u8 a[N]` and `a[i]` in DrosoC lower through it. The array-sum program agrees
+  across the C reference, the IR interpreter and the lowered reference (38 words); the indexed
+  instructions ran neurally on a 16-word machine (STOREI, LOADI, ADDI).
+- **CLR** (empty a port word), a **send timer** with a hardware-written status word, and
+  **store-pending as a two-rail pair** so hardware-written words never advance the PC. A
+  no-link send timed out twice and the handler retransmitted once (neural test).
+- **Exact channel** over FlyLink (alternating bit, immediate ACK on a reverse link, retransmit
+  on timeout, duplicate rejection by sequence): programs written; the clean-link and
+  dropped-event scenarios are running (slow tests).

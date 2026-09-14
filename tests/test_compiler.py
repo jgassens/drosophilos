@@ -77,3 +77,65 @@ def test_neural_machine_runs_compiled_program():
     assert state == gold["state"], (state, gold["state"])
     assert final.get(prog.ports["out"]) == gold["outs"][-1]
     print("neural machine:", m.net.n, "neurons;", len(exp), "instructions executed")
+
+
+ARRAY_SRC = """
+static u8 a[4] = {3, 1, 4, 1};
+static u8 i, s;
+int main(void) {
+    i = 0; s = 0;
+    while (i != 4) { s = s + a[i]; i = i + 1; }
+    a[2] = s;
+    out_pixel(s);
+    return 0;
+}
+"""
+
+
+MUL_SRC = """
+static u8 x, y;
+int main(void) { x = in_read(); y = x * 7; y = y + 1; out_pixel(y); return 0; }
+"""
+
+
+def test_multiply_matches_golden():
+    prog = compile_c(MUL_SRC)
+    for inputs in ([3], [40], [255]):
+        gold = run_golden(MUL_SRC, inputs, ["x", "y"], 8)
+        ir = interpret(prog, inputs)
+        assert ir["outs"] == gold["outs"] and [(v, val) for v, val in ir["state"] if not v.startswith("__")] == gold["state"]
+        words = lower(prog)
+        a_bits = max(1, (max(len(words), len(prog.variables)) - 1).bit_length())
+        ref = reference_run(words, 8, a_bits, {prog.ports["in"]: inputs[0]}, max_steps=500)
+        assert ref["halted"] and ref["dmem"][prog.ports["out"]] == gold["outs"][-1], (ref, gold)
+
+
+def test_arrays_through_the_index_word_match_golden():
+    prog = compile_c(ARRAY_SRC)
+    words = lower(prog)
+    names = [v for v in prog.variables if not v.startswith("__")]
+    gold = run_golden(ARRAY_SRC, [], names, prog.width)
+    ir = interpret(prog, [])
+    assert [(v, val) for v, val in ir["state"] if not v.startswith("__")] == gold["state"] and ir["outs"] == gold["outs"]
+    a_bits = max(1, (max(len(words), len(prog.variables)) - 1).bit_length())
+    ref = reference_run(words, prog.width, a_bits, {}, max_steps=3000, x_word=prog.ports["x"])
+    state = [(v, ref["dmem"].get(a, 0)) for v, a in sorted(prog.variables.items(), key=lambda kv: kv[1]) if not v.startswith("__")]
+    assert ref["halted"] and state == gold["state"] and ref["dmem"].get(prog.ports["out"]) == gold["outs"][-1]
+    assert gold["state"][1] == ("s", 9) and gold["state"][4] == ("a[2]", 9)
+
+
+@pytest.mark.slow
+def test_neural_machine_runs_array_program():
+    prog = compile_c(ARRAY_SRC)
+    words = lower(prog)
+    n_prog = 1 << (len(words) - 1).bit_length()
+    n_data = 1 << (len(prog.variables) - 1).bit_length()
+    m = build_machine(PARAMS, n=prog.width, n_prog=n_prog, n_data=n_data, x_word=prog.ports["x"])
+    dmem = {prog.variables[f"a[{k}]"]: v for k, v in enumerate((3, 1, 4, 1))}
+    ref = reference_run(words, m.n, m.a, dmem, max_steps=3000, x_word=prog.ports["x"])
+    run, sim = run_machine(m, PARAMS, words, dmem, max_ms=1100 * (len(ref["trace"]) + 4))
+    assert [v for _, v in run.commits] == [v for _, v in ref["trace"]], (run.faults, run.timeouts)
+    final = dict(dmem)
+    for _, k, v in run.writes:
+        final[k] = v
+    assert final.get(prog.variables["s"]) == 9 and final.get(prog.variables["a[2]"]) == 9 and final.get(prog.ports["out"]) == 9

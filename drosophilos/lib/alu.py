@@ -1,13 +1,14 @@
 """Dual-rail ALU on the rate-mode gate library, as a four-phase channel (plan §A2).
 
 Operand word (producer P, 2n+6 bits):
-    A[n] | B[n] | U[5] one-hot unit select (ADDER, AND, OR, XOR, PASSB) | SUB
+    A[n] | B[n] | U[6] one-hot unit select (ADDER, AND, OR, XOR, PASSB, MUL) | SUB
 Result word (consumer Q, n+3 bits):
     R[n] | C | Z | V
         ADDER : R = A + (B xor SUB) + SUB, i.e. A+B when SUB=0 and A-B (mod 2^n) when SUB=1.
                 C = carry out (for SUB: C=1 means no borrow, A >= B unsigned).
                 V = signed overflow = C xor (carry into the top stage).
-        AND / OR / XOR : bitwise. PASSB : R = B (MOV). C = V = 0 for these four.
+        AND / OR / XOR : bitwise. PASSB : R = B (MOV). MUL : low n bits of A x B (optional unit).
+        C = V = 0 for all but the adder.
         Z = 1 iff R == 0, for every unit.
 
 Structure. Every unit computes on every transaction (all operands are always valid
@@ -35,8 +36,8 @@ from .adder import extend_reset
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
 
-UNITS = ("ADDER", "AND", "OR", "XOR", "PASSB")
-OPS = {"ADD": (0, 0), "SUB": (0, 1), "AND": (1, 0), "OR": (2, 0), "XOR": (3, 0), "MOV": (4, 0)}  # op -> (unit, sub)
+UNITS = ("ADDER", "AND", "OR", "XOR", "PASSB", "MUL")
+OPS = {"ADD": (0, 0), "SUB": (0, 1), "AND": (1, 0), "OR": (2, 0), "XOR": (3, 0), "MOV": (4, 0), "MUL": (5, 0)}  # op -> (unit, sub)
 N_UNITS = len(UNITS)
 
 
@@ -62,6 +63,8 @@ def alu_reference(a: int, b: int, op: str, width: int) -> dict:
         r = a ^ b
     elif op == "MOV":
         r = b
+    elif op == "MUL":
+        r = (a * b) & mask  # MUL.WRAP: the low n bits
     else:
         raise ValueError(op)
     z = int(r == 0)
@@ -99,7 +102,7 @@ def decode_alu_word(w: int, width: int, with_a: bool = True) -> tuple[int | None
 
 
 def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[Rail2], SUB: Rail2,
-                  act_domain_inh: int, *, act_hops: int = 11, b_hops: int = 6, carry_hops: int = 5):
+                  act_domain_inh: int, *, act_hops: int = 11, b_hops: int = 6, carry_hops: int = 5, mul: bool = False):
     """Combinational dual-rail ALU on veto relays. Returns (R, C, Z, V).
 
     A and B may be levels (a master's rails) or producer rails; U and SUB are producer rails.
@@ -122,13 +125,20 @@ def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[R
     f_or = [G.or2_ordered(f"{name}.or{i}", bx[i], Ad[i]) for i in range(n)]
     f_xor = [G.xor2_ordered(f"{name}.xor{i}", bx[i], Ad[i]) for i in range(n)]
     units = [sums, f_and, f_or, f_xor, bx]  # PASSB passes bx (= B when SUB = 0, not-B when SUB = 1)
+    if mul:  # MUL unit: low n bits of A x bx; a constant-0 rail (lit by ACTIVE's delayed rise) feeds the carry-ins
+        zero = Rail2(G.latch(f"{name}.zero0"), G.latch(f"{name}.zero1"))
+        G.veto(f"{name}.zero0.g", act_d, [], zero.r0)
+        units.append(G.multiplier_ordered(f"{name}.mul", Ad, bx, zero, carry_hops))
+    else:
+        units.append(None)  # a MUL op selects nothing: the transaction cannot complete (watchdog refuses it)
     R = []
     for i in range(n):
         rails = []
         for r in (0, 1):
             t = G.latch(f"{name}.mux{i}r{r}")
             for k, unit in enumerate(units):  # one-hot select: unit k's rail ignites R unless k is deselected
-                G.veto(f"{name}.mux{i}r{r}u{k}", unit[i].latches[r].u, [U[k].r0.u], t)
+                if unit is not None:
+                    G.veto(f"{name}.mux{i}r{r}u{k}", unit[i].latches[r].u, [U[k].r0.u], t)
             rails.append(t)
         R.append(Rail2(rails[0], rails[1]))
     others = [U[k].r1.u for k in range(1, N_UNITS)]
@@ -191,7 +201,7 @@ def wire_alu(net: Netlist, drive: Drive, R, C, V, Q) -> None:
 
 
 def build_alu_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                      watchdog_hops: int = 150) -> Channel:
+                      watchdog_hops: int = 150, mul: bool = False) -> Channel:
     """P(A, B, U, SUB) -> ALU -> Q(R, C, Z, V) with the standard four-phase wiring."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
@@ -203,7 +213,7 @@ def build_alu_channel(params: Params, width: int, drive: Drive | None = None, li
     U = [Rail2(*P.rails[2 * width + k]) for k in range(N_UNITS)]
     SUB = Rail2(*P.rails[2 * width + N_UNITS])
     G = Gates(net, drive)
-    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh)
+    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh, mul=mul)
     wire_alu(net, drive, R, C, V, Q)
     extend_reset(net, drive, Q, G.latches, G.gates)
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT

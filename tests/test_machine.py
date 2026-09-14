@@ -105,3 +105,19 @@ def test_send_timer_expires_and_handler_retransmits():
     assert final[3] == 2, final  # the counter counted them
     assert [k for _, k, _ in run.writes].count(7) == 2, run.writes  # the original send and one retransmit
     assert run.faults == 0 and run.timeouts == 0
+
+
+def test_indexed_addressing_through_the_index_word():
+    """X = word 7. Write 9 to DMEM[2] through X, then read DMEM[3] (image) and add DMEM[3] again
+    through X; store the sum at word 4."""
+    prog = [("MOV", 2), ("STORE", 7), ("MOV", 9), ("STOREI", 0), ("MOV", 3), ("STORE", 7), ("LOADI", 0), ("ADDI", 0), ("STORE", 4), ("HALT", 9)]
+    m = build_machine(PARAMS, n=4, n_prog=16, n_data=8, x_word=7)
+    ref = reference_run(prog, 4, 4, {3: 5}, max_steps=20, x_word=7)
+    run, sim = run_machine(m, PARAMS, prog, {3: 5}, max_ms=16000)
+    got = [v for _, v in run.commits]
+    assert got == [v for _, v in ref["trace"]], (got, ref["trace"], run.faults, run.timeouts)
+    final = {3: 5}
+    for _, k, v in run.writes:
+        final[k] = v
+    assert final == ref["dmem"] == {3: 5, 7: 3, 2: 9, 4: 10}, (final, ref["dmem"])
+    assert run.halted and run.faults == 0

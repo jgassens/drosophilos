@@ -30,12 +30,13 @@ def test_reference_matches_isa_semantics_4bit():
             assert alu_reference(a, b, "OR", w)["r"] == sem.or_(a, b, w).value & 15
             assert alu_reference(a, b, "XOR", w)["r"] == sem.xor(a, b, w).value & 15
             assert alu_reference(a, b, "MOV", w)["r"] == b
+            assert alu_reference(a, b, "MUL", w)["r"] == sem.mul_wrap(sa, sb, w).value & 15
             for op in OPS:
                 assert decode_alu_word(alu_word(a, b, op, w), w) == (a, b, op)
 
 
 def test_alu_1bit_exhaustive():
-    ch = build_alu_channel(PARAMS, 1)
+    ch = build_alu_channel(PARAMS, 1, mul=True)
     cases = [(a, b, op) for op in OPS for a in (0, 1) for b in (0, 1)]
     words = [alu_word(a, b, op, 1) for a, b, op in cases]
     expected = [alu_reference(a, b, op, 1)["word"] for a, b, op in cases]
@@ -71,3 +72,14 @@ def test_alu_fault_refused_and_recovers():
     assert recs[0].decoded == expected[0] and recs[0].status == "valid"
     assert recs[1].status == "fault" and recs[1].fault_spikes > 0 and recs[1].ready_step is not None, recs[1]
     assert recs[2].decoded == expected[2] and recs[2].status == "valid" and recs[2].fault_spikes == 0, recs[2]
+
+
+def test_alu_4bit_multiplier():
+    ch = build_alu_channel(PARAMS, 4, mul=True, watchdog_hops=300)
+    cases = [(3, 5, "MUL"), (7, 7, "MUL"), (0, 9, "MUL"), (15, 15, "MUL"), (2, 4, "MUL"), (13, 11, "MUL"), (6, 5, "ADD")]
+    words = [alu_word(a, b, op, 4) for a, b, op in cases]
+    expected = [alu_reference(a, b, op, 4)["word"] for a, b, op in cases]
+    recs, sim, st = run_transactions(ch, PARAMS, words, expected=expected, max_steps_per_tx=30000)
+    assert [r.decoded for r in recs] == expected, [(c, r.decoded, r.status) for c, r in zip(cases, recs)]
+    assert all(r.fault_spikes == 0 and r.timeout_spikes == 0 for r in recs)
+    print("4-bit ALU with multiplier:", ch.net.n, "neurons; MUL accept ms", [round(a) for a in st["accept_latency_ms"][:6]])

@@ -31,7 +31,7 @@ def run_golden(source: str, inputs: list[int], variables: list[str], width: int)
     src += '  printf("{\\"state\\": [");\n'
     for k, v in enumerate(variables):
         sep = '""' if k == 0 else '","'
-        src += f'  printf("%s%u", {sep}, (unsigned)({v} & {mask}u));\n'
+        src += f'  printf("%s%u", {sep}, (unsigned)({v} & {mask}u));\n'  # a[k] spells as C too
     src += '  printf("], \\"outs\\": [");\n  for (int i = 0; i < __n_out; i++) printf("%s%d", i ? "," : "", __outs[i]);\n  printf("]}\\n");\n  return 0;\n}\n'
     with tempfile.TemporaryDirectory() as d:
         c = Path(d) / "prog.c"

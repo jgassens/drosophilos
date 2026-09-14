@@ -59,9 +59,12 @@ data words.
 and decodes every committed word, PC rise and written word; `random_program` draws programs
 the reference halts within 20 instructions with every LOAD reading a written word.
 
-Two later additions, encoder-only for the datapath: memory operands for every ALU op
-(`ADDM [a]` etc.: the LOAD flag routes B from the data RAM for any unit) and `JMP t` (JZ
-and JNZ both set).
+Later additions: memory operands for every ALU op (`ADDM [a]` etc.: the LOAD flag routes B
+from the data RAM for any unit) and `JMP t` (JZ and JNZ both set), both encoder-only;
+`CLR [a]` (a STORE with the copy vetoed, so the word is emptied; NEXT comes from the word's
+READY); **indexed addressing** through an index word X (`LOADI`, `ADDI`…, `STOREI`: a second
+read port and write port over the bank whose address taps are X's rails, ~50 neurons per
+data word), which is what arrays need; and a **send timer** (§2.2).
 
 ### 2.1 Safe-point interrupts
 
@@ -81,6 +84,19 @@ handler (save acc, increment a counter, restore acc, IRET) runs twice, returns t
 interrupted word each time, and the main program's result is unchanged: the final memory
 equals the reference with interrupts at those indices, word for word (`tests/test_machine.py`).
 Cost for 16 program words: ~250 neurons.
+
+### 2.2 Send timer and status word
+
+`build_machine(timer_hops=k, status_word=w)`: a delay chain started by the output port
+word's completion (a send) and cancelled by the input port word's completion train (the
+reply). On expiry it ignites the status word's rails to the constant 1 and raises the
+interrupt, so one handler serves both events and tells them apart by loading the status
+word; it then `CLR`s the status and re-sends (a STORE to the port word re-completes it, which
+re-exports its rails and restarts the timer). A word completing without a STORE (the status
+word, or the data image at power-up) must not light NEXT: the "store pending" state is a
+kill pair now, and every "written" pulse into NEXT is vetoed by "no store pending".
+Measured: with no link, two timeouts 1.6 s apart run the handler twice, the counter reads 2,
+the port word is re-written once (`tests/test_machine.py`).
 
 ## 3. What the composition exposed
 
@@ -167,6 +183,10 @@ the Stage A2/B exit (plan): a DrosoC program that reads runtime input, stores ne
 computes, branches, loops, calls and emits a pixel, matching the C reference and the IR
 interpreter on canonical state for fresh inputs, and an interrupt that lands at a safe
 point and resumes. What is not yet met from that list is under §6.
+
+Arrays: `static u8 a[N]` is a range of data words; `a[i]` lowers to `X <- base + i` then
+`LOADI`/`STOREI` through the index word (`__x`). The array-sum program (`tests/test_compiler.py`)
+agrees across the C reference, the IR interpreter and the lowered machine reference (38 words).
 
 `bench/capacity.py` produces the whole-program capacity report the plan requires before any
 run above 4 nodes: for this program, 713 program-image bits, 59 live state bits, one ALU,

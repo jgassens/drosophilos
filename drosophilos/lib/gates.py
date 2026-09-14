@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..protocol.celement import _ignite_from, add_and_latched, add_delay_chain, add_or_latched, add_veto_relay
+from ..protocol.celement import _ignite_from, add_and_latched, add_completion_tree, add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.latch import Latch, add_latch
 from .netlist import Drive, Netlist
 
@@ -160,6 +160,64 @@ class Gates:
             sums.append(s_)
             carries.append(Rail2(c0, c1))
         return sums, carries, x, cds
+
+    def retime(self, name: str, X: list[Rail2], hops: int = 3) -> list[Rail2]:
+        """A copy of the word whose bits all rise together: bit-valid ORs -> completion tree ->
+        (delayed) one veto relay per rail, vetoed by the bit's other rail. Needed where a
+        word's bits arrive spread out (a ripple adder's sums) but must be a LATE operand
+        whose bits are aligned (the next row of a multiplier): with the spread, a generate in
+        a low stage lets the carry chain overtake a late high bit and the sum double-rails
+        (measured). Cost ~75 neurons and ~110 ms per 4-bit word."""
+        valids = []
+        for i, x in enumerate(X):
+            g, lv = add_or_latched(self.net, self.drive, f"{name}.v{i}", [x.r0.u, x.r1.u])
+            self.gates.append(g); self.latches.append(lv)
+            valids.append(lv)
+        root, internal = add_completion_tree(self.net, self.drive, f"{name}.c", valids)
+        self.latches.extend(internal)
+        if root not in valids:
+            self.latches.append(root)
+        self.gates.extend(k for k, r in enumerate(self.net.roles) if r.startswith(f"{name}.c") and r.endswith(".and"))
+        d = add_delay_chain(self.net, self.drive, f"{name}.d", root.u, hops)
+        out = []
+        for i, x in enumerate(X):
+            r0, r1 = self.latch(f"{name}.o{i}r0"), self.latch(f"{name}.o{i}r1")
+            self.veto(f"{name}.o{i}r0.g", d, [x.r1.u], r0)
+            self.veto(f"{name}.o{i}r1.g", d, [x.r0.u], r1)
+            out.append(Rail2(r0, r1))
+        return out
+
+    def multiplier_ordered(self, name: str, Ad: list[Rail2], Bd: list[Rail2], zero: Rail2, carry_hops: int = 5,
+                           row_hops: int = 6) -> list[Rail2]:
+        """n x n -> low n bits of the product (MUL.WRAP), on veto relays only. Partial products
+        p_ij = A_i AND B_j are veto relays driven by Ad_i (LATE) and vetoed by Bd_j's other
+        rail (EARLY); row k of the array adds the shifted partial-product row (EARLY, valid at
+        Ad + 4) to the running sum (LATE, the previous row's output) with an ordered ripple
+        adder, so each row's inputs are ordered by construction. `zero` is a dual-rail 0 for
+        the carry-in. Cost ~ n rows x (n-bit ripple adder); latency ~ n x (n x 29 ms)."""
+        n = len(Ad)
+        pp = []  # pp[i][j] latch for A_i AND B_j
+        for i in range(n):
+            row = []
+            for j in range(n):
+                l1 = self.latch(f"{name}.pp{i}_{j}")  # rail 1 of the product bit
+                self.veto(f"{name}.pp{i}_{j}.g", Ad[i].r1.u, [Bd[j].r0.u], l1)
+                l0 = self.latch(f"{name}.pq{i}_{j}")  # rail 0: A_i = 0 or B_j = 0
+                self.veto(f"{name}.pq{i}_{j}.a", Ad[i].r0.u, [], l0)
+                self.veto(f"{name}.pq{i}_{j}.b", Ad[i].r1.u, [Bd[j].r1.u], l0)
+                row.append(Rail2(l0, l1))
+            pp.append(row)
+        # row 0: the product's bit k gets pp[k][0] shifted... product bit m = sum_j pp[m-j][j]
+        acc = [pp[m][0] for m in range(n)]  # A * b_0
+        for j in range(1, n):
+            # row j adds A * b_j shifted by j: bits m >= j get pp[m-j][j]; lower bits get 0
+            addend = [zero] * j + [pp[m - j][j] for m in range(j, n)]
+            # the running sum is LATE and must be aligned (re-timed through its completion); the
+            # addend is EARLY (partial products are valid at Ad + 4)
+            acc_r = self.retime(f"{name}.rt{j}", acc)
+            sums, carries, x, cds = self.ripple_adder_ordered(f"{name}.row{j}", acc_r, addend, zero, carry_hops)
+            acc = sums
+        return acc
 
     def overflow_ordered(self, name: str, Ad: list[Rail2], bx: list[Rail2], Cin: Rail2, x, carries, cds) -> Rail2:
         """V = cout xor (carry into the top stage), without ordering cout against that carry:

@@ -13,6 +13,7 @@ Ops (v0, the subset the neural machine v1 executes; the interpreter executes all
     JZ  src, target       jump if src == 0
     JNZ src, target
     CALL f / RET
+    LOADX dst / STOREX src  memory[X] with X the index variable __x (arrays)
     IN  dst  <- port       (the host's transduced input, read as a memory word)
     OUT src -> port        (a pixel record: written to a memory-mapped output word)
     HALT
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 
 from . import semantics as sem
 
-ALU_OPS = {"ADD": sem.add_wrap, "SUB": sem.sub_wrap, "AND": sem.and_, "OR": sem.or_, "XOR": sem.xor}
+ALU_OPS = {"ADD": sem.add_wrap, "SUB": sem.sub_wrap, "AND": sem.and_, "OR": sem.or_, "XOR": sem.xor, "MUL": sem.mul_wrap}
 
 
 @dataclass
@@ -107,6 +108,9 @@ def interpret(prog: Program, inputs: list[int], max_steps: int = 10000) -> dict:
                 val = r.value & mask
                 full = a + (b if ins.op == "ADD" else ((~b & mask) + 1))
                 flags = {"z": int(val == 0), "c": (full >> w) & 1, "v": r.flags.ovf}
+            elif ins.op == "MUL":
+                val = ALU_OPS["MUL"](_to_signed(a, w), _to_signed(b, w), w).value & mask
+                flags = {"z": int(val == 0), "c": 0, "v": 0}
             else:
                 val = ALU_OPS[ins.op](a, b, w).value & mask
                 flags = {"z": int(val == 0), "c": 0, "v": 0}
@@ -122,6 +126,12 @@ def interpret(prog: Program, inputs: list[int], max_steps: int = 10000) -> dict:
             fn, pc = ins.target, 0
         elif ins.op == "RET":
             fn, pc = stack.pop()
+        elif ins.op == "LOADX":  # dst <- memory[X]
+            xa = mem.get(prog.variables["__x"], 0)
+            mem[prog.variables[ins.dst]] = mem.get(xa, 0)
+        elif ins.op == "STOREX":  # memory[X] <- src
+            xa = mem.get(prog.variables["__x"], 0)
+            mem[xa] = rd(ins.srcs[0])
         elif ins.op == "IN":
             if not inputs:
                 raise RuntimeError("IN with no input available")

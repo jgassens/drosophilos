@@ -294,3 +294,20 @@ machine, which decides when a register may be read.
 - Register-file semantics (many masters, read ports gated by the control machine) and the
   reset-quiescence rule (a domain's inputs must be silent for ≥ 50 ms after its reset before
   they restart) are now design rules for the RAM and control FSM.
+
+
+## 7. Multiplier (MUL unit)
+
+`Gates.multiplier_ordered`: an n × n array on veto relays only. Partial products p_ij = A_i
+AND B_j are veto relays driven by A^d_i (late) and vetoed by B^d_j's other rail (early);
+row j adds the shifted partial-product row (early) to the running sum (late) with the ordered
+ripple adder. The running sum's bits arrive spread over ~29 ms per bit, and with that spread
+a generate in a low stage lets the next row's carry chain overtake a late high bit and the
+sum double-rails (measured on the first build: every product refused). Each row's output is
+therefore **re-timed** through its own completion (`Gates.retime`: bit-valid ORs → tree →
+delayed → one veto relay per rail), so the next row's late operand has all its bits rising
+together; the same operand-gate pattern that tokenises the master. 4-bit: +1,300 neurons
+on the ALU (2,451 total), products correct on the corners, ACCEPT 0.93–1.08 s (three rows
+of adder plus re-timing). MUL is an optional unit (`mul=True`); a MUL on a machine without it
+never completes and the watchdog refuses it. The IR, the front end (`*`) and the lowering
+carry it as `MUL.WRAP`.
