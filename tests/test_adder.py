@@ -34,3 +34,20 @@ def test_ripple_adder_4bit_random_operands():
     assert [r.decoded for r in recs] == expected, [(r.word, r.decoded, r.status) for r in recs]
     assert all(r.fault_spikes == 0 for r in recs)
     print("4-bit adder:", {k: v for k, v in st.items() if k != "accept_latency_ms"}, "accept ms", [round(a) for a in st["accept_latency_ms"]])
+
+
+def test_ordered_adder_1bit_exhaustive_and_4bit_corners():
+    """The veto-relay adder (operand gate, delayed B, delayed carries): no rate-mode gate."""
+    ch = build_adder_channel(PARAMS, 1, ordered=True)
+    cases = [(a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
+    recs, sim, st = run_transactions(ch, PARAMS, [operand_word(a, b, c, 1) for a, b, c in cases],
+                                     expected=[a + b + c for a, b, c in cases], max_steps_per_tx=12000)
+    assert [r.decoded for r in recs] == [a + b + c for a, b, c in cases], [(r.word, r.decoded, r.status) for r in recs]
+    assert all(r.fault_spikes == 0 for r in recs)
+    ch = build_adder_channel(PARAMS, 4, ordered=True)
+    cases = [(15, 15, 1), (0, 0, 0), (7, 8, 1), (9, 6, 0), (15, 0, 1), (5, 11, 0), (1, 15, 0)]
+    recs, sim, st = run_transactions(ch, PARAMS, [operand_word(a, b, c, 4) for a, b, c in cases],
+                                     expected=[a + b + c for a, b, c in cases], max_steps_per_tx=12000)
+    assert [r.decoded for r in recs] == [a + b + c for a, b, c in cases], [(r.word, r.decoded, r.status) for r in recs]
+    assert all(r.fault_spikes == 0 and r.timeout_spikes == 0 for r in recs)
+    print("ordered 4-bit adder:", ch.net.n, "neurons; accept ms", [round(a) for a in st["accept_latency_ms"]])

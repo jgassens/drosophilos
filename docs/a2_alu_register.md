@@ -200,27 +200,97 @@ The frozen contract is therefore re-measured on the new build and its 10⁵ mix-
 re-run with the same period and 55-hop watchdog; the freeze is re-issued on that result.
 Result: 100,000 ok, 0 non-ok of any class (the frozen build's run had 1 stale-activity case), ACCEPT p99 170 ms, 201 neurons. The freeze is re-issued on this build (`docs/contracts/channel_4bit.yaml`, status line).
 
-## 4. Costs and the accumulator's timeline
+## 4. The ordered datapath: an adder with no rate-mode gate
+
+§2.4 left the symmetric-arrival gates (B xor SUB, the adder's sum and carry, the zero tree)
+in rate mode, each exposing one input for a whole transaction whenever the other rail never
+comes. The way out is to *make* the arrival order deterministic with delay chains
+(`celement.py::add_delay_chain`: relays at pulse drive, ~5.3 ms per hop; only the rise is
+faithful, which is all a veto relay's driver needs). With the order fixed, every AND in the
+datapath is a veto relay.
+
+| signal | rises at | how |
+|---|---|---|
+| U, SUB, B | load (± 10 ms jitter) | producer rails |
+| B^d | load + 32 ms | each B rail through 6 hops |
+| bx = SUB xor B^d | ~36–46 ms | ordered XOR: SUB early, B^d late (margin ≥ 24 ms) |
+| ACTIVE | ~10 ms | OR-latch over the unit-select rails, in the producer's reset domain |
+| A^d | ~70 ms | operand gate: ACTIVE delayed 11 hops drives one veto relay per rail, vetoed by the source's other rail (works for a master's level or a producer rail alike) |
+| x_i = bx_i xor A^d_i; generate; kill | A^d + 4 | ordered: bx early, A^d late (margin ≥ 24 ms) |
+| carry-in to bit i ≥ 1 | c_{i−1} + 27 ms | each carry rail through 5 hops |
+| c_i | max(A^d + 2, carry-in + 2) | generate / kill relays (driver A^d, veto bx) + propagate relays (driver delayed carry-in, veto x_i.0) |
+| sum_i | carry-in + 2 | ordered XOR: x_i early, delayed carry late (margin ≥ 19 ms) |
+| V | delayed top carry + 2 | p_top = 1 → V = 0; generate → V = not c; kill → V = c, all as relays on the delayed carry with A^d, bx vetoes |
+| Z | R-completion + 20 ms | on the consumer: Z0 from any R.1 (relays); Z1 = the consumer tree's node over the R bits, delayed 3 hops, vetoed by every R.1 (§4.2) |
+
+The carry chain is therefore 29 ms per stage (27 ms of delay, 2 ms of relay), against ~35 ms
+for a rate-mode majority, and the sum of the top bit arrives 29 ms after the top carry
+instead of 35. The whole 4-bit adder is 594 neurons as a channel (the rate-mode one was 603)
+and the ALU 1,150 (was 1,191). Clean-model ACCEPT: ordered adder 330–384 ms; ALU 241 ms
+(MOV) – 524 ms (SUB with a full propagate chain and Z = 1); accumulator 663–827 ms per
+instruction. The completion tree (three levels of rate-mode ANDs on the bit-valid latches,
+~105 ms) is now the largest single cost in the ALU; its exposure is bounded because every
+bit always becomes valid.
+
+What is still rate-mode anywhere: the completion trees, the fault gates (0.55 per rail, one
+rail always live, measured clean over 10⁶), ACTIVE's OR (one input suffices), and the
+register's grant AND(COMMIT, W_S). The grant's exposure is the FSM's latency (COMMIT alone
+until completion, or W_S alone until COMMIT); a control machine that issues COMMIT in response
+to completion bounds it to its own reaction time.
+
+Ordering assumptions now stated in the contracts: A^d rises ≥ 24 ms after B^d; each delayed
+carry-in rises ≥ 19 ms after its stage's x; the mux's select rails are valid ≥ 26 ms before
+any unit output; the R rails are valid ≥ 50 ms before Z's driver.
+
+### 4.2 No result bit is reliably last: Z needs a completion, not a delay
+
+The first version drove Z from the top result bit delayed 32 ms, on the assumption that
+in a ripple adder the top sum arrives last. It does not: a lower sum can wait on a long
+propagate chain while the top carry was decided early by a kill or a generate. At mix B+
+every ALU refusal (13 in 500) was a Z double rail, and the accumulator's one refusal was the
+same (bit 3's sum at 164 ms, bit 2's at 204 ms, Z1 fired at 196 ms). The spread between the
+earliest and the latest result bit grows linearly with the width, so no fixed delay is the
+answer. "Every result bit is valid" is a completion, and the consumer's tree already has that
+node (the subtree over bits [0, n)): its train, delayed 3 hops, drives Z1's relay with every
+R rail 1 as a veto, straight into the consumer's Z rails; Z0 is an OR of the R rail-1
+latches. Z therefore costs one tree level of latency (Z=1 words complete ~110 ms after Z=0
+words) and no neurons beyond the relays.
+
+### 4.1 Campaigns (mix B)
+
+| block | transactions | ok | wrong values | refused / hung | non-ok observed / 95 % upper | ACCEPT p99 / max |
+|---|---|---|---|---|---|---|
+| 4-bit ripple adder, ordered, random operands and carry-in | 30,000 | 30,000 | 0 | 0 | 0 / 1.0 × 10⁻⁴ | 397 / 420 ms |
+| 4-bit ALU, random (A, B, op) | 5,000 | 5,000 | 0 | 0 | 0 / 6.0 × 10⁻⁴ | 516 / 555 ms |
+| 4-bit accumulator, random programs | 2,000 | 2,000 | 0 (stage and master) | 0 | 0 / 1.5 × 10⁻³ | 509 / 535 ms |
+
+For comparison, the rate-mode adder's 10⁵ campaign at the same mix (`a2_liveness.md` §4)
+observed 6.4 × 10⁻⁴ non-ok (30 faults, 1 timeout, 24 refused-or-hung, 9 stale), all of them
+refusals or hangs and none a wrong sum. Probes at the harsher B+ mix on the final ordered
+build: ALU 500/500, accumulator 120/120 clean (the delay-based Z had 13/500 and 1/120).
+
+## 5. Costs and the accumulator's timeline
 
 | block | neurons | ACCEPT (clean) | cycle |
 |---|---|---|---|
 | 4-bit channel (frozen) | 194 | 155 ms | 334 ms |
 | 4-bit ripple adder | 558 | 366 ms | 544 ms |
-| 4-bit ALU | 1,191 | 300 ms (MOV) – 520 ms (ADD/SUB) | 480–700 ms |
+| 4-bit ripple adder, ordered | 594 | 330–384 ms | 510–560 ms |
+| 4-bit ALU | 1,150 | 241 ms (MOV) – 524 ms (ADD/SUB, Z = 1) | 420–700 ms |
 | 4-bit staged register | 321 | 150 ms | 530 ms incl. commit |
-| 4-bit accumulator | 1,410 | 300–480 ms | 720–910 ms per instruction |
+| 4-bit accumulator | 1,323 | 241–405 ms | 660–830 ms per instruction |
 
-An instruction costs 0.7–0.9 s of neural time. The commit alone is 293 ms, of which
+An instruction costs 0.67–0.83 s of neural time. The commit alone is 293 ms, of which
 80 ms is the master's READY chain and ~70 ms is the master's completion tree. Both are
 protocol safety margins, not computation; overlapping the next operand load with the commit
 (a double-buffered stage) is the obvious throughput step and is deferred to the control
 machine, which decides when a register may be read.
 
-## 5. Carried forward
+## 6. Carried forward
 
-- The one-input AND margin is still the library's weakest point. The relay fix removes the
-  +10 % rate excursion that was eating it; whether the 0.65 window is now clean over long
-  exposures is what the campaigns in §3 measure.
+- The one-input AND margin was the library's weakest point; after §4 no rate-mode AND with
+  a whole-transaction exposure remains in the datapath. The completion trees and the grant
+  are the last rate-mode ANDs, with bounded exposure.
 - Register-file semantics (many masters, read ports gated by the control machine) and the
   reset-quiescence rule (a domain's inputs must be silent for ≥ 50 ms after its reset before
   they restart) are now design rules for the RAM and control FSM.

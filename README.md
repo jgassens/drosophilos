@@ -73,4 +73,9 @@ uv run pytest
   5,000, accumulator 2,000 random instructions, all correct, no refusals. Notes:
   `docs/a2_alu_register.md`; contracts `docs/contracts/{alu,staged_register,accumulator}_4bit.yaml`.
 
+- **Ordered datapath done.** The adder and the whole ALU datapath run on veto relays only,
+  with arrival order fixed by delay chains (operand gate, delayed B, delayed carries; Z from
+  the consumer's completion). Mix B campaigns: ordered adder 30,000 random additions, ALU 5,000, accumulator
+  2,000 instructions, all correct, no refusals (the rate-mode adder had 6.4 × 10⁻⁴ refusals/hangs). Notes: `docs/a2_alu_register.md` §4.
+
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

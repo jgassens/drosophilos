@@ -30,14 +30,14 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..protocol.celement import add_and_latched, add_or_latched, add_veto_relay
+from ..protocol.celement import add_and_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
 from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
 from ..protocol.token import decode_at, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .adder import extend_reset
-from .alu import N_UNITS, add_alu_logic, wire_outputs
+from .alu import N_UNITS, add_alu_logic, wire_alu
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
 
@@ -152,29 +152,13 @@ def build_accumulator(params: Params, width: int, drive: Drive | None = None, li
     P = add_register(net, drive, "P", pw, with_completion=False)
     M = add_register(net, drive, "R.M", width + 3, with_completion=True)
     S = add_register(net, drive, "Q", width + 3, with_completion=True)
+    A = [Rail2(*M.rails[i]) for i in range(width)]  # the master is a level: the ALU's operand gate tokenises it
     B = [Rail2(*P.rails[i]) for i in range(width)]
     U = [Rail2(*P.rails[width + k]) for k in range(N_UNITS)]
     SUB = Rail2(*P.rails[width + N_UNITS])
     G = Gates(net, drive)
-    # Operand gate. The master is a level (its rails hold for as long as the value is valid);
-    # the ALU consumes tokens. A gate fed by a level alone restarts ~25 ms after the stage's
-    # reset train ends, before its once-per-activation ignition relay has recovered (~50 ms of
-    # source silence), so its latch never re-ignites and the next transaction hangs (measured:
-    # 17 % of perturbed instructions, always a bit whose eager OR was driven by the master
-    # alone). ACTIVE holds only while the producer holds a word (it is in P's reset domain),
-    # so every ALU input is silent from ACCEPT until the next load.
-    act_gate, ACT = add_or_latched(net, drive, "alu.active", [U[k].r1.u for k in range(N_UNITS)])
-    q = -int(round(0.75 * drive.loop))
-    for x in list(ACT.members) + [act_gate]:
-        net.synapse(P.reset_inh, x, q)
-    A = []
-    for i in range(width):  # veto relays: ACTIVE's rise ignites A rail r unless the master holds rail 1-r
-        a0, a1 = G.latch(f"alu.a{i}r0"), G.latch(f"alu.a{i}r1")
-        G.veto(f"alu.a{i}r0.g", ACT.u, [M.rails[i][1].u], a0)
-        G.veto(f"alu.a{i}r1.g", ACT.u, [M.rails[i][0].u], a1)
-        A.append(Rail2(a0, a1))
-    R, C, Z, V = add_alu_logic(G, "alu", A, B, U, SUB)
-    wire_outputs(net, drive, R + [C, Z, V], S)
+    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh)
+    wire_alu(net, drive, R, C, V, S)
     extend_reset(net, drive, S, G.latches, G.gates)
     connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     wire_fault_path(net, drive, P, S)

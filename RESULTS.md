@@ -600,3 +600,66 @@ rail never comes, and at the harsher mix they still produced ~0.4 % refusals (ne
 value) before the campaigns above. An ordered full adder (per-bit delay of x so that the
 carry is always the earlier operand) would move the whole adder onto veto relays; it is the
 next gate-work item, ahead of the RAM and the control machine.
+
+
+---
+
+# A2 step 6b: the ordered datapath (adder on veto relays only)
+
+**Date:** 2026-09-14. Full note: `docs/a2_alu_register.md` §4; contracts: `docs/contracts/`;
+campaign summaries: `docs/a2/`.
+
+## What was built
+
+Every AND in the ALU's datapath is now a veto relay, because the arrival order of its two
+inputs is fixed by construction with delay chains (`protocol/celement.py::add_delay_chain`):
+
+- **B is delayed 6 hops** (~32 ms) before bx = SUB xor B^d, so SUB is the earlier operand.
+- **A enters through an operand gate** driven by ACTIVE (an OR-latch over the unit-select
+  rails) delayed 11 hops, so A^d (~70 ms) is the later operand against bx (36–46 ms). The
+  same gate tokenises a master's level or a producer's rails.
+- **Each carry is delayed 5 hops** before the next stage reads it, so the carry-in is the
+  later operand against that stage's x = bx xor A^d. Generate and kill relays are driven by
+  A^d and vetoed by bx; propagate relays by the delayed carry, vetoed by x; the sum is an
+  ordered XOR. 29 ms per stage.
+- **V** from the delayed top carry with A^d and bx vetoes (p_top = 1 → 0; generate → not c;
+  kill → c). **Z** on the consumer: its completion node over the R bits, delayed 3 hops,
+  drives Z1 vetoed by every R rail 1; Z0 is an OR of the R rail-1 latches.
+
+`Gates.ripple_adder_ordered`, `Gates.operand_gate`, `Gates.delayed`, `Gates.overflow_ordered`,
+`alu.add_zero_flag`; `build_adder_channel(ordered=True)`.
+
+| block | neurons | ACCEPT (clean model) |
+|---|---|---|
+| 4-bit ripple adder, ordered | 594 (rate-mode: 603) | 330–384 ms (rate-mode: 360) |
+| 4-bit ALU | 1,150 (was 1,191) | 241 ms (MOV) – 524 ms (SUB, full propagate, Z = 1) |
+| 4-bit accumulator | 1,323 (was 1,410) | 660–830 ms per instruction |
+
+## What went wrong on the way
+
+The first Z drove its relay from the top result bit delayed 32 ms, assuming the top sum is
+last. In a ripple adder a lower sum can wait on a long propagate chain while the top carry
+was decided early by a kill: at the harsh mix every ALU refusal (13 in 500) and the one
+accumulator refusal were Z double rails. The spread between result bits grows with the
+width, so no delay fixes it; "all bits valid" is a completion, and the consumer's tree
+already has that node. The corrected Z costs no gates and one tree level of latency.
+
+## Campaigns on the final build (mix B)
+
+| block | transactions | ok | wrong values | refused / hung | non-ok observed / 95 % upper | ACCEPT p99 / max |
+|---|---|---|---|---|---|---|
+| 4-bit ripple adder, ordered, random operands and carry-in | 30,000 | 30,000 | 0 | 0 | 0 / 1.0 × 10⁻⁴ | 397 / 420 ms |
+| 4-bit ALU, random (A, B, op) | 5,000 | 5,000 | 0 | 0 | 0 / 6.0 × 10⁻⁴ | 516 / 555 ms |
+| 4-bit accumulator, random programs | 2,000 | 2,000 | 0 (stage and master) | 0 | 0 / 1.5 × 10⁻³ | 509 / 535 ms |
+
+For comparison, the rate-mode adder's 10⁵ campaign at the same mix (`a2_liveness.md` §4)
+observed 6.4 × 10⁻⁴ non-ok (30 faults, 1 timeout, 24 refused-or-hung, 9 stale), all of them
+refusals or hangs and none a wrong sum. Probes at the harsher B+ mix on the final ordered
+build: ALU 500/500, accumulator 120/120 clean (the delay-based Z had 13/500 and 1/120).
+
+## What is still rate-mode
+
+The completion trees (bounded exposure: every bit becomes valid), the fault gates (0.55 per
+rail), ACTIVE's OR, and the register's grant AND(COMMIT, W_S), whose exposure is the control
+machine's reaction time. The carry chain is linear in the width (29 ms per bit); wide words
+will need carry-lookahead or bit-serial arithmetic, which the capacity report decides.

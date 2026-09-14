@@ -86,7 +86,7 @@ def accumulator_chain_fn(width):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("block", choices=["alu", "register", "accumulator"])
+    ap.add_argument("block", choices=["alu", "register", "accumulator", "adder"])
     ap.add_argument("--n", type=int, default=2000)
     ap.add_argument("--width", type=int, default=4)
     ap.add_argument("--batch", type=int, default=100)
@@ -104,9 +104,19 @@ def main():
     out = Path(a.out or f"data/a2/{a.block}_{a.width}bit_B.jsonl")
     if a.block == "alu":
         build = lambda: build_alu_channel(params, a.width)
-        period = a.period or 10000
+        period = a.period or 8000
         s = run_campaign(build, params, a.n, batch=a.batch, tx_per_chunk=a.tx_per_chunk, tx_period_steps=period, pert=pert,
                          seed=a.seed, out_path=out, word_fn=alu_word_fn(a.width), expected_fn=alu_expected_fn(a.width), debug=a.debug)
+    elif a.block == "adder":  # the ordered (veto-relay) ripple adder, random operands and carry-in
+        from ..lib.adder import build_adder_channel, operand_word
+        w = a.width
+        mask = (1 << w) - 1
+        build = lambda: build_adder_channel(params, w, ordered=True, watchdog_hops=100)
+        period = a.period or 7000
+        s = run_campaign(build, params, a.n, batch=a.batch, tx_per_chunk=a.tx_per_chunk, tx_period_steps=period, pert=pert,
+                         seed=a.seed, out_path=out,
+                         word_fn=lambda rng: operand_word(int(rng.integers(0, 1 << w)), int(rng.integers(0, 1 << w)), int(rng.integers(0, 2)), w),
+                         expected_fn=lambda word: (word & mask) + ((word >> w) & mask) + ((word >> (2 * w)) & 1), debug=a.debug)
     else:
         holder = {}
 
@@ -114,7 +124,7 @@ def main():
             sc = build_staged_register(params, a.width) if a.block == "register" else build_accumulator(params, a.width)
             holder["sc"] = sc
             return sc
-        period = a.period or (7000 if a.block == "register" else 12000)
+        period = a.period or (7000 if a.block == "register" else 10000)
         # run_campaign calls build_fn first, so the program_fn can close over the built channel
         prog_holder = {}
 

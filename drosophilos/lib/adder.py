@@ -29,7 +29,9 @@ def operand_word(a: int, b: int, cin: int, width: int) -> int:
 
 
 def build_adder_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                        watchdog_hops: int = 80) -> Channel:
+                        watchdog_hops: int = 80, ordered: bool = False) -> Channel:
+    """`ordered=True`: the veto-relay adder (operand gate on A driven by the carry-in rails,
+    B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     P = add_register(net, drive, "P", 2 * width + 1, with_completion=False)
@@ -38,7 +40,13 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     B = [Rail2(P.rails[width + i][0], P.rails[width + i][1]) for i in range(width)]
     Cin = Rail2(P.rails[2 * width][0], P.rails[2 * width][1])
     G = Gates(net, drive)
-    sums, cout = G.ripple_adder("add", A, B, Cin)
+    if ordered:
+        Ad, ACT, _ = G.operand_gate("add", A, [Cin.r0.u, Cin.r1.u], P.reset_inh)
+        Bd = [G.delayed(f"add.b{i}", B[i], 6) for i in range(width)]
+        sums, carries, _, _ = G.ripple_adder_ordered("add", Ad, Bd, Cin)
+        cout = carries[-1]
+    else:
+        sums, cout = G.ripple_adder("add", A, B, Cin)
     outputs = sums + [cout]
     for i, s in enumerate(outputs):
         for r, latch in enumerate(s.latches):

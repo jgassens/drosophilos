@@ -68,13 +68,25 @@ def main() -> None:
                                 "campaign classifier of that run filed FAULT-ACCEPTs without completion as no_accept (see a2_liveness.md)"])
     write_contract(c, OUT / "ripple_adder_4bit.yaml")
 
+    ado = build_adder_channel(params, 4, ordered=True, watchdog_hops=100)
+    cases = [(15, 15, 1), (3, 9, 0), (7, 8, 1), (0, 0, 0), (12, 5, 1), (9, 6, 0)]
+    c = measure_contract("ripple_adder_4bit_ordered", ado, params, [operand_word(a, b, ci, 4) for a, b, ci in cases],
+                         [a + b + ci for a, b, ci in cases],
+                         campaign_summary={"ordered_build_mix_B": _summary("docs/a2/adder_4bit_B_summary.json")},
+                         notes=["4-bit ripple-carry adder on veto relays only: operand gate on A (ACTIVE from the carry-in rails, 11 hops), "
+                                "B delayed 6 hops, carries delayed 5 hops per stage; no rate-mode gate between operands and sums",
+                                "ordering assumptions: A^d rises >= 24 ms after B^d; each delayed carry-in rises >= 19 ms after that stage's x"],
+                         timing_assumptions=STAGED_TIMING[:3] + [STAGED_TIMING[4]])
+    write_contract(c, OUT / "ripple_adder_4bit_ordered.yaml")
+
     alu = build_alu_channel(params, 4)
     cases = [(15, 15, "ADD"), (3, 9, "SUB"), (9, 3, "SUB"), (6, 5, "AND"), (6, 5, "OR"), (10, 5, "XOR"), (0, 11, "MOV"), (8, 8, "SUB")]
     c = measure_contract("alu_4bit", alu, params, [alu_word(a, b, op, 4) for a, b, op in cases],
                          [alu_reference(a, b, op, 4)["word"] for a, b, op in cases],
                          campaign_summary={"veto_build_mix_B": _summary("docs/a2/alu_4bit_B_summary.json")},
-                         notes=["4-bit ALU: units ADDER/AND/OR/XOR/PASSB, flags C Z V; veto-relay mux, logic units and first XOR; watchdog 150 hops",
-                                "latency depends on the unit: MOV/logic ~300 ms, ADD/SUB ~400-520 ms (carry ripple)"],
+                         notes=["4-bit ALU: units ADDER/AND/OR/XOR/PASSB, flags C Z V; the whole datapath on veto relays with delay-fixed "
+                                "ordering (operand gate 11 hops, B 6 hops, carries 5 hops); Z from the consumer's R-completion node; watchdog 150 hops",
+                                "latency depends on the unit, the carry chain and Z: MOV ~240 ms, logic ~310 ms, ADD/SUB 350-525 ms (Z=1 adds a tree level)"],
                          timing_assumptions=STAGED_TIMING[:3] + [STAGED_TIMING[4]])
     write_contract(c, OUT / "alu_4bit.yaml")
 
@@ -102,9 +114,9 @@ def main() -> None:
     c = measure_contract("accumulator_4bit", acc, params, words, exp,
                          runner=lambda: run_commits(acc, params, words, exp, commit_delay_steps=0, init_master=0),
                          campaign_summary={"veto_build_mix_B": _summary("docs/a2/accumulator_4bit_B_summary.json")},
-                         notes=["ALU -> staged register -> ALU operand A through the operand gate (ACTIVE-driven veto relays)",
+                         notes=["ALU -> staged register -> ALU operand A through the ALU's operand gate (ACTIVE-driven veto relays)",
                                 "the host loads (B, op) and one COMMIT per instruction and reads the master; A is never touched by the host",
-                                "cycle per instruction 720-910 ms (clean model): ALU 300-480 ms, commit ~293 ms, READY ~93 ms"],
+                                "cycle per instruction 660-830 ms (clean model): ALU 240-405 ms, commit ~293 ms, READY ~93 ms"],
                          timing_assumptions=STAGED_TIMING)
     write_contract(c, OUT / "accumulator_4bit.yaml")
     print("contracts written:", sorted(p.name for p in OUT.glob("*.yaml")))

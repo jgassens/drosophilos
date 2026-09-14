@@ -13,15 +13,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..protocol.celement import _ignite_from, add_and_latched, add_or_latched, add_veto_relay
+from ..protocol.celement import _ignite_from, add_and_latched, add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.latch import Latch, add_latch
 from .netlist import Drive, Netlist
 
 
 @dataclass(frozen=True)
+class Tap:
+    """A neuron whose train stands in for a rail (a delayed rail); usable wherever only `.u` is read."""
+    u: int
+
+
+@dataclass(frozen=True)
 class Rail2:
-    r0: Latch
-    r1: Latch
+    r0: Latch | Tap
+    r1: Latch | Tap
 
     @property
     def taps(self) -> tuple[int, int]:
@@ -103,6 +109,82 @@ class Gates:
         self.veto(f"{name}.y0.a", LATE.r1.u, [EARLY.r0.u], y0)  # E1 and L1
         self.veto(f"{name}.y0.b", LATE.r0.u, [EARLY.r1.u], y0)  # E0 and L0
         return Rail2(y0, y1)
+
+    # --- timing staging for the ordered datapath (docs/a2_alu_register.md section 4) ------
+    def delayed(self, name: str, X: Rail2, hops: int) -> Rail2:
+        """Both rails of X delayed by `hops` (~5.3 ms each); the result is a pair of Taps."""
+        return Rail2(Tap(add_delay_chain(self.net, self.drive, f"{name}r0", X.r0.u, hops)),
+                     Tap(add_delay_chain(self.net, self.drive, f"{name}r1", X.r1.u, hops)))
+
+    def operand_gate(self, name: str, A: list[Rail2], act_taps: list[int], act_domain_inh: int,
+                     act_hops: int = 11) -> tuple[list[Rail2], Latch, int]:
+        """Turns levels (a master's rails, or producer rails) into this transaction's operand
+        tokens at a fixed time: ACTIVE = OR-latch over `act_taps` (rails that are live for the
+        whole transaction, e.g. the unit select), living in the producer's reset domain;
+        ACTIVE delayed `act_hops` drives one veto relay per rail, vetoed by the source's other
+        rail. Returns (A^d rails, ACTIVE, ACTIVE^d tap)."""
+        net, drive = self.net, self.drive
+        act_gate, ACT = add_or_latched(net, drive, f"{name}.active", act_taps)
+        q = -int(round(0.75 * drive.loop))
+        for x in list(ACT.members) + [act_gate]:
+            net.synapse(act_domain_inh, x, q)
+        act_d = add_delay_chain(net, drive, f"{name}.actd", ACT.u, act_hops)
+        out = []
+        for i, a in enumerate(A):
+            a0, a1 = self.latch(f"{name}.a{i}r0"), self.latch(f"{name}.a{i}r1")
+            self.veto(f"{name}.a{i}r0.g", act_d, [a.r1.u], a0)
+            self.veto(f"{name}.a{i}r1.g", act_d, [a.r0.u], a1)
+            out.append(Rail2(a0, a1))
+        return out, ACT, act_d
+
+    def ripple_adder_ordered(self, name: str, Ad: list[Rail2], bx: list[Rail2], Cin: Rail2, carry_hops: int = 5):
+        """Ripple-carry adder on veto relays only. Ordering by construction: bx (EARLY) is
+        valid >= 15 ms before Ad (LATE); Cin is valid before everything (a producer rail); the
+        carry into bit i >= 1 is c_{i-1} delayed `carry_hops`, so it rises >= 20 ms after
+        x_i = bx_i xor Ad_i. Per bit: x, generate/kill relays (driver Ad, veto bx), propagate
+        relays (driver delayed carry-in, veto x), sum = x xor carry-in (ordered).
+        Returns (sums, carries, x, delayed carry-ins)."""
+        n = len(Ad)
+        x = [self.xor2_ordered(f"{name}.fa{i}.x", bx[i], Ad[i]) for i in range(n)]
+        sums, carries, cds = [], [], []
+        for i in range(n):
+            c1, c0 = self.latch(f"{name}.fa{i}.c1"), self.latch(f"{name}.fa{i}.c0")
+            self.veto(f"{name}.fa{i}.g", Ad[i].r1.u, [bx[i].r0.u], c1)  # generate: A=1 and bx=1
+            self.veto(f"{name}.fa{i}.k", Ad[i].r0.u, [bx[i].r1.u], c0)  # kill: A=0 and bx=0
+            if i == 0:
+                self.veto(f"{name}.fa0.p1", x[0].r1.u, [Cin.r0.u], c1)  # propagate with cin=1
+                self.veto(f"{name}.fa0.p0", x[0].r1.u, [Cin.r1.u], c0)  # propagate with cin=0
+                s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0])
+            else:
+                cd = self.delayed(f"{name}.fa{i}.cin", carries[-1], carry_hops)
+                self.veto(f"{name}.fa{i}.p1", cd.r1.u, [x[i].r0.u], c1)
+                self.veto(f"{name}.fa{i}.p0", cd.r0.u, [x[i].r0.u], c0)
+                s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd)
+                cds.append(cd)
+            sums.append(s_)
+            carries.append(Rail2(c0, c1))
+        return sums, carries, x, cds
+
+    def overflow_ordered(self, name: str, Ad: list[Rail2], bx: list[Rail2], Cin: Rail2, x, carries, cds) -> Rail2:
+        """V = cout xor (carry into the top stage), without ordering cout against that carry:
+        if p_top = 1 then V = 0; if generate, V = not c; if kill, V = c (c = the delayed
+        carry-in of the top stage, or Cin when n = 1)."""
+        n = len(Ad)
+        v1, v0 = self.latch(f"{name}1"), self.latch(f"{name}0")
+        At, bt = Ad[n - 1], bx[n - 1]
+        self.veto(f"{name}0.p", x[n - 1].r1.u, [], v0)
+        if n >= 2:
+            cd = cds[-1]
+            self.veto(f"{name}1.k", cd.r1.u, [At.r1.u, bt.r1.u], v1)  # kill and c=1
+            self.veto(f"{name}1.g", cd.r0.u, [At.r0.u, bt.r0.u], v1)  # generate and c=0
+            self.veto(f"{name}0.k", cd.r0.u, [At.r1.u, bt.r1.u], v0)
+            self.veto(f"{name}0.g", cd.r1.u, [At.r0.u, bt.r0.u], v0)
+        else:  # Cin is EARLY: drive from Ad instead
+            self.veto(f"{name}1.k", At.r0.u, [bt.r1.u, Cin.r0.u], v1)
+            self.veto(f"{name}1.g", At.r1.u, [bt.r0.u, Cin.r1.u], v1)
+            self.veto(f"{name}0.k", At.r0.u, [bt.r1.u, Cin.r1.u], v0)
+            self.veto(f"{name}0.g", At.r1.u, [bt.r0.u, Cin.r0.u], v0)
+        return Rail2(v0, v1)
 
     def and2(self, name: str, A: Rail2, B: Rail2) -> Rail2:
         y1 = self._and(f"{name}.y1", A.r1.u, B.r1.u)

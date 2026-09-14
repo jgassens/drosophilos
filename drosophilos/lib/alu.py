@@ -14,10 +14,10 @@ Structure. Every unit computes on every transaction (all operands are always val
 tokens, so every unit completes); a one-hot mux picks the result: per result rail, one
 veto relay per unit (driven by that unit's rail, vetoed by the unit's deselect rail) into
 one result latch. An unselected unit's outputs therefore never reach the result rails.
-B enters every unit through bx = B xor SUB, a rate-mode stage, which makes bx the later
-operand by >= 50 ms against A and the select rails; that ordering is what lets the logic
-units, the adder's first XOR, the mux and the flag gating use veto relays (no exposure
-window) instead of rate-mode ANDs (see protocol/celement.py::add_veto_relay).
+The whole datapath is veto relays (protocol/celement.py::add_veto_relay) whose input order
+is fixed by delay chains: B is delayed before bx = SUB xor B, A enters through an operand
+gate ~70 ms after the load, and each carry is delayed before the next stage reads it. No
+rate-mode gate remains between the operands and the result (see add_alu_logic).
 
 ISA mapping (isa/semantics.md): ADD = ADD.WRAP, SUB = SUB.WRAP with OVF = V; the ISA's
 compare results derive from SUB's flags (unsigned: lt = not C, eq = Z; signed: lt = Z==0
@@ -27,6 +27,8 @@ and (N xor V), N = R's top bit). Saturating ops, shifts and multiply are later m
 from __future__ import annotations
 
 from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault_path
+from ..protocol.celement import add_delay_chain, add_veto_relay
+from ..protocol.latch import Latch
 from ..protocol.latch import add_edge_relay, connect_trigger
 from ..sim.model import Params
 from .adder import extend_reset
@@ -96,32 +98,29 @@ def decode_alu_word(w: int, width: int, with_a: bool = True) -> tuple[int | None
     return a, b, op
 
 
-def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[Rail2], SUB: Rail2):
-    """Combinational dual-rail ALU. Returns (R, C, Z, V).
+def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[Rail2], SUB: Rail2,
+                  act_domain_inh: int, *, act_hops: int = 11, b_hops: int = 6, carry_hops: int = 5):
+    """Combinational dual-rail ALU on veto relays. Returns (R, C, Z, V).
 
-    Timing structure (the ordering the veto relays rely on): U, SUB, B and A arrive with the
-    load (A ~20 ms later in the accumulator); bx = B xor SUB is a rate-mode stage (~70 ms), so
-    bx is reliably the LATER operand against A and U. Everything downstream of bx that pairs it
-    with A or with a select rail is an ordered (veto-relay) gate; the adder's sum and carry
-    and the zero tree, whose inputs have no fixed order, stay rate-mode."""
+    A and B may be levels (a master's rails) or producer rails; U and SUB are producer rails.
+    Timeline (docs/a2_alu_register.md section 4): U, SUB, B at the load; B^d = B delayed
+    `b_hops` (~32 ms); bx = SUB xor B^d (ordered, ~36-46 ms); A^d = the operand gate driven by
+    ACTIVE delayed `act_hops` (~70 ms), so A^d is the later operand against bx by >= 24 ms;
+    the carry chain is ordered by `carry_hops` per stage. Z is not computed here: see
+    add_zero_flag (it needs the consumer's completion over the R bits). No rate-mode gate
+    remains in the datapath (the consumer's completion tree and fault gates are the only
+    ones downstream)."""
     n = len(A)
     assert len(B) == n and len(U) == N_UNITS
-    bx = [G.xor2(f"{name}.bx{i}", B[i], SUB) for i in range(n)]  # rate-mode: B and SUB arrive together
-    # adder unit: A + bx + SUB
-    c = SUB
-    sums, carries = [], []
-    for i in range(n):
-        x = G.xor2_ordered(f"{name}.fa{i}.x", A[i], bx[i])
-        s_ = G.xor2(f"{name}.fa{i}.s", x, c)  # x and the carry have no fixed order
-        c = G.maj3(f"{name}.fa{i}.c", A[i], bx[i], c)
-        sums.append(s_)
-        carries.append(c)
+    Ad, ACT, act_d = G.operand_gate(name, A, [U[k].r1.u for k in range(N_UNITS)], act_domain_inh, act_hops)
+    Bd = [G.delayed(f"{name}.b{i}", B[i], b_hops) for i in range(n)]
+    bx = [G.xor2_ordered(f"{name}.bx{i}", SUB, Bd[i]) for i in range(n)]
+    sums, carries, x, cds = G.ripple_adder_ordered(f"{name}", Ad, bx, SUB, carry_hops)
     cout = carries[-1]
-    c_top = carries[-2] if n >= 2 else SUB
-    vraw = G.xor2(f"{name}.vx", cout, c_top)  # rate-mode: cout can precede c_top (a3 == b3)
-    f_and = [G.and2_ordered(f"{name}.and{i}", A[i], bx[i]) for i in range(n)]
-    f_or = [G.or2_ordered(f"{name}.or{i}", A[i], bx[i]) for i in range(n)]
-    f_xor = [G.xor2_ordered(f"{name}.xor{i}", A[i], bx[i]) for i in range(n)]
+    vraw = G.overflow_ordered(f"{name}.vx", Ad, bx, SUB, x, carries, cds)
+    f_and = [G.and2_ordered(f"{name}.and{i}", bx[i], Ad[i]) for i in range(n)]
+    f_or = [G.or2_ordered(f"{name}.or{i}", bx[i], Ad[i]) for i in range(n)]
+    f_xor = [G.xor2_ordered(f"{name}.xor{i}", bx[i], Ad[i]) for i in range(n)]
     units = [sums, f_and, f_or, f_xor, bx]  # PASSB passes bx (= B when SUB = 0, not-B when SUB = 1)
     R = []
     for i in range(n):
@@ -144,25 +143,51 @@ def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[R
 
     C = gated_flag(f"{name}.c", cout)
     V = gated_flag(f"{name}.v", vraw)
-    level = [R[i].r0 for i in range(n)]  # Z = 1 iff every result bit is 0: AND tree over rail 0
-    d = 0
-    while len(level) > 1:
-        nxt = [G._and(f"{name}.z{d}_{k // 2}", level[k].u, level[k + 1].u) for k in range(0, len(level) - 1, 2)]
-        if len(level) % 2:
-            nxt.append(level[-1])
-        level = nxt
-        d += 1
-    z0 = G._or(f"{name}.z0", [R[i].r1.u for i in range(n)])
-    Z = Rail2(z0, level[0])
-    return R, C, Z, V
+    return R, C, V
 
 
-def wire_outputs(net: Netlist, drive: Drive, outputs: list[Rail2], Q) -> None:
-    """Each latched output rail ignites the consumer's rail latch once, through an edge relay."""
-    for i, s in enumerate(outputs):
+def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", hops: int = 3) -> None:
+    """Z on the consumer. No single result bit is reliably the last to arrive (in a ripple
+    adder a lower sum can wait on a long propagate chain while the top carry was decided
+    early by a kill), so "every result bit is valid" must come from a completion, not a
+    delay. The consumer's tree already has that node: the subtree over bits [0, n) (bit 0's
+    valid latch for n = 1, `comp.c{log2 n - 1}_0` otherwise, n a power of two). Its train,
+    delayed `hops` so the R rails are established >= 15 ms earlier, drives two veto relays
+    into Q's Z rail 1 unless any R rail 1 is live; Z rail 0 is an OR of the R rail-1 latches
+    (one relay each, no ordering needed). Latency: Z rises ~20 ms after that node, and the
+    word completes one tree level later; the register's fault gate on the Z bit covers a
+    double rail."""
+    assert n & (n - 1) == 0, "the first n bits must form a complete subtree of the completion tree"
+    roles = net.roles
+    prefix = roles[Q.completion.u].split(".")[0]
+    if n == 1:
+        node = Q.valid[0]
+    else:
+        k = n.bit_length() - 2
+        u = roles.index(f"{prefix}.comp.c{k}_0.L.u")
+        node = Latch(u, u + 1)
+    d = add_delay_chain(net, drive, f"{name}d", node.u, hops)
+    z0, z1 = Q.rails[n + 1][0], Q.rails[n + 1][1]
+    add_veto_relay(net, drive, f"{name}1", d, [Q.rails[i][1].u for i in range(n)], z1)  # zero: no rail 1 anywhere
+    for i in range(n):  # not zero: any rail 1 (an OR needs no ordering)
+        add_veto_relay(net, drive, f"{name}0.r{i}", Q.rails[i][1].u, [], z0)
+
+
+def wire_outputs(net: Netlist, drive: Drive, outputs: list[Rail2], Q, bits: list[int] | None = None) -> None:
+    """Each latched output rail ignites the consumer's rail latch once, through an edge relay.
+    `bits[k]` is the consumer bit for outputs[k] (default: k)."""
+    bits = bits or list(range(len(outputs)))
+    for s, i in zip(outputs, bits):
         for r, latch in enumerate(s.latches):
             relay = add_edge_relay(net, drive, f"out.b{i}r{r}", latch.u)
             net.synapse(relay, Q.rails[i][r].u, drive.ignite)
+
+
+def wire_alu(net: Netlist, drive: Drive, R, C, V, Q) -> None:
+    """R -> bits [0, n), C -> n, V -> n+2 through edge relays; Z (bit n+1) from add_zero_flag."""
+    n = len(R)
+    wire_outputs(net, drive, R + [C, V], Q, list(range(n)) + [n, n + 2])
+    add_zero_flag(net, drive, Q, n)
 
 
 def build_alu_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
@@ -178,8 +203,8 @@ def build_alu_channel(params: Params, width: int, drive: Drive | None = None, li
     U = [Rail2(*P.rails[2 * width + k]) for k in range(N_UNITS)]
     SUB = Rail2(*P.rails[2 * width + N_UNITS])
     G = Gates(net, drive)
-    R, C, Z, V = add_alu_logic(G, "alu", A, B, U, SUB)
-    wire_outputs(net, drive, R + [C, Z, V], Q)
+    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh)
+    wire_alu(net, drive, R, C, V, Q)
     extend_reset(net, drive, Q, G.latches, G.gates)
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     connect_trigger(net, drive, P.ready, Q.reset_trigger, Q.reset_edge)  # CLEARED

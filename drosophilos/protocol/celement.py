@@ -99,3 +99,18 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
         net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
     net.synapse(relay, target.u, drive.ignite)
     return relay
+
+
+def add_delay_chain(net: Netlist, drive: Drive, name: str, source: int, hops: int) -> int:
+    """Delays the rise of a train by `hops` relays (~5.3 ms per hop at pulse drive). Used to
+    fix the arrival order that veto relays depend on. Only the rise is faithful: fed a 213 Hz
+    latch train, a hop is over-driven and fires near its refractory limit, which is harmless
+    for a veto relay's driver (its own source inhibition holds it after the first spike). Not
+    in any reset domain: it drains within its delay once the source stops, and a train with
+    no gap cannot re-fire a relay (its inhibition needs ~86 ms of silence to decay)."""
+    prev = source
+    for k in range(hops):
+        h = net.neuron(f"{name}.d{k}")
+        net.synapse(prev, h, drive.pulse)
+        prev = h
+    return prev
