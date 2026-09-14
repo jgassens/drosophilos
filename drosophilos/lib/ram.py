@@ -46,7 +46,6 @@ def address_vetoes(addr_rails, w: int) -> list[int]:
 class Memory:
     words: list  # Register per word (masters)
     width: int
-    not_word: list = field(default_factory=list)  # shared "address != w" veto neurons, if a port made them
 
     @property
     def n_words(self) -> int:
@@ -66,7 +65,7 @@ class WritePort:
 
 
 def add_write_port(net: Netlist, drive: Drive, name: str, mem: Memory, trigger: int, addr_taps, data_taps,
-                   extra_vetoes: list[int] = (), veto_neurons: list[int] = ()) -> WritePort:
+                   extra_vetoes: list[int] = (), veto_neurons: list[int] = (), copy_vetoes: list[int] = ()) -> WritePort:
     """`trigger`: a train or a single pulse that starts the write; `addr_taps[j][r]`,
     `data_taps[i][r]`: taps of the address and data rails (levels valid before the trigger).
     `extra_vetoes`: taps that must be silent for the write to happen (e.g. "op is not WRITE")."""
@@ -83,7 +82,7 @@ def add_write_port(net: Netlist, drive: Drive, name: str, mem: Memory, trigger: 
         net.synapse(word.ready, copy.u, drive.ignite)  # the word is empty and recovered: copy
         for i in range(mem.width):
             for r in (0, 1):
-                add_veto_relay(net, drive, f"{name}.w{w}.cp{i}r{r}", copy.u, [data_taps[i][1 - r]], word.rails[i][r])
+                add_veto_relay(net, drive, f"{name}.w{w}.cp{i}r{r}", copy.u, [data_taps[i][1 - r]] + list(copy_vetoes), word.rails[i][r])
         d = add_edge_relay(net, drive, f"{name}.w{w}.done", word.completion.u, fast_inhibitor=True)
         selects.append(ws); copies.append(copy); done.append(d); dom.append(copy)
     return WritePort(selects, copies, done, dom)
@@ -151,7 +150,7 @@ def build_ram_block(params: Params, n_words: int, width: int, drive: Drive | Non
     data = [[S.rails[a_bits + i][0].u, S.rails[a_bits + i][1].u] for i in range(width)]
     op_w, op_r = S.rails[a_bits + width], S.rails[a_bits + width + 1]
     trig = add_delay_chain(net, drive, "ports.trig", S.completion.u, 3)  # the stage's completion, 16 ms later
-    wp = add_write_port(net, drive, "wr", mem, trig, addr, data, extra_vetoes=[op_w[0].u])
+    wp = add_write_port(net, drive, "wr", mem, trig, addr, data, extra_vetoes=[op_w[0].u], copy_vetoes=[S.fault_latch.u])
     OUT = add_register(net, drive, "OUT", width, with_completion=False)
     Qo = add_register(net, drive, "R", width, with_completion=True)
     add_read_port(net, drive, "rd", mem, trig, addr, OUT.rails, extra_vetoes=[op_r[0].u])

@@ -18,6 +18,7 @@ Instruction word (IMEM bit order): B[n] | U[5] one-hot | SUB | LOAD | STORE | JZ
     STORE [a]                       DMEM[a] <- acc   (U = OR, B = 0: acc unchanged, Z updated)
     JZ t / JNZ t                    PC <- t if Z / if not Z  (U = OR, B = 0)
     IRET                            PC <- the link ring (return from the interrupt handler)
+    CLR [a]                         DMEM[a] emptied (STORE with the copy vetoed; NEXT on the word's READY)
     HALT                            JZ self and JNZ self
 Every instruction runs the ALU and commits the accumulator.
 
@@ -26,10 +27,10 @@ Cycle (times from FETCH's rise, clean model):
     +82   IR <- IMEM[PC] control fields   (fetch relays driven by FETCH delayed 15 hops: the
           old PC line's "not this word" veto needs ~55 ms to decay before a fetch relay can
           fire; measured: at +34 the IR never loaded and every flag stayed 0)
-    +156  P  <- IMEM[PC] B/U/SUB          (FETCH delayed 29 hops; B vetoed by IR.LOAD, whose
+    +166  P  <- IMEM[PC] B/U/SUB          (FETCH delayed 31 hops; B vetoed by IR.LOAD, whose
           other rail may have died at +95: a relay must be driven >= 55 ms after any veto
           rail dies, or the veto's residual blocks it)
-    +177  P.B <- DMEM[ADDR] if LOAD; SP set if STORE   (FETCH delayed 33 hops)
+    +187  P.B <- DMEM[ADDR] if LOAD; SP set if STORE   (FETCH delayed 35 hops)
     ~+560 stage complete (W_S) -> COMMIT lit -> grant -> master rewritten -> W_M
     W_M's pulse: stage cleared; STORE write started; NEXT lit (unless a store is pending,
     in which case the word's "written" pulse lights NEXT)
@@ -37,7 +38,8 @@ Cycle (times from FETCH's rise, clean model):
     the new PC line's rise lights FETCH. A jump to the lit line makes no rise: HALT.
 
 Faults: a refused instruction (stage fault or watchdog) clears P and the stage and leaves the
-FSM in FETCH: the machine halts (fail-stop); recovery is later work. The master is not
+FSM where it was (FETCH for a fault before completion, COMMIT for one after it): the machine
+halts (fail-stop); recovery is later work. The master is not
 preloaded (its W_M rise would advance the PC); programs start with MOV or LOAD.
 """
 
@@ -59,7 +61,7 @@ from .ram import Memory, add_memory, add_read_port, add_write_port, address_veto
 from .staged import StagedChannel, build_accumulator
 
 # ------------------------------------------------------------------------------ ISA
-FLAGS = ("LOAD", "STORE", "JZ", "JNZ", "IRET")
+FLAGS = ("LOAD", "STORE", "JZ", "JNZ", "IRET", "CLR")
 
 
 def encode(instr: tuple, n: int, a: int) -> int:
@@ -85,6 +87,10 @@ def encode(instr: tuple, n: int, a: int) -> int:
     elif op == "IRET":
         unit, sub = ALU_OPS["OR"]
         flags["IRET"] = 1
+    elif op == "CLR":  # empty a data word (a port): the write port resets it and the copy is vetoed
+        unit, sub = ALU_OPS["OR"]
+        flags["STORE"] = flags["CLR"] = 1
+        addr = arg
     elif op == "STORE":
         unit, sub = ALU_OPS["OR"]
         flags["STORE"], addr = 1, arg
@@ -135,6 +141,8 @@ def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None
         z = ref["z"]
         if op == "STORE":
             dmem[arg] = ref["r"]
+        elif op == "CLR":
+            dmem.pop(arg, None)
         taken = op in ("HALT", "JMP") or (op == "JZ" and z) or (op == "JNZ" and not z)
         if taken and arg == pc:
             halted = True
@@ -240,13 +248,17 @@ class Machine:
 
 
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
-                  ir_hops: int = 15, p_hops: int = 29, rd_hops: int = 33, act_hops: int = 17, next_hops: int = 12,
+                  ir_hops: int = 15, p_hops: int = 31, rd_hops: int = 35, act_hops: int = 17, next_hops: int = 12,
                   watchdog_hops: int = 170, handler_pc: int | None = None, port_out_word: int | None = None,
-                  port_in_word: int | None = None) -> Machine:
+                  port_in_word: int | None = None, timer_hops: int | None = None, status_word: int | None = None) -> Machine:
     """`handler_pc`: enables safe-point interrupts with the handler at that program word.
     `port_out_word`: a data word whose rails' rises are exported as FlyLink events (one relay
     per rail, taps in Machine.link_out_taps). `port_in_word`: a data word whose completion
-    raises the interrupt (a message arrived); the transport ignites its rails."""
+    raises the interrupt (a message arrived); the transport ignites its rails.
+    `timer_hops` + `status_word`: a send timer started by the output word's completion and
+    cancelled by the input word's completion; on expiry it writes the constant 1 into the
+    status word (all bits) and raises the interrupt, so a handler can tell a timeout (status
+    != 0) from an arrival and retransmit (STORE the output word again)."""
     drive = drive or Drive.from_params(params)
     a = max(1, (max(n_prog, n_data) - 1).bit_length())
     acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True)
@@ -261,11 +273,11 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     # instruction register: control fields
     n_ctrl = len(FLAGS) + a
     ir = [add_kill_pair(net, drive, f"IR.b{k}") for k in range(n_ctrl)]
-    ir_load, ir_store, ir_jz, ir_jnz, ir_iret = ir[:5]
-    ir_addr = ir[5:]
+    ir_load, ir_store, ir_jz, ir_jnz, ir_iret, ir_clr = ir[:6]
+    ir_addr = ir[6:]
     addr_taps = [[l.u for l in pair] for pair in ir_addr]
     jt = add_latch(net, drive, "JT")
-    sp = add_latch(net, drive, "SP")
+    sp = add_kill_pair(net, drive, "SP")  # [r0 = no store pending, r1 = pending]: a pair, so both states are rails
     # FETCH is lit by any PC line's rise
     for k, line in enumerate(pc.lines):
         rl = add_edge_relay(net, drive, f"PC.{k}.fetch", line.u)
@@ -294,20 +306,24 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     # FETCH -> COMMIT on the stage's completion; COMMIT lights the register's COMMIT token
     rl = add_edge_relay(net, drive, "FSM.ws", S.completion.u)
     net.synapse(rl, COMMIT.u, drive.ignite)
-    rl = add_edge_relay(net, drive, "FSM.commit_token", COMMIT.u)
-    net.synapse(rl, R.commit.u, drive.ignite)
-    # store pending: set during FETCH if STORE, cleared by NEXT's train
-    add_veto_relay(net, drive, "SP.set", f_rd, [ir_store[0].u], sp)
-    add_kill_train(net, drive, "SPkill", NEXT.u, [sp])
+    rl = add_edge_relay(net, drive, "FSM.commit_token", COMMIT.u, fast_inhibitor=True)
+    net.synapse(rl, R.commit_in, drive.ignite)  # one COMMIT token pulse
+    # store pending: r1 set during FETCH if STORE; r0 re-asserted at NEXT's rise
+    add_veto_relay(net, drive, "SP.set", f_rd, [ir_store[0].u], sp[1])
+    add_veto_relay(net, drive, "SP.clear", NEXT.u, [], sp[0])
     # commit done (W_M's pulse): NEXT unless a store is pending; the store write starts on it.
     # Both NEXT-lighting paths are vetoed by FETCH and NEXT: a "written" pulse from the data
     # image at power-up, or any done pulse outside COMMIT, must not advance the PC (measured:
-    # the image's completions lit NEXT at 70 ms and the PC moved under the first fetch)
-    add_veto_relay(net, drive, "FSM.done_next", R.done_relay, [sp.u, FETCH.u, NEXT.u], NEXT)
+    # the image's completions lit NEXT at 70 ms and the PC moved under the first fetch). A
+    # word written by hardware (the send timer's status word) completes without a STORE, so
+    # its "written" pulse is also vetoed by "no store pending".
+    add_veto_relay(net, drive, "FSM.done_next", R.done_relay, [sp[1].u, FETCH.u, NEXT.u], NEXT)
     wp = add_write_port(net, drive, "ST", dmem, R.done_relay, addr_taps, [[M.rails[i][0].u, M.rails[i][1].u] for i in range(n)],
-                        extra_vetoes=[ir_store[0].u])
+                        extra_vetoes=[ir_store[0].u], copy_vetoes=[S.fault_latch.u, ir_clr[1].u])
     for w, d in enumerate(wp.done):  # the word is written: NEXT
-        add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u], NEXT)
+        add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u, sp[0].u], NEXT)
+    for w, word in enumerate(dmem.words):  # a CLR is done when the word's READY fires (it stays empty)
+        add_veto_relay(net, drive, f"FSM.wclr{w}", word.ready, [FETCH.u, NEXT.u, sp[0].u, ir_clr[0].u], NEXT)
     for l in wp.domain_latches:  # COPY_w: cleared with the stage
         for x in l.members:
             net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
@@ -354,11 +370,31 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         word = dmem.words[port_out_word]
         for i in range(n):
             link_out.append([add_edge_relay(net, drive, f"LINK.out.b{i}r{r}", word.rails[i][r].u, fast_inhibitor=True) for r in (0, 1)])
+    arr = None
     if port_in_word is not None:  # FlyLink receive: the input port word's completion is an interrupt
         assert intp is not None, "port_in_word needs handler_pc (the arrival is an interrupt)"
         arr = add_edge_relay(net, drive, "LINK.in.arrive", dmem.words[port_in_word].completion.u, fast_inhibitor=True)
         net.synapse(arr, intp[1].u, drive.ignite)
-    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done, intp, handler_pc, lr, link_out, port_in_word)
+    if timer_hops is not None:  # send timer: out-word completion starts it, in-word completion cancels it
+        assert port_out_word is not None and status_word is not None and intp is not None
+        start = add_edge_relay(net, drive, "TIMER.start", dmem.words[port_out_word].completion.u, fast_inhibitor=True)
+        chain, prev = [], start
+        for k in range(timer_hops):
+            h = net.neuron(f"TIMER.h{k}")
+            net.synapse(prev, h, drive.pulse)
+            chain.append(h)
+            prev = h
+        cancel = net.neuron("TIMER.cancel_inh")  # driven by the input word's completion train (a
+        if port_in_word is not None:  # single pulse could miss the hop that is charging)
+            net.synapse(dmem.words[port_in_word].completion.u, cancel, drive.pulse)
+        for h in chain:
+            net.synapse(cancel, h, -int(round(1.5 * drive.loop)))
+        st_word = dmem.words[status_word]
+        net.synapse(prev, st_word.rails[0][1].u, drive.ignite)  # status <- 1
+        for i in range(1, n):
+            net.synapse(prev, st_word.rails[i][0].u, drive.ignite)
+        net.synapse(prev, intp[1].u, drive.ignite)
+    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp[1], wp.done, intp, handler_pc, lr, link_out, port_in_word)
 
 
 # ------------------------------------------------------------------------------ runner
@@ -380,6 +416,7 @@ def load_image(sim, m: Machine, program: list[tuple], dmem: dict | None, node: i
     for addr, v in (dmem or {}).items():
         for i, r in rails_for(v, m.n):
             sim.add_events(node, [step], [m.dmem.words[addr].rails[i][r].u], [m.drive.ignite])
+    sim.add_events(node, [step], [m.net.roles.index("SPr0.u")], [m.drive.ignite])  # "no store pending" is a rail
     if m.intp is not None:  # "no interrupt pending" and "not masked" are asserted rails, not silence
         sim.add_events(node, [step], [m.intp[0].u], [m.drive.ignite])
         mask_r0 = m.net.roles.index("MASKr0.u")
@@ -511,7 +548,9 @@ def classify_machine_run(m: Machine, ev_steps, ev_neurons, program, dmem, params
             dmem_final[k[1]] = decode(m.dmem.words[k[1]].rail_taps, s_)
     n_fault = sum(1 for _, k in rises if k[0] in ("fault", "timeout"))
     exp = [t[1] for t in ref["trace"]]
-    if any(c is not None and i < len(exp) and c != exp[i] for i, c in enumerate(commits)):
+    if any(c is None for c in commits):
+        cls = "master_fault"  # an undecodable committed word (both rails or a missing bit) is a fault, never skipped
+    elif any(c is not None and i < len(exp) and c != exp[i] for i, c in enumerate(commits)):
         cls = "wrong_value"
     elif len(commits) < len(exp):
         cls = "short"

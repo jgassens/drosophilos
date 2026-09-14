@@ -38,10 +38,6 @@ class Rail2:
         return [self.r0, self.r1]
 
 
-def swap(x: Rail2) -> Rail2:  # NOT
-    return Rail2(x.r1, x.r0)
-
-
 def add_maj_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) -> tuple[int, Latch]:
     """2-of-3 majority: each input at and_in (0.65x need): one input 4.6 mV, two 9.1 mV,
     three 13.7 mV against the 7 mV gap."""

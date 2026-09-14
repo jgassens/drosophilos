@@ -38,5 +38,6 @@ build-backend = "hatchling.build"
 packages = ["drosophilos"]
 
 [tool.pytest.ini_options]
+markers = ["slow: minutes-long neural runs; deselect with -m 'not slow'"]
 testpaths = ["tests"]
 addopts = "-q"

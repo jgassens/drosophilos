@@ -25,6 +25,9 @@ class Link:
     mapping: dict  # source neuron -> (destination neuron, quanta)
     delay_steps: int
     log: list = field(default_factory=list)  # (step, src neuron, dst neuron) packets
+    faults: dict = field(default_factory=dict)  # fault injection: {"drop": p, "dup": p, "corrupt": p, "jitter": steps}
+    rng: object = None
+    injected: list = field(default_factory=list)  # (step, kind, src neuron)
 
 
 def run_linked(sims: list, links: list[Link], n_steps: int, on_step=None) -> None:
@@ -45,19 +48,49 @@ def run_linked(sims: list, links: list[Link], n_steps: int, on_step=None) -> Non
                 if m is None:
                     continue
                 dn, q = m
-                sims[ln.dst].add_events(0, [s + ln.delay_steps], [dn], [q])
+                arrival = s + ln.delay_steps
+                if ln.faults:
+                    r = ln.rng
+                    if ln.faults.get("drop_first", 0) > 0:  # deterministic: lose the first k events
+                        ln.faults["drop_first"] -= 1
+                        ln.injected.append((s, "drop", int(n_)))
+                        continue
+                    if r is not None and r.random() < ln.faults.get("drop", 0):
+                        ln.injected.append((s, "drop", int(n_)))
+                        continue
+                    if r is not None and r.random() < ln.faults.get("corrupt", 0):  # delivered on the wrong rail
+                        dn = ln.corrupt_target(dn)
+                        ln.injected.append((s, "corrupt", int(n_)))
+                    if ln.faults.get("jitter") and r is not None:
+                        arrival += int(r.integers(0, ln.faults["jitter"] + 1))
+                    if r is not None and r.random() < ln.faults.get("dup", 0):
+                        sims[ln.dst].add_events(0, [arrival + 50], [dn], [q])
+                        ln.injected.append((s, "dup", int(n_)))
+                sims[ln.dst].add_events(0, [arrival], [dn], [q])
                 ln.log.append((s, int(n_), dn))
         if on_step is not None:
             on_step(s)
 
 
-def word_link(src_machine, dst_machine, delay_steps: int) -> Link:
+def _corrupt_target(self, dn: int) -> int:
+    """The other rail of the same destination bit (a rail-flip corruption)."""
+    return self.other_rail.get(dn, dn)
+
+
+Link.corrupt_target = _corrupt_target
+
+
+def word_link(src_machine, dst_machine, delay_steps: int, src_index: int = 0, dst_index: int = 1,
+              faults: dict | None = None, rng=None) -> Link:
     """Map the source machine's output-port relays onto the destination's input-port word
     rails, rail for rail, at the ignition drive."""
     assert src_machine.link_out_taps and dst_machine.link_in_word is not None
     word = dst_machine.dmem.words[dst_machine.link_in_word]
-    mapping = {}
+    mapping, other = {}, {}
     for i, pair in enumerate(src_machine.link_out_taps):
         for r in (0, 1):
             mapping[pair[r]] = (word.rails[i][r].u, dst_machine.drive.ignite)
-    return Link(0, 1, mapping, delay_steps)
+            other[word.rails[i][r].u] = word.rails[i][1 - r].u
+    ln = Link(src_index, dst_index, mapping, delay_steps, faults=faults or {}, rng=rng)
+    ln.other_rail = other
+    return ln

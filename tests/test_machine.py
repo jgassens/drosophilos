@@ -68,3 +68,40 @@ def test_interrupt_lands_at_safe_point_and_resumes():
     for i, k in enumerate(pcs):
         if k == 10:
             assert pcs[i + 6] == pcs[i - 1], pcs
+
+
+def test_clr_empties_a_word_and_the_machine_continues():
+    program = [("MOV", 3), ("STORE", 2), ("CLR", 2), ("MOV", 1), ("STORE", 3), ("HALT", 5)]
+    m = build_machine(PARAMS, n=4, n_prog=8, n_data=8)
+    run, sim = run_machine(m, PARAMS, program, {}, max_ms=12000)
+    final = {}
+    for _, k, v in run.writes:
+        final[k] = v
+    assert [k for _, k in run.pcs] == [0, 1, 2, 3, 4, 5], run.pcs
+    assert final == {2: 3, 3: 1} and run.halted and run.faults == 0, (final, run.faults)
+    # word 2 is empty at the end: no rail of it is active in the last 50 ms
+    ev = sim.trace.events
+    w2 = m.dmem.words[2]
+    late = ev["step"] > ev["step"].max() - 500
+    assert not any(np.isin(ev["neuron"][late], [t for pair in w2.rail_taps for t in pair])), "word 2 not emptied"
+
+
+def test_send_timer_expires_and_handler_retransmits():
+    """No link: the send times out, the handler counts the timeout, clears the status word and
+    re-sends once; after the second timeout it stops. Word 3 = counter, 4 = saved acc,
+    5 = status (written by the timer), 7 = output port."""
+    main = [("MOV", 9), ("STORE", 7), ("JMP", 3), ("JMP", 2)] + [("HALT", k) for k in range(4, 8)]
+    handler = [("STORE", 4), ("LOAD", 5), ("JZ", 19), ("LOAD", 3), ("ADD", 1), ("STORE", 3), ("CLR", 5), ("SUB", 2), ("JZ", 19),
+               ("LOAD", 4), ("STORE", 7), ("LOAD", 4), ("IRET", 0)]
+    program = main + handler + [("HALT", k) for k in range(21, 32)]
+    assert len(program) == 32 and program[19] == ("LOAD", 4)
+    m = build_machine(PARAMS, n=4, n_prog=32, n_data=8, handler_pc=8, port_out_word=7, timer_hops=300, status_word=5)
+    run, sim = run_machine(m, PARAMS, program, {3: 0}, max_ms=36000, idle_ms=6000)
+    final = {3: 0}
+    for _, k, v in run.writes:
+        final[k] = v
+    pcs = [k for _, k in run.pcs]
+    assert pcs.count(8) == 2, pcs  # the handler ran twice (two timeouts)
+    assert final[3] == 2, final  # the counter counted them
+    assert [k for _, k, _ in run.writes].count(7) == 2, run.writes  # the original send and one retransmit
+    assert run.faults == 0 and run.timeouts == 0

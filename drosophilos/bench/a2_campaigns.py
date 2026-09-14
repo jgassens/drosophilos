@@ -47,7 +47,7 @@ def register_program_fn(sc, width, commit_delay_steps):
     """Random words; one COMMIT token per word, `commit_delay_steps` after the load."""
     def f(rng, loads):
         words = [int(rng.integers(0, 1 << width)) for _ in loads]
-        events = [(t + commit_delay_steps, sc.reg.commit.u, sc.drive.ignite) for t in loads]
+        events = [(t + commit_delay_steps, sc.reg.commit_in, sc.drive.ignite) for t in loads]
         return words, list(words), events
     return f
 
@@ -67,7 +67,7 @@ def accumulator_program_fn(sc, width, commit_delay_steps):
             acc = ref["r"]
             words.append(alu_operand_word(b, op, width))
             expected.append(ref["word"])
-            events.append((t + commit_delay_steps, sc.reg.commit.u, sc.drive.ignite))
+            events.append((t + commit_delay_steps, sc.reg.commit_in, sc.drive.ignite))
         return words, expected, events
     return f
 

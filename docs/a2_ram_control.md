@@ -112,9 +112,34 @@ Five mechanisms, each found from the spike anatomy of one run and fixed on measu
    now drive their inhibitor at the head-start drive (`fast_inhibitor`), landing at 3.6 ms;
    relays that feed a latch keep the plain form, where a doublet is harmless.
 
+### 3.1 Independent review (Kimi, 2026-09-14, on `2f0f818`) and what changed
+
+| finding | fix |
+|---|---|
+| A stage fault caught **after** the grant found the master already reset: "discarded, M untouched" only held before the grant (same hole in the RAM write port) | The grant is guarded: the COMMIT token's pulse (`commit_in`) is delayed ~64 ms before it can grant, so a rail arriving up to ~60 ms after completion is refused with M untouched; the copy relays are vetoed by the fault latch, so a fault caught later leaves M empty or partial, which M's completion and fault gates turn into a fail-stop, never a silently wrong master. Both blocks. |
+| `classify_machine_run` skipped undecodable commits and could call a run with a faulted master "ok" | An undecodable committed word is `master_fault`, checked first |
+| P-fetch veto margin after a LOAD flip was 62 ms against the 55 ms rule (7 ms slack) | P fetch at +166 ms, data read at +187 (two more hops each) |
+| A fault after W_S strands the FSM in COMMIT, not FETCH as the note said | Note corrected (fail-stop in either state) |
+| Watchdog re-arm after a sustained cancel unbudgeted (~+10 ms) | Recorded; fails loud if violated |
+| Dead code and drift (`gates.swap`, `Memory.not_word`, stale docstrings) | Removed / corrected |
+
+Audited clean by the review: the ordered-gate veto tables, the Z tree-node choice, reset
+domains, power-up sequencing, encoders, simulator parity. The guard also changed how a
+COMMIT is issued: `StagedRegister.commit_in` is fired once (by the FSM's token relay or by
+the host), lighting the COMMIT latch and starting the guard; a chain fed by the latch's
+train would have re-ignited the guarded latch continuously (measured: the grant fired
+before completion).
+
 ## 4. Campaigns (mix B)
 
-CAMPAIGN_TABLE
+| block | transactions | ok | wrong values | refused / hung | non-ok observed / 95 % upper | wall |
+|---|---|---|---|---|---|---|
+| 8 × 4 data RAM, random writes and reads (every word written first) | 4,000 | 4,000 | 0 | 0 | 0 / 7.5 × 10⁻⁴ | 96 min, 3 CPU threads |
+| control machine, random 8-word programs (probe) | 10 programs / 65 instructions | 65 | 0 | 0 | 0 / — | 39 min, 4 CPU threads |
+| control machine, 200 random programs | queued on Juno (`droso-machine`, GPU and CPU copies); the local CPU run is too slow (~4 min per program) | | | | | |
+
+Before the doublet fix (§3.5) the RAM block's first 10-node probe had one node with 11
+non-ok in 20 (a word that could not hold its copy); after it, 200/200 and then 4,000/4,000.
 
 ## 5. The compiler path: DrosoC → IR → interpreter → machine
 

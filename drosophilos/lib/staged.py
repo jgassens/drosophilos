@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..protocol.celement import add_and_latched, add_veto_relay
+from ..protocol.celement import add_and_latched, add_delay_chain, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
 from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
 from ..protocol.token import decode_at, rails_for
@@ -52,10 +52,11 @@ class StagedRegister:
     grant_gate: int
     copy_gates: list
     done_relay: int
+    commit_in: int = -1  # fire this neuron once to issue COMMIT (set after construction)
 
 
 def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Register,
-                      M: Register | None = None, ordered_grant: bool = False) -> StagedRegister:
+                      M: Register | None = None, ordered_grant: bool = False, guard_hops: int = 12) -> StagedRegister:
     """Wrap consumer register S (with completion and fault latch, i.e. after wire_fault_path)
     with a master M and a commit controller. The caller must NOT wire the producer's CLEARED
     to S's reset: S is cleared by commit-done, by F, or by the producer's TIMEOUT."""
@@ -65,20 +66,34 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     assert len(M.rails) == n and S.completion is not None and S.fault_latch is not None
     W, F = S.completion, S.fault_latch
     COMMIT = add_latch(net, drive, f"{name}.commit")
+    # Guard window (review finding 2026-09-14): a late opposite rail that the fault gates
+    # catch after the grant would find M already reset, so "discarded, M untouched" only
+    # held before the grant. The grant is now delayed `guard_hops` (~64 ms) after COMMIT so
+    # a rail arriving up to ~60 ms after completion is refused before M is touched; a fault
+    # after that leaves M empty or partial, which M's own completion and fault gates make a
+    # fail-stop, never a silently wrong master.
+    # The guard carries the COMMIT token's own pulse (`commit_in`): a chain fed by the COMMIT
+    # latch's train would carry the train and re-ignite the guarded latch continuously, and a
+    # one-shot relay on the train could not re-arm within the ~85 ms between transactions.
+    commit_in = net.neuron(f"{name}.commit_in")  # the COMMIT token's entry: one pulse from the FSM or the host
+    net.synapse(commit_in, COMMIT.u, drive.ignite)
+    guard = add_delay_chain(net, drive, f"{name}.guardd", commit_in, guard_hops)
     if ordered_grant:
         # a control machine issues COMMIT only after W_S: the grant is then a veto relay
-        # (driver COMMIT, vetoed by the fault latch), with no rate-mode exposure at all
+        # (driver: the guarded pulse, vetoed by the fault latch), with no rate-mode exposure
         C = add_latch(net, drive, f"{name}.grant.L")
-        g = add_veto_relay(net, drive, f"{name}.grant", COMMIT.u, [F.u], C)
+        g = add_veto_relay(net, drive, f"{name}.grant", guard, [F.u], C)
     else:
-        g, C = add_and_latched(net, drive, f"{name}.grant", [COMMIT.u, W.u])
+        COMMIT2 = add_latch(net, drive, f"{name}.commit2")
+        net.synapse(guard, COMMIT2.u, drive.ignite)  # the guarded COMMIT as a standard-rate train
+        g, C = add_and_latched(net, drive, f"{name}.grant", [COMMIT2.u, W.u])
     connect_trigger(net, drive, C.u, M.reset_trigger, M.reset_edge)  # granted -> clear M
     COPY = add_latch(net, drive, f"{name}.copy")
     net.synapse(M.ready, COPY.u, drive.ignite)  # M empty and recovered -> copy enable
     copy_gates = []  # veto relays: COPY's rise ignites M rail r unless the stage holds rail 1-r
     for i in range(n):  # (a rate-mode AND(COPY, S rail) sat on COPY alone for ~100 ms per commit and
         for r in (0, 1):  # leaked in nodes whose COPY latch ran fast: master faults, 2 per 5,000)
-            copy_gates.append(add_veto_relay(net, drive, f"{name}.cp{i}r{r}", COPY.u, [S.rails[i][1 - r].u], M.rails[i][r]))
+            copy_gates.append(add_veto_relay(net, drive, f"{name}.cp{i}r{r}", COPY.u, [S.rails[i][1 - r].u, F.u], M.rails[i][r]))
     # commit done = W_M's first spike, through an edge relay as a single pulse: W_M then holds
     # for as long as M is valid, and a train into the stage's edge-detected reset trigger would
     # hold that trigger down and block the F / TIMEOUT discards
@@ -92,13 +107,15 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     if P.watchdog is not None:
         connect_trigger(net, drive, P.watchdog.timeout.u, S.reset_trigger, S.reset_edge)
     q = -int(round(0.75 * drive.loop))
-    for l in (COMMIT, C, COPY):
+    for l in (COMMIT, C, COPY) + (() if ordered_grant else (COMMIT2,)):
         for x in l.members:
             net.synapse(S.reset_inh, x, q)
     if not ordered_grant:
         net.synapse(S.reset_inh, g, q)
     net.group(f"{name}.master_taps", [t for pair in M.rail_taps for t in pair])
-    return StagedRegister(S, M, COMMIT, C, COPY, g, copy_gates, done)
+    sr = StagedRegister(S, M, COMMIT, C, COPY, g, copy_gates, done)
+    sr.commit_in = commit_in
+    return sr
 
 
 @dataclass
@@ -236,7 +253,7 @@ def run_commits(sc: StagedChannel, params: Params, words: list[int], expected: l
         rec = CommitRecord(w, expected[k], load_step, None)
         if delays[k] is not None:
             rec.commit_inject_step = load_step + int(delays[k])
-            sim.add_events(0, [rec.commit_inject_step], [R.commit.u], [drive.ignite])
+            sim.add_events(0, [rec.commit_inject_step], [R.commit_in], [drive.ignite])
         for spec in faults.get(k, []):
             if spec[0] == "corrupt":
                 i = spec[1]
@@ -247,7 +264,7 @@ def run_commits(sc: StagedChannel, params: Params, words: list[int], expected: l
                 rec.injected.append(("corrupt", i, r, t))
             elif spec[0] == "duplicate_commit":
                 t = rec.commit_inject_step + int(spec[1])
-                sim.add_events(0, [t], [R.commit.u], [drive.ignite])
+                sim.add_events(0, [t], [R.commit_in], [drive.ignite])
                 rec.injected.append(("duplicate_commit", t))
         first_fault = None
         ev0 = sim.trace.events
