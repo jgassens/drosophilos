@@ -59,6 +59,29 @@ data words.
 and decodes every committed word, PC rise and written word; `random_program` draws programs
 the reference halts within 20 instructions with every LOAD reading a written word.
 
+Two later additions, encoder-only for the datapath: memory operands for every ALU op
+(`ADDM [a]` etc.: the LOAD flag routes B from the data RAM for any unit) and `JMP t` (JZ
+and JNZ both set).
+
+### 2.1 Safe-point interrupts
+
+`build_machine(handler_pc=k)` adds: an interrupt-pending kill pair INTP (the host ignites
+rail 1; rail 0 = "none pending" is asserted at power-up, not left dark), a MASK pair, a link
+ring LR of one line per program word, and two decision latches at NEXT. The safe point is
+NEXT: the accumulator is committed and any store has completed. IT = relay(driver NEXT, vetoes
+INTP.r0, MASK.r1, IR.IRET.r1) lights when an interrupt is pending; 64 ms later the lit PC
+line is copied into LR (one relay per line vetoed by the other lines), INTP.r0 and MASK.r1
+are set, and the handler's PC line is lit. The handler ends with `IRET`: IRT = relay(driver
+NEXT, veto IR.IRET.r0) copies the lit LR line back into the PC and clears MASK. The ordinary
+increment and jump relays are vetoed by IT and IRT. An interrupt arriving within ~55 ms of a
+NEXT waits for the next one (the veto-residual rule), which is the intended bounded latency.
+
+Measured: two interrupts during a countdown loop are taken after instructions 2 and 5, the
+handler (save acc, increment a counter, restore acc, IRET) runs twice, returns to the
+interrupted word each time, and the main program's result is unchanged: the final memory
+equals the reference with interrupts at those indices, word for word (`tests/test_machine.py`).
+Cost for 16 program words: ~250 neurons.
+
 ## 3. What the composition exposed
 
 Five mechanisms, each found from the spike anatomy of one run and fixed on measurement.
@@ -93,7 +116,35 @@ Five mechanisms, each found from the spike anatomy of one run and fixed on measu
 
 CAMPAIGN_TABLE
 
-## 5. Costs, and what the machine is not yet
+## 5. The compiler path: DrosoC → IR → interpreter → machine
+
+`compiler/frontend_c.py` (pycparser) accepts the v0 DrosoC subset: one scalar width
+(`u8`…), static globals, `void f(void)` functions without recursion, `if`/`else`, `while`,
+`+ - & | ^` with nested temporaries, `== 0`/`!= 0`/`a == b`, `x = in_read()` and
+`out_pixel(e)` as ports. `isa/ir.py` is the three-address IR and its interpreter (the
+executable oracle, on `isa/semantics`). `compiler/lower.py` lowers to the accumulator
+machine: `dst = a op b` → `LOAD a; OP b | OPM [b]; STORE dst`; a branch → `LOAD v; JZ/JNZ`
+(a LOAD commits Z = (v == 0)); calls inlined (bounded, no recursion); ports memory-mapped;
+HALT = JMP self. `compiler/golden.py` compiles the same source with clang and UBSan into a
+harness that prints the canonical state (declared statics in declaration order) and the
+emitted pixels.
+
+Three-way comparison on a program that reads an input, sums in a loop through a call,
+masks, branches, stores and emits a pixel (17 IR ops, 31 machine words, 6 data words):
+C reference, IR interpreter and the lowered program's machine reference agree on the
+canonical state and the pixel for four fresh inputs (`tests/test_compiler.py`). The neural
+run of the same program on machine v1 (8-bit, 32 program words, 12,450 neurons) is
+COMPILED_NEURAL.
+
+`bench/capacity.py` produces the whole-program capacity report the plan requires before any
+run above 4 nodes: for this program, 713 program-image bits, 59 live state bits, one ALU,
+neurons by class (7,392 program image, 2,048 data memory, 1,449 ALU, 782 control, 779
+registers and handshake), and a critical path of 55 instructions ≈ 58 s of neural time for
+input 4. The program image is the cost driver: ~230 neurons per instruction word (two
+latches per bit plus a fetch relay per bit), which is what a resident-kernel (spatial
+dataflow) design avoids and what sets the direction for Stage B's resource sharing.
+
+## 6. Costs, and what the machine is not yet
 
 An instruction costs about one second, of which ~180 ms is fetch spacing imposed by veto
 residuals, ~400 ms the ALU, ~300 ms the commit and ~70 ms the PC update. Four fifths of the

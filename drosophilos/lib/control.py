@@ -12,9 +12,12 @@
 
 Instruction word (IMEM bit order): B[n] | U[5] one-hot | SUB | LOAD | STORE | JZ | JNZ | ADDR[a]
     MOV/ADD/SUB/AND/OR/XOR imm     the ALU op on (acc, imm)
+    ADDM/SUBM/ANDM/ORM/XORM [a]     the ALU op on (acc, DMEM[a])  (the LOAD flag routes B)
     LOAD [a]                        acc <- DMEM[a]   (U = PASSB, B from the read port)
+    JMP t                           PC <- t  (JZ and JNZ both set)
     STORE [a]                       DMEM[a] <- acc   (U = OR, B = 0: acc unchanged, Z updated)
     JZ t / JNZ t                    PC <- t if Z / if not Z  (U = OR, B = 0)
+    IRET                            PC <- the link ring (return from the interrupt handler)
     HALT                            JZ self and JNZ self
 Every instruction runs the ALU and commits the accumulator.
 
@@ -56,7 +59,7 @@ from .ram import Memory, add_memory, add_read_port, add_write_port, address_veto
 from .staged import StagedChannel, build_accumulator
 
 # ------------------------------------------------------------------------------ ISA
-FLAGS = ("LOAD", "STORE", "JZ", "JNZ")
+FLAGS = ("LOAD", "STORE", "JZ", "JNZ", "IRET")
 
 
 def encode(instr: tuple, n: int, a: int) -> int:
@@ -69,9 +72,19 @@ def encode(instr: tuple, n: int, a: int) -> int:
     if op in ALU_OPS:
         unit, sub = ALU_OPS[op]
         b = arg & ((1 << n) - 1)
+    elif op.endswith("M") and op[:-1] in ALU_OPS:  # ADDM [a] etc.: B from data memory (the LOAD flag)
+        unit, sub = ALU_OPS[op[:-1]]
+        flags["LOAD"], addr = 1, arg
     elif op == "LOAD":
         unit, sub = ALU_OPS["MOV"]
         flags["LOAD"], addr = 1, arg
+    elif op == "JMP":
+        unit, sub = ALU_OPS["OR"]
+        flags["JZ"] = flags["JNZ"] = 1
+        addr = arg
+    elif op == "IRET":
+        unit, sub = ALU_OPS["OR"]
+        flags["IRET"] = 1
     elif op == "STORE":
         unit, sub = ALU_OPS["OR"]
         flags["STORE"], addr = 1, arg
@@ -95,35 +108,44 @@ def word_bits(n: int, a: int) -> int:
     return n + N_UNITS + 1 + len(FLAGS) + a
 
 
-def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None, max_steps: int = 64) -> dict:
+def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None, max_steps: int = 64,
+                  interrupts_after: list[int] = (), handler_pc: int | None = None) -> dict:
     """Executes the program in Python: returns the trace of (pc, acc word) after each committed
-    instruction, the final DMEM, and whether it halted."""
+    instruction, the final DMEM, and whether it halted. `interrupts_after`: execution indices
+    after which an interrupt is taken at the safe point (PC saved, jump to `handler_pc`; the
+    handler's IRET returns); nested interrupts are masked until IRET."""
     dmem = dict(dmem or {})
     acc = None  # not preloaded
     pc, trace, halted = 0, [], False
+    link, masked = None, False
+    pending = sorted(interrupts_after)
     for _ in range(max_steps):
         op, arg = program[pc]
         a_val = 0 if acc is None else acc & ((1 << n) - 1)
         if op in ALU_OPS:
             ref = alu_reference(a_val, arg, op, n)
-        elif op == "LOAD":
+        elif op == "LOAD" or (op.endswith("M") and op[:-1] in ALU_OPS):
             if arg not in dmem:
                 return {"trace": trace, "dmem": dmem, "halted": False, "fault": ("unwritten read", pc)}
-            ref = alu_reference(a_val, dmem[arg], "MOV", n)
-        else:  # STORE, JZ, JNZ, HALT: OR 0
+            ref = alu_reference(a_val, dmem[arg], "MOV" if op == "LOAD" else op[:-1], n)
+        else:  # STORE, JZ, JNZ, JMP, HALT: OR 0
             ref = alu_reference(a_val, 0, "OR", n)
         acc = ref["word"]
         trace.append((pc, acc))
         z = ref["z"]
         if op == "STORE":
             dmem[arg] = ref["r"]
-        if op == "HALT" or (op == "JZ" and z and arg == pc) or (op == "JNZ" and not z and arg == pc):
+        taken = op in ("HALT", "JMP") or (op == "JZ" and z) or (op == "JNZ" and not z)
+        if taken and arg == pc:
             halted = True
             break
-        if (op == "JZ" and z) or (op == "JNZ" and not z) or (op == "HALT"):
-            pc = arg
+        if op == "IRET":
+            pc, masked = link, False
         else:
-            pc = (pc + 1) % len(program)
+            pc = arg if taken else (pc + 1) % len(program)
+        if pending and len(trace) - 1 >= pending[0] and not masked and handler_pc is not None:
+            pending.pop(0)
+            link, masked, pc = pc, True, handler_pc
     return {"trace": trace, "dmem": dmem, "halted": halted, "fault": None}
 
 
@@ -198,6 +220,9 @@ class Machine:
     jt: Latch
     sp: Latch
     wdone: list = field(default_factory=list)
+    intp: list | None = None  # interrupt pending kill pair [r0, r1]; the host ignites r1
+    handler_pc: int | None = None
+    lr: Ring | None = None
 
     @property
     def fetch(self) -> Latch:
@@ -214,7 +239,8 @@ class Machine:
 
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
                   ir_hops: int = 15, p_hops: int = 29, rd_hops: int = 33, act_hops: int = 17, next_hops: int = 12,
-                  watchdog_hops: int = 170) -> Machine:
+                  watchdog_hops: int = 170, handler_pc: int | None = None) -> Machine:
+    """`handler_pc`: enables safe-point interrupts with the handler at that program word."""
     drive = drive or Drive.from_params(params)
     a = max(1, (max(n_prog, n_data) - 1).bit_length())
     acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True)
@@ -229,8 +255,8 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     # instruction register: control fields
     n_ctrl = len(FLAGS) + a
     ir = [add_kill_pair(net, drive, f"IR.b{k}") for k in range(n_ctrl)]
-    ir_load, ir_store, ir_jz, ir_jnz = ir[:4]
-    ir_addr = ir[4:]
+    ir_load, ir_store, ir_jz, ir_jnz, ir_iret = ir[:5]
+    ir_addr = ir[5:]
     addr_taps = [[l.u for l in pair] for pair in ir_addr]
     jt = add_latch(net, drive, "JT")
     sp = add_latch(net, drive, "SP")
@@ -284,13 +310,40 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     add_veto_relay(net, drive, "JT.z", NEXT.u, [ir_jz[0].u, z0], jt)
     add_veto_relay(net, drive, "JT.nz", NEXT.u, [ir_jnz[0].u, z1], jt)
     nx = add_delay_chain(net, drive, "NEXT.d", NEXT.u, next_hops)
+    # interrupts (safe point = NEXT, after the commit and any store)
+    intp = mask = lr = None
+    it = irt = None
+    extra_pc_vetoes = []
+    if handler_pc is not None:
+        intp = add_kill_pair(net, drive, "INTP")  # r1 = pending (host), r0 = none
+        mask = add_kill_pair(net, drive, "MASK")  # r1 = in the handler
+        lr = add_onehot_ring(net, drive, "LR", n_prog)
+        it = add_latch(net, drive, "IT")  # interrupt taken this NEXT
+        irt = add_latch(net, drive, "IRT")  # IRET taken this NEXT
+        add_kill_train(net, drive, "ITkill", FETCH.u, [it, irt])
+        add_veto_relay(net, drive, "IT.take", NEXT.u, [intp[0].u, mask[1].u, ir_iret[1].u], it)
+        add_veto_relay(net, drive, "IRT.take", NEXT.u, [ir_iret[0].u], irt)
+        itd = add_delay_chain(net, drive, "IT.d", it.u, next_hops)
+        for w in range(n_prog):  # save the lit PC line into LR, then jump to the handler
+            others = [pc.lines[j].u for j in range(n_prog) if j != w]
+            add_veto_relay(net, drive, f"LR.save{w}", itd, others, lr.lines[w])
+        itd2 = add_delay_chain(net, drive, "IT.d2", itd, 3)
+        add_veto_relay(net, drive, "PC.handler", itd2, [], pc.lines[handler_pc])
+        add_veto_relay(net, drive, "INTP.clear", itd, [], intp[0])  # taken: no longer pending
+        add_veto_relay(net, drive, "MASK.set", itd, [], mask[1])
+        irtd = add_delay_chain(net, drive, "IRT.d", irt.u, next_hops)
+        for w in range(n_prog):  # return: the lit LR line -> PC line
+            others = [lr.lines[j].u for j in range(n_prog) if j != w]
+            add_veto_relay(net, drive, f"PC.ret{w}", irtd, others, pc.lines[w])
+        add_veto_relay(net, drive, "MASK.clear", irtd, [], mask[0])
+        extra_pc_vetoes = [it.u, irt.u]
     for w in range(n_prog):  # increment: line w lit and no jump -> line w+1
         others = [pc.lines[j].u for j in range(n_prog) if j != w]
-        add_veto_relay(net, drive, f"PC.inc{w}", nx, others + [jt.u], pc.lines[(w + 1) % n_prog])
+        add_veto_relay(net, drive, f"PC.inc{w}", nx, others + [jt.u] + extra_pc_vetoes, pc.lines[(w + 1) % n_prog])
     jd = add_delay_chain(net, drive, "JT.d", jt.u, next_hops)
     for t in range(n_prog):  # jump: target t
-        add_veto_relay(net, drive, f"PC.jmp{t}", jd, address_vetoes(addr_taps, t), pc.lines[t])
-    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done)
+        add_veto_relay(net, drive, f"PC.jmp{t}", jd, address_vetoes(addr_taps, t) + extra_pc_vetoes, pc.lines[t])
+    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done, intp, handler_pc, lr)
 
 
 # ------------------------------------------------------------------------------ runner
@@ -312,16 +365,23 @@ def load_image(sim, m: Machine, program: list[tuple], dmem: dict | None, node: i
     for addr, v in (dmem or {}).items():
         for i, r in rails_for(v, m.n):
             sim.add_events(node, [step], [m.dmem.words[addr].rails[i][r].u], [m.drive.ignite])
+    if m.intp is not None:  # "no interrupt pending" and "not masked" are asserted rails, not silence
+        sim.add_events(node, [step], [m.intp[0].u], [m.drive.ignite])
+        mask_r0 = m.net.roles.index("MASKr0.u")
+        sim.add_events(node, [step], [mask_r0], [m.drive.ignite])
     sim.add_events(node, [step + 20], [m.pc.lines[0].u], [m.drive.ignite])  # FETCH is lit before the image completes
 
 
 def run_machine(m: Machine, params: Params, program: list[tuple], dmem: dict | None = None, *, max_ms: float = 20000,
-                idle_ms: float = 1500, sim=None) -> tuple[MachineRun, RefSim]:
+                idle_ms: float = 1500, sim=None, interrupts_at_ms: list[float] = ()) -> tuple[MachineRun, RefSim]:
     """Loads the image, lights PC line 0, and runs until no commit and no PC rise for `idle_ms`
-    (halt) or `max_ms`. Decodes the master at every W_M re-ignition and each written word."""
+    (halt) or `max_ms`. Decodes the master at every W_M re-ignition and each written word.
+    `interrupts_at_ms`: times at which the host ignites the interrupt-pending rail."""
     net, drive = m.net, m.drive
     sim = sim or RefSim(net.topology(), params)
     load_image(sim, m, program, dmem)
+    for t in interrupts_at_ms:
+        sim.add_events(0, [int(t / params.dt)], [m.intp[1].u], [drive.ignite])
     M = m.acc.reg.master
     wm = M.completion.u
     window = 2 * drive.loop_period_steps
