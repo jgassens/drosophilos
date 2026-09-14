@@ -5,13 +5,21 @@ H0 report), not from assumptions:
   single-pulse need  : one synchronous input that just reaches threshold
   loop               : 1.4x that, regenerates a circulating spike (period ~4.7 ms)
   pulse              : same as loop; "each spike alone fires the target"
-  and_in             : 0.75x the sustained-train need; one 213 Hz latch train stays below
-                       threshold (75 % of the gap), two cross it with margin for -10 % weights
-                       and -10 % rate (0.65x failed the 5 % weight-noise campaign)
+  and_in             : 0.65x the sustained-train need per input: one live input at 65 % of
+                       the gap, two at 1.3x. Measured window with doublet-free ignition
+                       (latch rates 195-236 Hz): 0.75 leaks one-input false positives in
+                       long-exposure gates (adder 4 %), 0.70/0.68 still leak a few, 0.65 is
+                       clean on 2,000 perturbed additions and transports; 0.55 (1.1x) fails
+                       to fire under noise. Earlier, 0.65 failed only because 2x ignition
+                       doublets pushed latch rates to +22 %.
   or_in              : 2x the sustained-train need; one train suffices
   reset              : -1.5x loop, delivered to BOTH latch members by a single spike
-  ignite             : 2x loop; a latch just reset sits several mV below rest for tens of
-                       ms (tau_m = 20 ms), and a 1.4x pulse then lands exactly at threshold
+  ignite             : 1.8x need (~1.29x loop), the largest doublet-free pulse. It was 2x loop
+                       to beat the post-reset hangover at READY, but that made ignition a
+                       doublet, a latch then carries two spikes for a while, and every
+                       rate-mode gate reading it sees up to +22 %: one-input ANDs fired
+                       (~14 % of perturbed 4-bit additions). With the 15-hop READY chain the
+                       hangover at READY is negligible and 1.8x need suffices.
 """
 
 from __future__ import annotations
@@ -34,11 +42,12 @@ class Drive:
     or_in: int
     reset: int
     loop_period_steps: int
-    ignite: int = 0  # 2x loop: ignition pulse that reaches threshold even ~10 mV below rest
+    ignite: int = 0  # 1.8x need: the largest doublet-free ignition pulse. 2x loop produced a doublet
+                     # and a latch briefly carrying two spikes read as +22 % rate to its gates
     relay_in: int = 0  # 1.8x need (~1.29x loop): edge relays fire ~1.8 ms after the source, >= 2 ms before their inhibitor lands; doublet-free below ~1.9x
 
     @classmethod
-    def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.75, or_margin=2.0, reset_factor=1.5) -> "Drive":
+    def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.65, or_margin=2.0, reset_factor=1.5) -> "Drive":
         from ..connectome.embed_h0 import loop_period_steps, needed_quanta
 
         nq = needed_quanta(params)
@@ -48,7 +57,7 @@ class Drive:
         rate_need = gap * (period * params.dt) / (params.w_unit * params.tau_s)
         return cls(nq, rate_need, loop, loop, int(math.ceil(and_fraction * rate_need)),
                    int(math.ceil(or_margin * rate_need)), -int(math.ceil(reset_factor * loop)), period,
-                   ignite=2 * loop, relay_in=int(math.ceil(1.8 * nq)))
+                   ignite=int(math.ceil(1.8 * nq)), relay_in=int(math.ceil(1.8 * nq)))
 
 
 @dataclass

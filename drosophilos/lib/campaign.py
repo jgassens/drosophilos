@@ -114,7 +114,16 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
         if cls == "ok" and len(stale_ns) and np.isin(nu, stale_ns).any():
             cls = "ok_stale_retry"
         if cls not in ("ok", "late_activity") and debug is not None:
-            debug.append((cls, {"n_spikes_in_window": int(m.sum()), "accept": acc_lat}))
+            # which neurons were active in the last 40 ms before the end of the window (or
+            # around the first fault spike): translated to roles by the caller
+            if cls == "fault":
+                f_st = st[np.isin(nu, faults)]
+                t_ref = int(f_st[0]) if len(f_st) else int(hi) - 1
+            else:
+                t_ref = int(hi) - 1
+            act = nu[(st > t_ref - 400) & (st <= t_ref)]
+            debug.append((cls, {"n_spikes_in_window": int(m.sum()), "accept": acc_lat, "t_ref_ms": (t_ref - lo) * 0.1,
+                                "active": sorted(set(act.tolist()))}))
         out.append((cls, acc_lat, int(m.sum())))
     return out
 
@@ -192,6 +201,9 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
                                loads.tolist(), expected[b].tolist(), window, dbg, timeout_n, stale_ns)
             if dbg:
                 for cls_, det in dbg:
+                    if isinstance(det, dict) and "active" in det:
+                        det = dict(det, active=[net.roles[n_] for n_ in det["active"]
+                                                if net.roles[n_].endswith((".L.u", ".u")) and not net.roles[n_].endswith(".v")])
                     if isinstance(det, list):
                         # control signals before READY, everything after it
                         det = [(round(d * params.dt, 1), net.roles[n_]) for d, n_ in det

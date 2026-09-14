@@ -11,7 +11,10 @@ from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
 
 
-def extend_reset(net: Netlist, drive: Drive, reg, latches, gates, strength: float = 0.5) -> None:
+def extend_reset(net: Netlist, drive: Drive, reg, latches, gates, strength: float = 0.75) -> None:
+    """Adder-internal latches join the consumer's reset domain at the same 0.75x per pulse as
+    every other latch (0.5x, the old default, let +10 % loops survive: stale carries and XOR
+    stages, wrong sums and both-rail faults in ~25 % of perturbed additions)."""
     q = -int(round(strength * drive.loop))
     for l in latches:
         for x in l.members:
