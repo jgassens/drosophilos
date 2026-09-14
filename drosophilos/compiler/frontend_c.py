@@ -14,6 +14,8 @@ Runtime intrinsics `in_read()` and `out_pixel()` are ports, not calls.
 
 from __future__ import annotations
 
+import re
+
 from pycparser import c_ast, c_parser
 
 from ..isa.ir import Instr, Program
@@ -39,6 +41,8 @@ class Compiler:
 
     # ---------------------------------------------------------------- program
     def compile(self, source: str, width_hint: int | None = None) -> Program:
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)  # pycparser takes no comments
+        source = re.sub(r"//[^\n]*", "", source)
         ast = c_parser.CParser().parse(PRELUDE + source)
         globals_, funcs = [], []
         for ext in ast.ext:
@@ -54,6 +58,7 @@ class Compiler:
         for d in globals_:
             widths.add(self._width(d.type))
         width = width_hint or (widths.pop() if len(widths) == 1 else 8)
+        widths.discard(width)
         if widths and any(w_ != width for w_ in widths):
             raise Unsupported("all variables must share one width in v0")
         self.prog = Program(width=width)
@@ -93,6 +98,8 @@ class Compiler:
     def _const(self, node) -> int:
         if isinstance(node, c_ast.Constant) and node.type == "int":
             return int(node.value, 0)
+        if isinstance(node, c_ast.Constant) and node.type == "char":
+            return ord(node.value.strip("'").encode().decode("unicode_escape"))
         if isinstance(node, c_ast.UnaryOp) and node.op == "-":
             return -self._const(node.expr)
         raise Unsupported("constant expected")
@@ -129,8 +136,12 @@ class Compiler:
         elif isinstance(node, c_ast.FuncCall):
             name = node.name.name
             if name == "out_pixel":
-                src = self._expr(node.args.exprs[0])
-                self.body.append(Instr("OUT", srcs=(src,)))
+                arg = node.args.exprs[0]
+                if isinstance(arg, c_ast.Constant):
+                    self.body.append(Instr("OUT", imm=self._const(arg)))  # constant pixel: no temporary
+                else:
+                    src = self._expr(arg)
+                    self.body.append(Instr("OUT", srcs=(src,)))
             elif name == "in_read":
                 raise Unsupported("in_read() result must be assigned")
             else:

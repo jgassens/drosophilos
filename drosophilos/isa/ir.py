@@ -127,7 +127,7 @@ def interpret(prog: Program, inputs: list[int], max_steps: int = 10000) -> dict:
                 raise RuntimeError("IN with no input available")
             mem[prog.variables[ins.dst]] = inputs.pop(0) & mask
         elif ins.op == "OUT":
-            outs.append(rd(ins.srcs[0]))
+            outs.append(ins.imm & mask if ins.imm is not None else rd(ins.srcs[0]))
         elif ins.op == "HALT":
             halted = True
             break

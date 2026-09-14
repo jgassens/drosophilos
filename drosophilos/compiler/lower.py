@@ -57,7 +57,11 @@ def lower(prog: Program) -> list[tuple]:
             elif op == "IN":
                 emit("LOAD", prog.ports["in"]); emit("STORE", addr(ins.dst))
             elif op == "OUT":
-                emit("LOAD", addr(ins.srcs[0])); emit("STORE", prog.ports["out"])
+                if ins.imm is not None:
+                    emit("MOV", ins.imm & ((1 << prog.width) - 1))
+                else:
+                    emit("LOAD", addr(ins.srcs[0]))
+                emit("STORE", prog.ports["out"])
             elif op == "CALL":
                 inline_id[0] += 1
                 body(ins.target, f"{suffix}@{inline_id[0]}")

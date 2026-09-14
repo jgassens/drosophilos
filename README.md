@@ -81,7 +81,12 @@ uv run pytest
 - **Data RAM and control machine done.** Word masters with veto-relay decoding (exact, no
   threshold margin); a one-hot sequencer that executes an 8-word program held in neural
   memory (MOV/ADD/SUB/AND/OR/XOR, LOAD, STORE, JZ/JNZ, HALT) with the accumulator and the
-  RAM, checked instruction by instruction against a Python reference. MACHINE_README
+  RAM, checked instruction by instruction against a Python reference. Safe-point interrupts; a compiler path (DrosoC → IR → interpreter → machine,
+  checked against a clang/UBSan golden reference) with a compiled program running on the
+  neural machine; a capacity report.
   Notes: `docs/a2_ram_control.md`.
+
+- **Stage C started.** FlyLink transport between simulated nodes; two machines: A computes
+  and sends, B's arrival interrupt computes and emits the pixel (`docs/stage_c_flylink.md`).
 
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).
