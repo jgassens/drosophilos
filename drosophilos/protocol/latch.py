@@ -67,7 +67,7 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
 
 
 def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),
-                   hold_strength: float = 0.25) -> int:
+                   hold_strength: float = 0.25, fast_inhibitor: bool = False) -> int:
     """A relay that fires exactly once per activation of `source`, however long the source's
     train lasts (feed-forward inhibition from the same source). Used so that DATA and gate
     outputs ignite a latch once instead of driving it continuously, which would push the
@@ -98,7 +98,14 @@ def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength:
     relay = net.neuron(f"{name}.edge")
     inh = net.neuron(f"{name}.edge_inh")
     net.synapse(source, relay, drive.relay_in)
-    net.synapse(source, inh, drive.pulse)
+    # `fast_inhibitor`: the inhibitor gets the relay's own head-start drive, so its pulse lands
+    # ~3.6 ms after the source's first spike instead of ~5.3 ms. With the plain pulse drive the
+    # source train's second spike (4.7 ms, less at fast nodes) can cross before the inhibition
+    # lands and the relay fires a doublet (measured on a RAM word-select: two pulses 3.6 ms
+    # apart into an edge-detected reset trigger stacked three reset trains and the word could
+    # not hold the copy). A doublet into a latch is harmless, so this is used where the target
+    # is a trigger. The relay still wins the head-start race by ~1.8 ms nominal.
+    net.synapse(source, inh, drive.relay_in if fast_inhibitor else drive.pulse)
     net.synapse(inh, relay, -int(round(strength * drive.loop)))
     if hold_from:
         hinh = net.neuron(f"{name}.hold_inh")

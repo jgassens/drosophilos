@@ -1,0 +1,473 @@
+"""Control machine v0: a one-hot sequencer that executes a program held in neural memory
+(plan §A2/B: control FSM, program image).
+
+    IMEM   n_prog words x 17 dual-rail bits, latch-only (the host loads the program image once)
+    PC     one-hot ring of n_prog lines; a newly lit line's rise kills the others
+    FSM    one-hot ring FETCH -> COMMIT -> NEXT -> FETCH; a state's rise kills the others
+    ACC    the accumulator (ALU + stage + master) with an ordered grant
+    IR     the instruction's control fields (LOAD, STORE, JZ, JNZ, ADDR) as kill pairs (each
+           bit's two rail latches kill each other), re-loaded from IMEM 32 ms after FETCH
+    DMEM   data RAM (lib/ram.py) with a read port into the ALU's B rails and a write port
+           from the accumulator
+
+Instruction word (IMEM bit order): B[n] | U[5] one-hot | SUB | LOAD | STORE | JZ | JNZ | ADDR[a]
+    MOV/ADD/SUB/AND/OR/XOR imm     the ALU op on (acc, imm)
+    LOAD [a]                        acc <- DMEM[a]   (U = PASSB, B from the read port)
+    STORE [a]                       DMEM[a] <- acc   (U = OR, B = 0: acc unchanged, Z updated)
+    JZ t / JNZ t                    PC <- t if Z / if not Z  (U = OR, B = 0)
+    HALT                            JZ self and JNZ self
+Every instruction runs the ALU and commits the accumulator.
+
+Cycle (times from FETCH's rise, clean model):
+    +0    FETCH lit by the PC line's rise; kill train on JT; the old PC line dies at ~+8
+    +82   IR <- IMEM[PC] control fields   (fetch relays driven by FETCH delayed 15 hops: the
+          old PC line's "not this word" veto needs ~55 ms to decay before a fetch relay can
+          fire; measured: at +34 the IR never loaded and every flag stayed 0)
+    +156  P  <- IMEM[PC] B/U/SUB          (FETCH delayed 29 hops; B vetoed by IR.LOAD, whose
+          other rail may have died at +95: a relay must be driven >= 55 ms after any veto
+          rail dies, or the veto's residual blocks it)
+    +177  P.B <- DMEM[ADDR] if LOAD; SP set if STORE   (FETCH delayed 33 hops)
+    ~+560 stage complete (W_S) -> COMMIT lit -> grant -> master rewritten -> W_M
+    W_M's pulse: stage cleared; STORE write started; NEXT lit (unless a store is pending,
+    in which case the word's "written" pulse lights NEXT)
+    NEXT: JT (jump taken) from IR and the master's Z; 64 ms later the PC advances or jumps;
+    the new PC line's rise lights FETCH. A jump to the lit line makes no rise: HALT.
+
+Faults: a refused instruction (stage fault or watchdog) clears P and the stage and leaves the
+FSM in FETCH: the machine halts (fail-stop); recovery is later work. The master is not
+preloaded (its W_M rise would advance the PC); programs start with MOV or LOAD.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from ..protocol.celement import add_delay_chain, add_veto_neuron, add_veto_relay
+from ..protocol.handshake import Register
+from ..protocol.latch import Latch, add_edge_relay, add_latch
+from ..protocol.token import decode_at, rails_for
+from ..sim.model import Params
+from ..sim.ref64 import RefSim
+from .alu import N_UNITS, OPS as ALU_OPS, alu_reference
+from .netlist import Drive, Netlist
+from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
+from .staged import StagedChannel, build_accumulator
+
+# ------------------------------------------------------------------------------ ISA
+FLAGS = ("LOAD", "STORE", "JZ", "JNZ")
+
+
+def encode(instr: tuple, n: int, a: int) -> int:
+    """(op, arg) -> IMEM word. op in MOV ADD SUB AND OR XOR LOAD STORE JZ JNZ HALT; HALT takes
+    its own address as arg."""
+    op, arg = instr
+    b = unit = sub = 0
+    flags = {f: 0 for f in FLAGS}
+    addr = 0
+    if op in ALU_OPS:
+        unit, sub = ALU_OPS[op]
+        b = arg & ((1 << n) - 1)
+    elif op == "LOAD":
+        unit, sub = ALU_OPS["MOV"]
+        flags["LOAD"], addr = 1, arg
+    elif op == "STORE":
+        unit, sub = ALU_OPS["OR"]
+        flags["STORE"], addr = 1, arg
+    elif op in ("JZ", "JNZ"):
+        unit, sub = ALU_OPS["OR"]
+        flags[op], addr = 1, arg
+    elif op == "HALT":
+        unit, sub = ALU_OPS["OR"]
+        flags["JZ"] = flags["JNZ"] = 1
+        addr = arg
+    else:
+        raise ValueError(op)
+    w = b | (1 << (n + unit)) | (sub << (n + N_UNITS))
+    for k, f in enumerate(FLAGS):
+        w |= flags[f] << (n + N_UNITS + 1 + k)
+    w |= (addr & ((1 << a) - 1)) << (n + N_UNITS + 1 + len(FLAGS))
+    return w
+
+
+def word_bits(n: int, a: int) -> int:
+    return n + N_UNITS + 1 + len(FLAGS) + a
+
+
+def reference_run(program: list[tuple], n: int, a: int, dmem: dict | None = None, max_steps: int = 64) -> dict:
+    """Executes the program in Python: returns the trace of (pc, acc word) after each committed
+    instruction, the final DMEM, and whether it halted."""
+    dmem = dict(dmem or {})
+    acc = None  # not preloaded
+    pc, trace, halted = 0, [], False
+    for _ in range(max_steps):
+        op, arg = program[pc]
+        a_val = 0 if acc is None else acc & ((1 << n) - 1)
+        if op in ALU_OPS:
+            ref = alu_reference(a_val, arg, op, n)
+        elif op == "LOAD":
+            if arg not in dmem:
+                return {"trace": trace, "dmem": dmem, "halted": False, "fault": ("unwritten read", pc)}
+            ref = alu_reference(a_val, dmem[arg], "MOV", n)
+        else:  # STORE, JZ, JNZ, HALT: OR 0
+            ref = alu_reference(a_val, 0, "OR", n)
+        acc = ref["word"]
+        trace.append((pc, acc))
+        z = ref["z"]
+        if op == "STORE":
+            dmem[arg] = ref["r"]
+        if op == "HALT" or (op == "JZ" and z and arg == pc) or (op == "JNZ" and not z and arg == pc):
+            halted = True
+            break
+        if (op == "JZ" and z) or (op == "JNZ" and not z) or (op == "HALT"):
+            pc = arg
+        else:
+            pc = (pc + 1) % len(program)
+    return {"trace": trace, "dmem": dmem, "halted": halted, "fault": None}
+
+
+# ------------------------------------------------------------------------------ rings
+@dataclass
+class Ring:
+    lines: list  # Latch per line
+    killers: list  # inhibitory interneuron per line (fires a 3-pulse train at that line's rise, on the other lines)
+
+
+def add_onehot_ring(net: Netlist, drive: Drive, name: str, n: int) -> Ring:
+    """n latches; a line's *rise* (one relay) fires a short kill train on every other line.
+    The kill must be edge-triggered: a lit line that inhibited the others continuously would
+    hold its own successor down and no transition could ever happen (measured: the FSM never
+    left FETCH). After a kill train the killed lines recover in ~80 ms; a line is re-lit at
+    least one instruction (>= 600 ms) later."""
+    lines = [add_latch(net, drive, f"{name}.{k}") for k in range(n)]
+    killers = []
+    for k, l in enumerate(lines):
+        others = [o for j, o in enumerate(lines) if j != k]
+        killers.append(add_kill_train(net, drive, f"{name}.{k}.kill", l.u, others))
+    return Ring(lines, killers)
+
+
+def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
+    """A dual-rail bit whose rail latches kill each other at their rise: loading a value ignites
+    the right rail, whose rise fires a kill train on the other rail. No reset train, no
+    continuous inhibition; a reload to the other rail works ~20 ms after the previous load
+    (a reload to the same rail is a harmless re-ignition). Both rails can be live for ~10 ms
+    at a reload; readers sample later."""
+    r0, r1 = add_latch(net, drive, f"{name}r0"), add_latch(net, drive, f"{name}r1")
+    add_kill_train(net, drive, f"{name}.k0", r0.u, [r1])
+    add_kill_train(net, drive, f"{name}.k1", r1.u, [r0])
+    return [r0, r1]
+
+
+def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int = 3,
+                   strength: float = 0.75) -> int:
+    """`source`'s rise (one relay) starts a short train of `pulses` inhibitory pulses on every
+    member of `latches` (like a reset train, without an edge detector: the source is a relay
+    pulse or a fresh latch's rise)."""
+    relay = add_edge_relay(net, drive, f"{name}.start", source, fast_inhibitor=True)
+    inh = net.neuron(f"{name}.inh")
+    prev = relay
+    net.synapse(prev, inh, drive.pulse)
+    for k in range(1, pulses):
+        h = net.neuron(f"{name}.h{k}")
+        net.synapse(prev, h, drive.pulse)
+        net.synapse(h, inh, drive.pulse)
+        prev = h
+    q = -int(round(strength * drive.loop))
+    for l in latches:
+        for x in l.members:
+            net.synapse(inh, x, q)
+    return inh
+
+
+# ------------------------------------------------------------------------------ machine
+@dataclass
+class Machine:
+    net: Netlist
+    drive: Drive
+    n: int
+    a: int
+    n_prog: int
+    acc: StagedChannel
+    imem: list  # per word: list of Latch pairs [ [r0, r1], ... ] (word_bits entries)
+    pc: Ring
+    fsm: Ring  # lines: FETCH, COMMIT, NEXT
+    ir: list  # [ [r0, r1] ... ] for LOAD, STORE, JZ, JNZ, ADDR bits
+    dmem: Memory
+    jt: Latch
+    sp: Latch
+    wdone: list = field(default_factory=list)
+
+    @property
+    def fetch(self) -> Latch:
+        return self.fsm.lines[0]
+
+    @property
+    def commit(self) -> Latch:
+        return self.fsm.lines[1]
+
+    @property
+    def next(self) -> Latch:
+        return self.fsm.lines[2]
+
+
+def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
+                  ir_hops: int = 15, p_hops: int = 29, rd_hops: int = 33, act_hops: int = 17, next_hops: int = 12,
+                  watchdog_hops: int = 170) -> Machine:
+    drive = drive or Drive.from_params(params)
+    a = max(1, (max(n_prog, n_data) - 1).bit_length())
+    acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True)
+    net = acc.net
+    P, S, M, R = acc.producer, acc.reg.stage, acc.reg.master, acc.reg
+    nb = word_bits(n, a)
+    # program memory: latch-only words
+    imem = [[[add_latch(net, drive, f"IM.w{w}.b{i}r{r}") for r in (0, 1)] for i in range(nb)] for w in range(n_prog)]
+    pc = add_onehot_ring(net, drive, "PC", n_prog)
+    fsm = add_onehot_ring(net, drive, "FSM", 3)
+    FETCH, COMMIT, NEXT = fsm.lines
+    # instruction register: control fields
+    n_ctrl = len(FLAGS) + a
+    ir = [add_kill_pair(net, drive, f"IR.b{k}") for k in range(n_ctrl)]
+    ir_load, ir_store, ir_jz, ir_jnz = ir[:4]
+    ir_addr = ir[4:]
+    addr_taps = [[l.u for l in pair] for pair in ir_addr]
+    jt = add_latch(net, drive, "JT")
+    sp = add_latch(net, drive, "SP")
+    # FETCH is lit by any PC line's rise
+    for k, line in enumerate(pc.lines):
+        rl = add_edge_relay(net, drive, f"PC.{k}.fetch", line.u)
+        net.synapse(rl, FETCH.u, drive.ignite)
+    # FETCH's rise clears JT (the IR bits clear themselves: kill pairs)
+    add_kill_train(net, drive, "JTkill", FETCH.u, [jt])
+    f_ir = add_delay_chain(net, drive, "FETCH.ird", FETCH.u, ir_hops)
+    f_p = add_delay_chain(net, drive, "FETCH.pd", FETCH.u, p_hops)
+    f_rd = add_delay_chain(net, drive, "FETCH.rdd", FETCH.u, rd_hops)
+    # fetch relays: one per (word, bit) into the rail the word holds, vetoed by PC != w and by
+    # the word's other rail (so an unloaded word ignites nothing)
+    for w in range(n_prog):
+        notw = add_veto_neuron(net, drive, f"IM.w{w}.notw", [pc.lines[j].u for j in range(n_prog) if j != w])
+        for i in range(nb):
+            for r in (0, 1):
+                if i < n + N_UNITS + 1:  # B, U, SUB -> P
+                    extra = [ir_load[1].u] if i < n else []  # a LOAD takes B from DMEM, not the immediate
+                    add_veto_relay(net, drive, f"IM.w{w}.f{i}r{r}", f_p, [imem[w][i][1 - r].u] + extra, P.rails[i][r],
+                                   veto_neurons=[notw])
+                else:  # control fields -> IR
+                    k = i - (n + N_UNITS + 1)
+                    add_veto_relay(net, drive, f"IM.w{w}.f{i}r{r}", f_ir, [imem[w][i][1 - r].u], ir[k][r], veto_neurons=[notw])
+    # data memory: read port into P's B rails for LOAD; write port from the master for STORE
+    dmem = add_memory(net, drive, "DM", n_data, n)
+    add_read_port(net, drive, "LD", dmem, f_rd, addr_taps, [P.rails[i] for i in range(n)], extra_vetoes=[ir_load[0].u])
+    # FETCH -> COMMIT on the stage's completion; COMMIT lights the register's COMMIT token
+    rl = add_edge_relay(net, drive, "FSM.ws", S.completion.u)
+    net.synapse(rl, COMMIT.u, drive.ignite)
+    rl = add_edge_relay(net, drive, "FSM.commit_token", COMMIT.u)
+    net.synapse(rl, R.commit.u, drive.ignite)
+    # store pending: set during FETCH if STORE, cleared by NEXT's train
+    add_veto_relay(net, drive, "SP.set", f_rd, [ir_store[0].u], sp)
+    add_kill_train(net, drive, "SPkill", NEXT.u, [sp])
+    # commit done (W_M's pulse): NEXT unless a store is pending; the store write starts on it.
+    # Both NEXT-lighting paths are vetoed by FETCH and NEXT: a "written" pulse from the data
+    # image at power-up, or any done pulse outside COMMIT, must not advance the PC (measured:
+    # the image's completions lit NEXT at 70 ms and the PC moved under the first fetch)
+    add_veto_relay(net, drive, "FSM.done_next", R.done_relay, [sp.u, FETCH.u, NEXT.u], NEXT)
+    wp = add_write_port(net, drive, "ST", dmem, R.done_relay, addr_taps, [[M.rails[i][0].u, M.rails[i][1].u] for i in range(n)],
+                        extra_vetoes=[ir_store[0].u])
+    for w, d in enumerate(wp.done):  # the word is written: NEXT
+        add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u], NEXT)
+    for l in wp.domain_latches:  # COPY_w: cleared with the stage
+        for x in l.members:
+            net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
+    # NEXT: jump taken? (JZ and Z) or (JNZ and not Z); Z is the master's bit n+1
+    z0, z1 = M.rails[n + 1][0].u, M.rails[n + 1][1].u
+    add_veto_relay(net, drive, "JT.z", NEXT.u, [ir_jz[0].u, z0], jt)
+    add_veto_relay(net, drive, "JT.nz", NEXT.u, [ir_jnz[0].u, z1], jt)
+    nx = add_delay_chain(net, drive, "NEXT.d", NEXT.u, next_hops)
+    for w in range(n_prog):  # increment: line w lit and no jump -> line w+1
+        others = [pc.lines[j].u for j in range(n_prog) if j != w]
+        add_veto_relay(net, drive, f"PC.inc{w}", nx, others + [jt.u], pc.lines[(w + 1) % n_prog])
+    jd = add_delay_chain(net, drive, "JT.d", jt.u, next_hops)
+    for t in range(n_prog):  # jump: target t
+        add_veto_relay(net, drive, f"PC.jmp{t}", jd, address_vetoes(addr_taps, t), pc.lines[t])
+    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done)
+
+
+# ------------------------------------------------------------------------------ runner
+@dataclass
+class MachineRun:
+    commits: list  # (step, decoded master word)
+    pcs: list  # (step, line) rises
+    writes: list  # (step, word index, decoded value)
+    halted: bool
+    faults: int
+    timeouts: int
+
+
+def load_image(sim, m: Machine, program: list[tuple], dmem: dict | None, node: int = 0, step: int = 1) -> None:
+    for w, instr in enumerate(program):
+        word = encode(instr, m.n, m.a)
+        for i, r in rails_for(word, word_bits(m.n, m.a)):
+            sim.add_events(node, [step], [m.imem[w][i][r].u], [m.drive.ignite])
+    for addr, v in (dmem or {}).items():
+        for i, r in rails_for(v, m.n):
+            sim.add_events(node, [step], [m.dmem.words[addr].rails[i][r].u], [m.drive.ignite])
+    sim.add_events(node, [step + 20], [m.pc.lines[0].u], [m.drive.ignite])  # FETCH is lit before the image completes
+
+
+def run_machine(m: Machine, params: Params, program: list[tuple], dmem: dict | None = None, *, max_ms: float = 20000,
+                idle_ms: float = 1500, sim=None) -> tuple[MachineRun, RefSim]:
+    """Loads the image, lights PC line 0, and runs until no commit and no PC rise for `idle_ms`
+    (halt) or `max_ms`. Decodes the master at every W_M re-ignition and each written word."""
+    net, drive = m.net, m.drive
+    sim = sim or RefSim(net.topology(), params)
+    load_image(sim, m, program, dmem)
+    M = m.acc.reg.master
+    wm = M.completion.u
+    window = 2 * drive.loop_period_steps
+    fault_set = set(m.acc.reg.stage.fault) | {m.acc.reg.stage.fault_latch.u}
+    timeout_n = m.acc.producer.watchdog.timeout.u if m.acc.producer.watchdog is not None else -1
+    pc_taps = {l.u: k for k, l in enumerate(m.pc.lines)}
+    w_taps = {w.completion.u: k for k, w in enumerate(m.dmem.words)}
+    last = {}
+    commits, pcs, writes = [], [], []
+    faults = timeouts = 0
+    last_event = 0
+    idle = int(idle_ms / params.dt)
+    while sim.step_index < int(max_ms / params.dt):
+        sim.step()
+        s_ = sim.step_index - 1
+        if not sim._spk_step or sim._spk_step[-1][0] != s_:
+            if s_ - last_event > idle and s_ > 3000:
+                break
+            continue
+        for n_ in sim._spk_neuron[-1].tolist():
+            prev = last.get(n_)
+            rise = prev is None or s_ - prev > 3 * drive.loop_period_steps
+            last[n_] = s_
+            if not rise:
+                continue
+            if n_ == wm:
+                commits.append((s_, decode_at(sim.trace, M.rail_taps, s_, window)[0]))
+                last_event = s_
+            elif n_ in pc_taps:
+                pcs.append((s_, pc_taps[n_]))
+                last_event = s_
+            elif n_ in w_taps:
+                k = w_taps[n_]
+                writes.append((s_, k, decode_at(sim.trace, m.dmem.words[k].rail_taps, s_, window)[0]))
+            elif n_ in fault_set:
+                faults += 1
+            elif n_ == timeout_n:
+                timeouts += 1
+        if s_ - last_event > idle and s_ > 3000:
+            break
+    halted = sim.step_index < int(max_ms / params.dt)
+    return MachineRun(commits, pcs, writes, halted, faults, timeouts), sim
+
+
+# ------------------------------------------------------------------------------ programs and campaigns
+def random_program(rng, n: int = 4, a: int = 3, n_prog: int = 8, max_exec: int = 20) -> tuple[list[tuple], dict]:
+    """A random n_prog-word program that the reference halts within `max_exec` instructions,
+    with a data image so that every LOAD reads a written word. The last word is HALT."""
+    ops = ["MOV", "ADD", "SUB", "AND", "OR", "XOR", "STORE", "LOAD", "JZ", "JNZ"]
+    while True:
+        dmem = {int(rng.integers(0, 1 << a)): int(rng.integers(0, 1 << n)) for _ in range(3)}
+        prog = []
+        for k in range(n_prog - 1):
+            op = ops[int(rng.integers(0, len(ops)))] if k else "MOV"  # start with MOV (the master is not preloaded)
+            if op in ("STORE", "LOAD"):
+                arg = int(rng.integers(0, 1 << a))
+            elif op in ("JZ", "JNZ"):
+                arg = int(rng.integers(0, n_prog))
+            else:
+                arg = int(rng.integers(0, 1 << n))
+            prog.append((op, arg))
+        prog.append(("HALT", n_prog - 1))
+        ref = reference_run(prog, n, a, dmem, max_steps=max_exec)
+        if ref["halted"] and ref["fault"] is None and len(ref["trace"]) >= 3:
+            return prog, dmem
+
+
+def _rises(steps, neurons, taps: dict, period: int):
+    """(step, key) at every rise (first spike after >= 3 periods of silence) of the tapped neurons."""
+    out, last = [], {}
+    for s_, n_ in zip(steps, neurons):
+        k = taps.get(int(n_))
+        if k is None:
+            continue
+        prev = last.get(int(n_))
+        if prev is None or s_ - prev > 3 * period:
+            out.append((int(s_), k))
+        last[int(n_)] = int(s_)
+    return out
+
+
+def classify_machine_run(m: Machine, ev_steps, ev_neurons, program, dmem, params: Params) -> dict:
+    """Compare one node's spike record with the reference execution. Classes:
+    ok / wrong_value (a committed word differs: silent) / wrong_memory / short (fewer commits:
+    hang or refusal) / no_halt (more commits than the reference) ."""
+    ref = reference_run(program, m.n, m.a, dmem)
+    M = m.acc.reg.master
+    period = m.drive.loop_period_steps
+    window = 2 * period
+    taps = {M.completion.u: ("wm", 0)}
+    for w, word in enumerate(m.dmem.words):
+        taps[word.completion.u] = ("w", w)
+    taps[m.acc.reg.stage.fault_latch.u] = ("fault", 0)
+    if m.acc.producer.watchdog is not None:
+        taps[m.acc.producer.watchdog.timeout.u] = ("timeout", 0)
+    rises = _rises(ev_steps, ev_neurons, taps, period)
+
+    def decode(rails, step):
+        act = set(ev_neurons[(ev_steps > step - window) & (ev_steps <= step)].tolist())
+        v = 0
+        for i, (r0, r1) in enumerate(rails):
+            a0, a1 = r0 in act, r1 in act
+            if a0 and a1 or not (a0 or a1):
+                return None
+            v |= a1 << i
+        return v
+
+    commits = [decode(M.rail_taps, s_) for s_, k in rises if k[0] == "wm"]
+    dmem_final = dict(dmem or {})
+    for s_, k in rises:
+        if k[0] == "w":
+            dmem_final[k[1]] = decode(m.dmem.words[k[1]].rail_taps, s_)
+    n_fault = sum(1 for _, k in rises if k[0] in ("fault", "timeout"))
+    exp = [t[1] for t in ref["trace"]]
+    if any(c is not None and i < len(exp) and c != exp[i] for i, c in enumerate(commits)):
+        cls = "wrong_value"
+    elif len(commits) < len(exp):
+        cls = "short"
+    elif len(commits) > len(exp):
+        cls = "no_halt"
+    elif dmem_final != ref["dmem"]:
+        cls = "wrong_memory"
+    else:
+        cls = "ok"
+    return {"class": cls, "commits": commits, "expected": exp, "dmem": dmem_final, "expected_dmem": ref["dmem"],
+            "faults": n_fault, "instructions": len(exp)}
+
+
+def run_machine_batch(m: Machine, params: Params, programs: list, dmems: list, pert, rng, max_ms: float = 25000,
+                      device: str = "cpu") -> list[dict]:
+    """B perturbed copies of the machine, one program each, on the batched simulator."""
+    from .campaign import make_perturbed_sim
+
+    B = len(programs)
+    n_steps = int(max_ms / params.dt)
+    topo = m.net.topology()
+    sim = make_perturbed_sim(topo, params, B, pert, rng, n_steps, device=device)
+    for b in range(B):
+        load_image(sim, m, programs[b], dmems[b], node=b)
+    sim.run(n_steps)
+    ev = sim.trace.events
+    order = np.lexsort((ev["step"], ev["node"]))
+    ev = ev[order]
+    bounds = np.searchsorted(ev["node"], np.arange(B + 1))
+    out = []
+    for b in range(B):
+        sl = slice(bounds[b], bounds[b + 1])
+        out.append(classify_machine_run(m, ev["step"][sl], ev["neuron"][sl], programs[b], dmems[b], params))
+    return out

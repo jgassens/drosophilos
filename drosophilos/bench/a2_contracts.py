@@ -119,6 +119,27 @@ def main() -> None:
                                 "cycle per instruction 660-830 ms (clean model): ALU 240-405 ms, commit ~293 ms, READY ~93 ms"],
                          timing_assumptions=STAGED_TIMING)
     write_contract(c, OUT / "accumulator_4bit.yaml")
+    from ..lib.ram import build_ram_block, run_ram
+
+    rb = build_ram_block(params, 8, 4)
+    ops = [("WRITE", 2, 9), ("WRITE", 5, 3), ("READ", 2, 9), ("READ", 5, 3), ("WRITE", 2, 14), ("READ", 2, 14)]
+
+    def ram_runner():
+        recs, sim, st = run_ram(rb, params, ops)
+        st = dict(st, completed=st["ok"], correct=st["ok"], accept_latency_ms=[x for x in st["latency_ms"] if x is not None])
+        return recs, sim, st
+    c = measure_contract("ram_8x4", rb, params, [0] * len(ops), runner=ram_runner,
+                         campaign_summary={"mix_B": _summary("docs/a2/ram_4bit_B_summary.json")},
+                         notes=["8 words x 4 bits: word masters (rails, completion, reset, READY) with a veto-relay write port "
+                                "(word-select vetoed by the mismatching address rails) and a read port into an output register",
+                                "clean model: write done ~506 ms after the load, read ~417 ms, cycle ~600 ms; a read of an unwritten "
+                                "word ignites both rails of every bit and is refused by the read consumer's fault gates",
+                                "'accept' below = done (the word's completion for a write, the output register's completion for a read)"],
+                         timing_assumptions=STAGED_TIMING[:3] + [
+                             "a relay is driven >= 55 ms after any of its veto rails dies (the veto's residual inhibition)",
+                             "relays that feed an edge-detected trigger use the fast inhibitor (doublet-free)",
+                             STAGED_TIMING[4]])
+    write_contract(c, OUT / "ram_8x4.yaml")
     print("contracts written:", sorted(p.name for p in OUT.glob("*.yaml")))
 
 

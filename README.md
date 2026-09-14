@@ -78,4 +78,10 @@ uv run pytest
   the consumer's completion). Mix B campaigns: ordered adder 30,000 random additions, ALU 5,000, accumulator
   2,000 instructions, all correct, no refusals (the rate-mode adder had 6.4 × 10⁻⁴ refusals/hangs). Notes: `docs/a2_alu_register.md` §4.
 
+- **Data RAM and control machine done.** Word masters with veto-relay decoding (exact, no
+  threshold margin); a one-hot sequencer that executes an 8-word program held in neural
+  memory (MOV/ADD/SUB/AND/OR/XOR, LOAD, STORE, JZ/JNZ, HALT) with the accumulator and the
+  RAM, checked instruction by instruction against a Python reference. MACHINE_README
+  Notes: `docs/a2_ram_control.md`.
+
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

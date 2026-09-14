@@ -663,3 +663,61 @@ The completion trees (bounded exposure: every bit becomes valid), the fault gate
 rail), ACTIVE's OR, and the register's grant AND(COMMIT, W_S), whose exposure is the control
 machine's reaction time. The carry chain is linear in the width (29 ms per bit); wide words
 will need carry-lookahead or bit-serial arithmetic, which the capacity report decides.
+
+
+---
+
+# A2/B: data RAM and the control machine
+
+**Date:** 2026-09-15. Full note: `docs/a2_ram_control.md`; contracts: `docs/contracts/ram_8x4.yaml`;
+campaign summaries: `docs/a2/`.
+
+## What was built
+
+- **Data RAM** (`drosophilos/lib/ram.py`): W words × n bits, each word a master register.
+  Word-select is a veto relay vetoed by the mismatching address rails, so decoding is exact
+  with no threshold margin (hierarchical predecoding would only cut fan-in). Write port
+  (select → word reset → READY → copy relays → completion → "written" pulse) and read port
+  (per-rail relays into the destination). 8 × 4 block: 1,626 neurons, write done 506 ms,
+  read 417 ms. An unwritten read double-rails every bit and is refused.
+- **Control machine** (`drosophilos/lib/control.py`): a program of 8 words held in latch-only
+  neural memory and loaded by the host as the initial image; a one-hot PC ring and a
+  one-hot FSM ring (FETCH → COMMIT → NEXT) whose kills are edge-triggered; an instruction
+  register of kill pairs; the accumulator with an ordered grant; the RAM as data memory.
+  ISA: MOV/ADD/SUB/AND/OR/XOR immediate, LOAD, STORE, JZ, JNZ, HALT. Every instruction
+  commits the accumulator, so the committed master is the architectural state after each
+  instruction. A Python reference executes the same ISA; random programs are checked
+  against it commit by commit and word by word. 4,230 neurons; 920–1,130 ms per
+  instruction.
+
+Only the host's allowed actions are used: it loads the program and data image, lights PC
+line 0, and reads spikes. Fetch, decode, execute, commit, load, store, branch and halt are
+neural.
+
+## What the composition exposed
+
+Five mechanisms, found from spike anatomy and fixed on measurement:
+
+1. A lit line must not inhibit its successor: ring kills are edge-triggered trains, not
+   continuous inhibition (the first FSM never left FETCH).
+2. A reset train paralyses a latch for ~80 ms, so the instruction register cannot be cleared
+   by a train and reloaded 20 ms later; its bits are kill pairs.
+3. A relay must be driven ≥ 55 ms after any of its veto rails dies: the previous PC line's
+   "not this word" veto blocked the instruction fetch at +34 ms. The fetch stages are spaced
+   accordingly (+82, +156, +177 ms).
+4. A "written" or "committed" pulse counts only in COMMIT: the data image's completions at
+   power-up were advancing the PC.
+5. A relay that feeds an edge-detected trigger must be doublet-free: one node's word-select
+   fired twice 3.6 ms apart, three reset trains stacked, and the word could not hold its
+   copy. Such relays now drive their inhibitor at the head-start drive.
+
+## Campaigns on the final build (mix B)
+
+CAMPAIGN_TABLE
+
+## What the machine is not yet
+
+Fail-stop only (a refused instruction halts the machine in FETCH); 8 program words; no
+stack, interrupt or I/O port; about one second per instruction, of which ~180 ms is fetch
+spacing imposed by veto residuals. Those, the IR interpreter as the compiler's oracle, and
+the capacity report are the rest of Stage B.

@@ -55,7 +55,7 @@ class StagedRegister:
 
 
 def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Register,
-                      M: Register | None = None) -> StagedRegister:
+                      M: Register | None = None, ordered_grant: bool = False) -> StagedRegister:
     """Wrap consumer register S (with completion and fault latch, i.e. after wire_fault_path)
     with a master M and a commit controller. The caller must NOT wire the producer's CLEARED
     to S's reset: S is cleared by commit-done, by F, or by the producer's TIMEOUT."""
@@ -65,7 +65,13 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     assert len(M.rails) == n and S.completion is not None and S.fault_latch is not None
     W, F = S.completion, S.fault_latch
     COMMIT = add_latch(net, drive, f"{name}.commit")
-    g, C = add_and_latched(net, drive, f"{name}.grant", [COMMIT.u, W.u])
+    if ordered_grant:
+        # a control machine issues COMMIT only after W_S: the grant is then a veto relay
+        # (driver COMMIT, vetoed by the fault latch), with no rate-mode exposure at all
+        C = add_latch(net, drive, f"{name}.grant.L")
+        g = add_veto_relay(net, drive, f"{name}.grant", COMMIT.u, [F.u], C)
+    else:
+        g, C = add_and_latched(net, drive, f"{name}.grant", [COMMIT.u, W.u])
     connect_trigger(net, drive, C.u, M.reset_trigger, M.reset_edge)  # granted -> clear M
     COPY = add_latch(net, drive, f"{name}.copy")
     net.synapse(M.ready, COPY.u, drive.ignite)  # M empty and recovered -> copy enable
@@ -76,12 +82,12 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     # commit done = W_M's first spike, through an edge relay as a single pulse: W_M then holds
     # for as long as M is valid, and a train into the stage's edge-detected reset trigger would
     # hold that trigger down and block the F / TIMEOUT discards
-    done = add_edge_relay(net, drive, f"{name}.done", M.completion.u)
+    done = add_edge_relay(net, drive, f"{name}.done", M.completion.u, fast_inhibitor=True)
     net.synapse(done, S.reset_trigger, drive.relay_in)
     # discard: a faulty staged word clears the stage (P is cleared by FAULT-ACCEPT already);
     # F also holds the grant down so the word can never be committed
     connect_trigger(net, drive, F.u, S.reset_trigger, S.reset_edge)
-    for x in list(C.members) + [g]:
+    for x in list(C.members) + ([] if ordered_grant else [g]):
         net.synapse(F.u, x, drive.reset)
     if P.watchdog is not None:
         connect_trigger(net, drive, P.watchdog.timeout.u, S.reset_trigger, S.reset_edge)
@@ -89,7 +95,8 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     for l in (COMMIT, C, COPY):
         for x in l.members:
             net.synapse(S.reset_inh, x, q)
-    net.synapse(S.reset_inh, g, q)
+    if not ordered_grant:
+        net.synapse(S.reset_inh, g, q)
     net.group(f"{name}.master_taps", [t for pair in M.rail_taps for t in pair])
     return StagedRegister(S, M, COMMIT, C, COPY, g, copy_gates, done)
 
@@ -144,7 +151,7 @@ def build_staged_register(params: Params, width: int, drive: Drive | None = None
 
 
 def build_accumulator(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                      watchdog_hops: int = 150) -> StagedChannel:
+                      watchdog_hops: int = 150, act_hops: int = 11, ordered_grant: bool = False) -> StagedChannel:
     """P(B, U, SUB) + master[0:n] as A -> ALU -> stage(R, C, Z, V) -> commit -> master."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
@@ -157,14 +164,14 @@ def build_accumulator(params: Params, width: int, drive: Drive | None = None, li
     U = [Rail2(*P.rails[width + k]) for k in range(N_UNITS)]
     SUB = Rail2(*P.rails[width + N_UNITS])
     G = Gates(net, drive)
-    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh)
+    R, C, V = add_alu_logic(G, "alu", A, B, U, SUB, P.reset_inh, act_hops=act_hops)
     wire_alu(net, drive, R, C, V, S)
     extend_reset(net, drive, S, G.latches, G.gates)
     connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     wire_fault_path(net, drive, P, S)
     if liveness:
         add_liveness(net, drive, P, S, watchdog_hops)
-    sr = add_staged_commit(net, drive, "R", S, P, M)
+    sr = add_staged_commit(net, drive, "R", S, P, M, ordered_grant=ordered_grant)
     net.group("alu_latches", [x for l in G.latches for x in l.members])
     return StagedChannel(net, drive, pw, P, sr, alu_width=width)
 

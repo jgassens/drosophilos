@@ -75,8 +75,18 @@ def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: li
     return level[0], internal
 
 
+def add_veto_neuron(net: Netlist, drive: Drive, name: str, taps: list[int]) -> int:
+    """An inhibitory interneuron that fires with every spike of any of `taps`; shared by
+    several veto relays through `add_veto_relay(..., veto_neurons=[...])` (e.g. one
+    "address is not w" neuron per memory word for all of that word's relays)."""
+    v = net.neuron(f"{name}.veto")
+    for t in taps:
+        net.synapse(t, v, drive.pulse)
+    return v
+
+
 def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: list[int], target: Latch,
-                   veto_strength: float = 0.5) -> int:
+                   veto_strength: float = 0.5, veto_neurons: list[int] = ()) -> int:
     """driver AND NOT(any veto), evaluated once at the driver's rise, as a one-shot ignition of
     `target`. The driver is a latch train (so the relay's own feed-forward inhibition and the
     target's train keep it to one pulse); each veto is a latch train that, while live, holds
@@ -96,6 +106,8 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
         v = net.neuron(f"{name}.veto")
         for t in vetoes:
             net.synapse(t, v, drive.pulse)
+        net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
+    for v in veto_neurons:
         net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
     net.synapse(relay, target.u, drive.ignite)
     return relay
