@@ -223,6 +223,8 @@ class Machine:
     intp: list | None = None  # interrupt pending kill pair [r0, r1]; the host ignites r1
     handler_pc: int | None = None
     lr: Ring | None = None
+    link_out_taps: list = field(default_factory=list)  # [[r0 relay, r1 relay] per bit] of the output port word
+    link_in_word: int | None = None
 
     @property
     def fetch(self) -> Latch:
@@ -239,8 +241,12 @@ class Machine:
 
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
                   ir_hops: int = 15, p_hops: int = 29, rd_hops: int = 33, act_hops: int = 17, next_hops: int = 12,
-                  watchdog_hops: int = 170, handler_pc: int | None = None) -> Machine:
-    """`handler_pc`: enables safe-point interrupts with the handler at that program word."""
+                  watchdog_hops: int = 170, handler_pc: int | None = None, port_out_word: int | None = None,
+                  port_in_word: int | None = None) -> Machine:
+    """`handler_pc`: enables safe-point interrupts with the handler at that program word.
+    `port_out_word`: a data word whose rails' rises are exported as FlyLink events (one relay
+    per rail, taps in Machine.link_out_taps). `port_in_word`: a data word whose completion
+    raises the interrupt (a message arrived); the transport ignites its rails."""
     drive = drive or Drive.from_params(params)
     a = max(1, (max(n_prog, n_data) - 1).bit_length())
     acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True)
@@ -343,7 +349,16 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     jd = add_delay_chain(net, drive, "JT.d", jt.u, next_hops)
     for t in range(n_prog):  # jump: target t
         add_veto_relay(net, drive, f"PC.jmp{t}", jd, address_vetoes(addr_taps, t) + extra_pc_vetoes, pc.lines[t])
-    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done, intp, handler_pc, lr)
+    link_out = []
+    if port_out_word is not None:  # FlyLink send: one event per rail rise of the output port word
+        word = dmem.words[port_out_word]
+        for i in range(n):
+            link_out.append([add_edge_relay(net, drive, f"LINK.out.b{i}r{r}", word.rails[i][r].u, fast_inhibitor=True) for r in (0, 1)])
+    if port_in_word is not None:  # FlyLink receive: the input port word's completion is an interrupt
+        assert intp is not None, "port_in_word needs handler_pc (the arrival is an interrupt)"
+        arr = add_edge_relay(net, drive, "LINK.in.arrive", dmem.words[port_in_word].completion.u, fast_inhibitor=True)
+        net.synapse(arr, intp[1].u, drive.ignite)
+    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp, wp.done, intp, handler_pc, lr, link_out, port_in_word)
 
 
 # ------------------------------------------------------------------------------ runner

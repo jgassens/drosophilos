@@ -133,8 +133,15 @@ Three-way comparison on a program that reads an input, sums in a loop through a 
 masks, branches, stores and emits a pixel (17 IR ops, 31 machine words, 6 data words):
 C reference, IR interpreter and the lowered program's machine reference agree on the
 canonical state and the pixel for four fresh inputs (`tests/test_compiler.py`). The neural
-run of the same program on machine v1 (8-bit, 32 program words, 12,450 neurons) is
-COMPILED_NEURAL.
+run of the same program on machine v1 (8-bit, 32 program words, 8 data words, 12,450
+neurons) for input 2 executes 37 instructions and ends with the same canonical state and
+the same pixel as the C reference, commit for commit against the machine reference
+(`tests/test_compiler.py::test_neural_machine_runs_compiled_program`, ~40 s of neural time,
+~50 minutes on the CPU reference simulator). With the safe-point interrupt of §2.1, this is
+the Stage A2/B exit (plan): a DrosoC program that reads runtime input, stores neurally,
+computes, branches, loops, calls and emits a pixel, matching the C reference and the IR
+interpreter on canonical state for fresh inputs, and an interrupt that lands at a safe
+point and resumes. What is not yet met from that list is under §6.
 
 `bench/capacity.py` produces the whole-program capacity report the plan requires before any
 run above 4 nodes: for this program, 713 program-image bits, 59 live state bits, one ALU,

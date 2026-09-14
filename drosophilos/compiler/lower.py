@@ -10,6 +10,8 @@ The machine is an accumulator machine: every IR op becomes a short sequence
     OUT src               LOAD src ; STORE [port_out]
     CALL f                the callee's body inlined (no recursion: checked by the front end)
     HALT                  JMP self
+The program starts with MOV 0: the accumulator is dark at power-up and a dark operand lights
+both A rails in the operand gate (a JMP/JZ/STORE runs OR 0 and would fault).
 Variables and ports are data-memory addresses; the IR's CALL nesting is flattened, so the
 machine program is one straight sequence with absolute jump targets.
 """
@@ -66,6 +68,7 @@ def lower(prog: Program) -> list[tuple]:
             else:
                 raise ValueError(op)
 
+    emit("MOV", 0)  # prologue: the accumulator is dark at power-up and must be written before any OR/JZ/STORE
     body(prog.entry, "")
     out = []
     for k, (op, arg) in enumerate(words):

@@ -715,9 +715,48 @@ Five mechanisms, found from spike anatomy and fixed on measurement:
 
 CAMPAIGN_TABLE
 
+## Stage B exit: a compiled DrosoC program on the neural machine
+
+- **Compiler path** (`drosophilos/compiler/`, `drosophilos/isa/ir.py`): pycparser front end for
+  the v0 DrosoC subset → three-address IR → (a) the IR interpreter on `isa/semantics` (the
+  oracle), (b) lowering to the accumulator machine (calls inlined, ports memory-mapped),
+  (c) a clang + UBSan golden harness printing the canonical state and the emitted pixels.
+- **Three-way agreement.** A program that reads an input, sums in a loop through a call,
+  masks, branches, stores and emits a pixel (17 IR ops, 31 machine words): C reference, IR
+  interpreter and the lowered program's reference agree on canonical state and pixel for four
+  fresh inputs; the neural machine v1 (8-bit, 32 program words, 12,450 neurons) executes it
+  in 37 instructions with the same state and pixel, commit for commit.
+- **Safe-point interrupts.** A pending-interrupt pair set by the host, taken at NEXT (after
+  the commit and any store), PC saved to a link ring, `IRET` restores it, nested interrupts
+  masked. Two interrupts during a loop: the handler runs twice and returns to the interrupted
+  word each time; the main program's result is unchanged.
+- **Capacity report** (`bench/capacity.py`): program-image bits, live state bits, neurons by
+  class, critical path. For the test program: 713 image bits, 59 live bits, 12,450 neurons of
+  which 7,392 are the program image (~230 per instruction word), 55 instructions ≈ 58 s for
+  input 4.
+
 ## What the machine is not yet
 
-Fail-stop only (a refused instruction halts the machine in FETCH); 8 program words; no
-stack, interrupt or I/O port; about one second per instruction, of which ~180 ms is fetch
-spacing imposed by veto residuals. Those, the IR interpreter as the compiler's oracle, and
-the capacity report are the rest of Stage B.
+Fail-stop only (a refused instruction halts the machine in FETCH); no call stack (calls are
+inlined, so no recursion); about one second per instruction, of which ~180 ms is fetch
+spacing imposed by veto residuals; the program image costs ~230 neurons per word, which
+argues for resident kernels (spatial dataflow) for the hot loops. Stage C (FlyLink, two
+nodes) is next.
+
+
+---
+
+# Stage C, first milestone: two nodes over FlyLink
+
+**Date:** 2026-09-15. Note: `docs/stage_c_flylink.md`.
+
+`cluster/flylink.py` transports spike events between simulated nodes (host role: transport
+only; a packet is source node, source neuron, step; the receiver's mapping is fixed at link
+creation; modeled positive delay). A machine exports an output port word as one edge relay
+per rail and takes an input port word's completion as an interrupt. Demo 1 shape on the
+clean model: node A reads an input, computes, branches, stores neurally and sends its result;
+node B's arrival interrupt runs a handler that loads it, adds one and emits the pixel. A's
+word complete at 9.1 s, B received it 21 ms later, the pixel landed at 13.2 s, values as the
+references compute them. Not yet: sequence/epoch, credits, acknowledgement, retransmit,
+duplicate rejection, corruption, backpressure (the rest of Stage C). Rule found: a program
+must write the accumulator before any OR-based instruction (the lowering emits `MOV 0`).
