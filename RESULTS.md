@@ -819,3 +819,17 @@ How it is known to have worked, with nothing taken on trust from the machine:
 - **Exact channel** over FlyLink (alternating bit, immediate ACK on a reverse link, retransmit
   on timeout, duplicate rejection by sequence): programs written; the clean-link and
   dropped-event scenarios are running (slow tests).
+
+- **Stage D shape, on the references**: `examples/tick.c`, a toy world update in the shape of
+  `p_tick` (player moves by the input velocity with wall collision, a monster steps toward the
+  player, contact costs health, three ticks, one pixel record per entity per tick and the
+  health at the end): 65 machine words, 133 instructions per run; the C reference, the IR
+  interpreter and the machine reference agree on all outputs and the canonical state for
+  three inputs. Its neural run is in progress (`bench/run_program.py examples/tick.c --inputs 5`).
+- **Stage E1 shape, on the references**: `examples/render.c`, a toy renderer in the shape of
+  the `r_segs` column loop (for each of 8 columns the wall distance from a map array indexed by
+  the heading, the height from a lookup table, one pixel record per column, a frame record,
+  two frames): 82 machine words, 28 data words, 517 instructions for two frames; the three
+  references agree on every pixel for two headings. On this sequencer a frame is ~250
+  instructions, about four minutes of neural time; that number is the case for resident
+  kernels (spatial dataflow) and the cluster rather than a faster sequencer.
