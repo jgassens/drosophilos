@@ -59,4 +59,10 @@ uv run pytest
   4-bit ripple adder, all exact. 10⁶ perturbed 4-bit transactions: 0 wrong values consumed,
   2.2 × 10⁻⁵ detected refusals/hangs. Report `docs/m1_report.md`, contracts `docs/contracts/`.
 
+- **A2 opening done.** Neural watchdog (timeout → FAULT-ACCEPT); stale monitor rejected on
+  measurement; adder composition campaign fixed three defects (reset strength, ignition
+  doublets, AND window). Final build at mix B: channel 10⁵ with 0 wrong values; 4-bit adder
+  10⁵ random additions with 0 wrong sums, 6.4 × 10⁻⁴ refusals/hangs (half raised neurally).
+  Channel contract frozen. Notes: `docs/a2_liveness.md`.
+
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

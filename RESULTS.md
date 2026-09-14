@@ -463,3 +463,55 @@ defect carried into A2/B.
 4. FAULT is a state, held in a latch, not a pulse.
 5. There is no low-activity register in this neuron model (`docs/m1_latches.md`); the
    two-neuron loop at 1.4× is the production register, at 44 spikes per 100 ms per bit.
+
+---
+
+# A2 opening — liveness, and what composition exposed
+
+**Date:** 2026-09-14. Full note: `docs/a2_liveness.md`; contracts: `docs/contracts/`; raw
+campaign data: `docs/a2/`.
+
+## What was built
+
+- A neural **watchdog**: a delay chain started when the producer's register activates and
+  cancelled by ACCEPT or FAULT-ACCEPT; if it completes it ignites a TIMEOUT latch that raises
+  FAULT-ACCEPT itself. A transaction that starts and cannot complete is now refused by the
+  machine (severed data path: refusal at 227 ms, channel recovered, next words correct).
+- A **stale-state monitor** (ENABLE armed after the reset train, one AND per latch, STALE
+  latch holding READY and re-running the reset). Built, measured, rejected: its detectors
+  fire spuriously under perturbation and a single spike ignites STALE.
+- Campaign classes `timeout` (neural) and `ok_stale_retry`; exact Clopper–Pearson bounds;
+  a `detected_by` split between the machine and the harness.
+
+## What the adder composition campaign exposed, and the fixes
+
+The first 10⁵ random additions at mix B failed ~25 %. Three causes, each fixed on
+measurement: adder-internal latches were reset at 0.5× per pulse instead of 0.75×; the
+2× ignition pulse was a doublet that let latches briefly run at up to +22 % and pushed
+one-input ANDs over threshold in long-exposure gates (ignition now 1.8× need, latch rates
+195–236 Hz); and with tight rates the two-input AND's usable window sits at 0.65
+(0.75 leaks 4 %, 0.55 fails to fire). ACCEPT latency rose from 112 to 155 ms on the channel
+and from 245 to 358 ms on the adder.
+
+## Campaigns on the final build (mix B)
+
+| circuit | transactions | wrong values | raised by the machine | harness-only | non-ok observed / 95 % upper | ACCEPT p99 |
+|---|---|---|---|---|---|---|
+| 4-bit channel + watchdog | 100,000 | 0 | 0 | 1 stale-activity | 1.0 × 10⁻⁵ / 4.7 × 10⁻⁵ | 170 ms |
+| 4-bit ripple adder, random operands | 100,002 | **0** | 30 faults, 1 timeout | 24 no-accept, 9 stale-activity | 6.4 × 10⁻⁴ / 7.9 × 10⁻⁴ | 388 ms |
+
+Exact 95 % upper limit on silent wrong values: 3.0 × 10⁻⁵ for each run.
+
+## What did not work
+
+The stale monitor (false STALE in ~2 % of perturbed transactions, wrong values through
+mid-transaction resets); a second unconditional reset train (no gain at the ±20 % margin
+edge); AND fractions 0.55 and 0.75 on the final build; the first two adder campaign
+launches (wrong period and watchdog for the slower build; a `sed` that silently did nothing).
+
+## Status
+
+The M1 channel contract is **frozen** for A2/B (`docs/contracts/channel_4bit.yaml`). The
+adder's residual 6.4 × 10⁻⁴ is now half neurally detected; the 24 missing completions that
+the watchdog did not convert are the first item of the A2 gate work, together with a wider-
+margin AND. Then the ALU, word register with staged commit, RAM, ROM, control machine.

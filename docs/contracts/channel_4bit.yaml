@@ -217,5 +217,5 @@ notes:
 - 'liveness: a transaction that never completes is refused neurally (TIMEOUT latch
   -> FAULT-ACCEPT); stale state after a reset is harness-observed only (monitor rejected
   on measurement, docs/a2_liveness.md)'
-- 'status: contract frozen for A2/B pending the 1e5 adder composition campaign on
-  the same build'
+- 'status: FROZEN for A2/B (2026-09-14): protocol, drives, chain lengths and the watchdog
+  are the M1 channel interface; changes require a new campaign'

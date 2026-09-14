@@ -80,11 +80,20 @@ released together by a completion stage), which is recorded for the A2 gate work
 
 | run | transactions | ok | wrong value | fault (neural) | timeout (neural) | hangs | stale | non-ok observed / 95 % upper |
 |---|---|---|---|---|---|---|---|---|
-| 4-bit ripple adder, final build, random operands | (pending) | | | | | | | |
+| 4-bit ripple adder, final build, random operands | 100,002 | 99,938 | 0 | 30 | 1 | 24 | 9 | 6.4e-04 / 7.9e-04 |
 
-Reading so far: the watchdog never fired falsely in 2 × 10⁵ channel transactions; the
-channel's residual non-ok class at this level is a single harness-observed stale-activity
-case in 10⁵ on the final build. The hangs the watchdog is designed to catch (a transaction
+Reading: no wrong value was ever consumed in 3 × 10⁵ channel transactions and 10⁵
+random additions (exact 95 % upper limits 3.0 × 10⁻⁵ each). The watchdog never fired
+falsely. On the adder, ACCEPT p99 388 ms, max 410 ms, 558 neurons; its residual non-ok
+rate is 6.4 × 10⁻⁴, an order of magnitude above the channel's, and about half of it is now
+raised by the machine (30 faults, 1 timeout) while 24 missing completions and 9 stale-
+activity cases are still harness-observed. The faults are the fault gates doing their job
+on internal false positives that reach the output rails; they cost a refused transaction,
+not a wrong sum. The missing completions are the class the watchdog was built for and
+did not catch: an addition whose producer register activated (the watchdog started) but
+where cancellation or the chain itself failed, or a hang that lasted beyond the 700 ms
+window but resolved before the watchdog's 530 ms deadline had expired in the run's own
+timeline — separating these needs a per-case dump and is the first item of A2's gate work. The hangs the watchdog is designed to catch (a transaction
 that starts and never completes) did not occur in these runs; the two `no_accept` cases in
 the M1-build run were not converted to timeouts either, which means they were not
 "started and stalled" — most likely the producer register never activated (a failed load
