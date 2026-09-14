@@ -71,6 +71,23 @@ set by the latch-rate spread on one side and by weight noise on the other, and a
 window needs a different construction (an inhibition-sharpened AND, or inputs that are
 released together by a completion stage), which is recorded for the A2 gate work.
 
-## 4. Campaigns with the final build
+## 4. Campaigns with the final build (mix B, 10⁵ each; `docs/a2/`)
 
-(filled in from `data/a2/`)
+| run | transactions | ok | wrong value | fault (neural) | timeout (neural) | hangs (harness) | stale activity (harness) | non-ok observed / 95 % upper | ACCEPT p99 |
+|---|---|---|---|---|---|---|---|---|---|
+| 4-bit channel, M1 build + watchdog (AND 0.75, 2× ignition) | 100,000 | 99,997 | 0 | 0 | 0 | 2 | 1 | 3.0e-05 / 7.8e-05 | 120 ms |
+| 4-bit channel, final build (AND 0.65, 1.8× ignition, watchdog 55 hops) | 100,000 | 99,999 | 0 | 0 | 0 | 0 | 1 | 1.0e-05 / 4.7e-05 | 170 ms |
+
+| run | transactions | ok | wrong value | fault (neural) | timeout (neural) | hangs | stale | non-ok observed / 95 % upper |
+|---|---|---|---|---|---|---|---|---|
+| 4-bit ripple adder, final build, random operands | (pending) | | | | | | | |
+
+Reading so far: the watchdog never fired falsely in 2 × 10⁵ channel transactions; the
+channel's residual non-ok class at this level is a single harness-observed stale-activity
+case in 10⁵ on the final build. The hangs the watchdog is designed to catch (a transaction
+that starts and never completes) did not occur in these runs; the two `no_accept` cases in
+the M1-build run were not converted to timeouts either, which means they were not
+"started and stalled" — most likely the producer register never activated (a failed load
+ignition), which is outside the watchdog's window by construction and belongs to the
+upstream's own timeout. Recorded as a scoped limitation.
+
