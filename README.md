@@ -38,7 +38,7 @@ uv sync
 uv run pytest
 ```
 
-## Status (2026-09-13)
+## Status (2026-09-14)
 
 - **Stage 0 done.** Normative model in `drosophilos/sim/schedule.md`; float64 reference
   simulator and PyTorch production simulator agree spike-for-spike with each other and with
@@ -64,5 +64,13 @@ uv run pytest
   doublets, AND window). Final build at mix B: channel 10⁵ with 0 wrong values; 4-bit adder
   10⁵ random additions with 0 wrong sums, 6.4 × 10⁻⁴ refusals/hangs (half raised neurally).
   Channel contract frozen. Notes: `docs/a2_liveness.md`.
+
+- **A2 step 6 done (ALU, staged-commit register, accumulator).** 4-bit ALU (ADD/SUB/AND/OR/
+  XOR/MOV, flags C Z V, exact against the ISA semantics), word register with staged commit
+  (a COMMIT token applies exactly once; faults and timeouts discard with the master untouched),
+  and the first closed loop (ALU → register → operand). Two new primitives: the veto relay (an
+  AND with no exposure window) and the light relay hold. Mix B campaigns: ALU 5,000, register
+  5,000, accumulator 2,000 random instructions, all correct, no refusals. Notes:
+  `docs/a2_alu_register.md`; contracts `docs/contracts/{alu,staged_register,accumulator}_4bit.yaml`.
 
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

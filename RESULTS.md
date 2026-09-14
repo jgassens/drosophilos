@@ -515,3 +515,88 @@ The M1 channel contract is **frozen** for A2/B (`docs/contracts/channel_4bit.yam
 adder's residual 6.4 × 10⁻⁴ is now half neurally detected; the 24 missing completions that
 the watchdog did not convert are the first item of the A2 gate work, together with a wider-
 margin AND. Then the ALU, word register with staged commit, RAM, ROM, control machine.
+
+
+---
+
+# A2 step 6: ALU and word register with staged commit
+
+**Date:** 2026-09-14. Full note: `docs/a2_alu_register.md`; contracts: `docs/contracts/`;
+campaign summaries: `docs/a2/`.
+
+## What was built
+
+- **ALU** (`drosophilos/lib/alu.py`, 4-bit: 1,191 neurons): units ADDER (ADD and SUB through
+  B xor SUB), AND, OR, XOR, PASSB (MOV); flags C, Z, V; one-hot unit select. Bit-exact against
+  `isa/semantics.py` on all 256 signed 4-bit pairs; every op exact on the reference
+  simulator, 1-bit exhaustive and 4-bit corners. ACCEPT 300 ms (MOV) to 520 ms (ADD/SUB).
+- **Word register with staged commit** (`drosophilos/lib/staged.py`, 4-bit: 321 neurons):
+  a stage (channel consumer with completion and fault latch) and a master with its own
+  completion (W_M = readable). A COMMIT token is granted only against a complete, fault-free
+  stage; the commit clears the master, copies through veto relays, and W_M's rise clears the
+  stage. A faulty or timed-out word is discarded and the master is untouched. Early, late
+  (2 s), duplicate and premature COMMIT behaviours are tested and stated. Commit 247 ms.
+- **Accumulator** (1,410 neurons): ALU → stage → master → ALU operand A. The host supplies
+  (B, op) and one COMMIT per instruction and reads the master; the value that feeds back is
+  never touched by the host. 720–910 ms per instruction.
+- Two new library primitives: the **veto relay** (a one-shot AND of a later operand's rail
+  against an earlier operand's other rail, no exposure window) and the **light relay hold**
+  (an ignited latch keeps its own ignition relay quiet through a −0.25× interneuron).
+
+## What the campaigns exposed, and what changed
+
+Five mechanisms, none visible in clean runs, each found from the spike anatomy of one
+perturbed node and fixed on measurement:
+
+1. **A level is not a token.** The master's rails restarted eager gates 25 ms after the
+   stage's reset, before their relays had re-armed: 17 % of instructions hung. The master
+   now enters the ALU only through an ACTIVE-gated operand gate that lives with the producer.
+2. **Edge relays re-fire on slow sources.** A rate-mode gate fires at 25–40 Hz and its
+   relay's inhibition decays between spikes; every gate-fed latch got an extra ignition pulse
+   every ~43 ms and ran ~10 % fast, which is the regime in which one-input rate-mode ANDs
+   leak. Fix: the ignited latch holds its relay. This most likely also explains the adder's
+   residual 3 × 10⁻⁴.
+3. **A refused word is not a hang.** The campaign classifier filed a FAULT-ACCEPT without
+   completion as `no_accept`; corrected, and the adder campaign's 24 "missing completions"
+   are re-labelled as an upper bound on hangs (most are neural refusals).
+4. **The veto relay.** Rate-mode ANDs with ordered inputs (the result mux, the flag gating,
+   the operand gate, the master copy, the logic units, the adder's first XOR) leaked on the
+   ±10 % latch-rate spread (a MOV refused after 150 ms; master faults from copy gates firing
+   on COPY alone). All are now veto relays: 3 neurons and ~5 ms instead of 5 and ~35, and
+   nothing to leak. Routing B through the B xor SUB stage makes it the later operand by
+   ≥ 50 ms, which is what the ordering needs.
+5. **A relay's head start is ~5 ms.** A hold or veto through the relay's 2.2× inhibitor
+   paralysed the relay for ~86 ms, longer than the gap between a reset and the next load;
+   every relay whose target had held in the previous transaction failed. Holds are now
+   −0.25× and vetoes −0.5×, with a stated recovery budget (40 / 55 / 86 ms).
+
+## Campaigns on the final build (mix B)
+
+| block | transactions | wrong values | refused / hung | non-ok observed / 95 % upper | ACCEPT p99 |
+|---|---|---|---|---|---|
+| 4-bit ALU, random operations | 5,000 | 0 | 0 | 0 / 6.0 × 10⁻⁴ | 497 ms |
+| 4-bit staged register, random words | 5,000 | 0 (stage and master) | 0 | 0 / 6.0 × 10⁻⁴ | 170 ms |
+| 4-bit accumulator, random programs | 2,000 | 0 (stage and master) | 0 | 0 / 1.5 × 10⁻³ | 490 ms |
+| 4-bit channel, re-validation after the relay fix (freeze re-issued) | 100,000 | 0 | 0 | 0 / 3.0 × 10⁻⁵ | 170 ms |
+
+Before the fixes the same harness measured, at a harsher mix: accumulator 7 hangs in 40,
+ALU 6 refusals in 500, register 10 non-ok in 5,000 (2 master faults). These are composition
+checks with a recorded trial count, not attempts on the silent-error bound.
+
+## What did not work
+
+Rate-mode ANDs as the operand gate, the mux and the copy (leaks under the latch-rate
+spread); the hold through the 2.2× inhibitor (relay paralysis); a direct host load of the
+master at power-up in the campaign (its W_M rise resets the stage mid-instruction; programs
+now start with MOV). Two runner bugs were mine, not the circuit's: reading W_M's dying train
+as commit-done, and injecting the "opposite rail" of the producer word instead of the staged
+word.
+
+## What remains rate-mode, and why it matters
+
+B xor SUB, the adder's sum and carry, and the zero tree have inputs with no fixed order and
+stay rate-mode ANDs at 0.65. They expose one input for a whole transaction when the other
+rail never comes, and at the harsher mix they still produced ~0.4 % refusals (never a wrong
+value) before the campaigns above. An ordered full adder (per-bit delay of x so that the
+carry is always the earlier operand) would move the whole adder onto veto relays; it is the
+next gate-work item, ahead of the RAM and the control machine.

@@ -18,11 +18,11 @@ drive_quanta:
   ignite: 4655
   relay_in: 4655
 resources:
-  neurons: 227
-  synapses: 455
-  excitatory_synapses: 288
-  inhibitory_synapses: 167
-  total_abs_quanta: 1707418
+  neurons: 264
+  synapses: 529
+  excitatory_synapses: 325
+  inhibitory_synapses: 204
+  total_abs_quanta: 1965420
 latency:
   accept_ms_mean: 244.3
   accept_ms_max: 245.5
@@ -30,11 +30,11 @@ initiation_interval:
   cycle_ms_mean: 422.3
   cycle_ms_max: 423.5
 activity:
-  spikes_per_transaction_total: 1723.6
+  spikes_per_transaction_total: 2092.0
   spikes_per_transaction_by_class:
     latch: 1227.6
     gate: 79.4
-    control: 416.6
+    control: 785.0
   output_port_spikes_per_transaction: 117.9
   latch_member_rate_hz_while_holding: 212.8
   sustained_duty_cycle: a held latch fires continuously at the rate above until reset
@@ -57,14 +57,10 @@ delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in
 stray_input_tolerance: null
 campaign: null
 timing_assumptions:
-- READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed
+- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
   reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition
-- 'edge relays: relay fires ~2.5 ms after the source''s first spike, its inhibitor''s
-  pulse lands ~5.3 ms after; ordering margin ~2.8 ms nominal'
+- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s
+  pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence'
 - loads (upstream DATA) arrive only after READY
 notes:
-- 'dual-rail full adder: sum = XOR(XOR(a,b),c) with latched stages, carry = 2-of-3
-  majority'
-- 'final build: AND input fraction 0.65, fault gates 0.55, ignition 1.8x need, READY
-  chain 15 hops, adder-internal latches reset at 0.75x, producer watchdog'
-- no campaign of its own; the 4-bit adder campaign covers its primitives
+- dual-rail full adder as a channel; relay-hold build

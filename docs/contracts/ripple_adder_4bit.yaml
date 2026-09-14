@@ -18,24 +18,24 @@ drive_quanta:
   ignite: 4655
   relay_in: 4655
 resources:
-  neurons: 558
-  synapses: 1186
-  excitatory_synapses: 745
-  inhibitory_synapses: 441
-  total_abs_quanta: 4230159
+  neurons: 603
+  synapses: 1276
+  excitatory_synapses: 790
+  inhibitory_synapses: 486
+  total_abs_quanta: 4343289
 latency:
-  accept_ms_mean: 366.2
-  accept_ms_max: 373.8
+  accept_ms_mean: 360.8
+  accept_ms_max: 373.7
 initiation_interval:
-  cycle_ms_mean: 544.2
-  cycle_ms_max: 551.8
+  cycle_ms_mean: 538.8
+  cycle_ms_max: 551.7
 activity:
-  spikes_per_transaction_total: 7394.8
+  spikes_per_transaction_total: 9297.5
   spikes_per_transaction_by_class:
-    latch: 5825.0
-    gate: 418.0
-    control: 1151.8
-  output_port_spikes_per_transaction: 330.0
+    latch: 5805.3
+    gate: 416.3
+    control: 3075.8
+  output_port_spikes_per_transaction: 332.8
   latch_member_rate_hz_while_holding: 212.8
   sustained_duty_cycle: a held latch fires continuously at the rate above until reset
   quiescent_spikes_between_ready_and_next_load: 0
@@ -81,18 +81,18 @@ campaign:
       max: 409.6
       p99: 387.90000000000003
     neurons: 558
+    perturbation_text: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q,
+      arrival jitter ≤100 steps
+    tx_period_ms: 700.0
     wall_minutes: 279.55070790449776
 timing_assumptions:
-- READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed
+- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
   reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition
-- 'edge relays: relay fires ~2.5 ms after the source''s first spike, its inhibitor''s
-  pulse lands ~5.3 ms after; ordering margin ~2.8 ms nominal'
+- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s
+  pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence'
 - loads (upstream DATA) arrive only after READY
 notes:
-- '4-bit ripple-carry adder as a channel: producer (A,B,cin) -> latched adder -> 5-bit
-  consumer register; watchdog 100 hops (~530 ms)'
-- 'final build: AND input fraction 0.65, fault gates 0.55, ignition 1.8x need, READY
-  chain 15 hops, adder-internal latches reset at 0.75x, producer watchdog'
-- 'composition campaign: 100,002 random additions at mix B, 0 wrong sums (95 % upper
-  limit 3.0e-5); 64 non-ok (6.4e-4): 31 raised neurally (30 faults, 1 timeout), 33
-  harness-observed (24 no-accept, 9 stale activity)'
+- 4-bit ripple-carry adder as a channel; relay-hold build (the campaign predates that
+  fix)
+- campaign classifier of that run filed FAULT-ACCEPTs without completion as no_accept
+  (see a2_liveness.md)

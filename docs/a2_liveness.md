@@ -80,7 +80,7 @@ released together by a completion stage), which is recorded for the A2 gate work
 
 | run | transactions | ok | wrong value | fault (neural) | timeout (neural) | hangs | stale | non-ok observed / 95 % upper |
 |---|---|---|---|---|---|---|---|---|
-| 4-bit ripple adder, final build, random operands | 100,002 | 99,938 | 0 | 30 | 1 | 24 | 9 | 6.4e-04 / 7.9e-04 |
+| 4-bit ripple adder, final build, random operands | 100,002 | 99,938 | 0 | 30 | 1 | 24 (old rule; includes refused words, see note) | 9 | 6.4e-04 / 7.9e-04 |
 
 Reading: no wrong value was ever consumed in 3 × 10⁵ channel transactions and 10⁵
 random additions (exact 95 % upper limits 3.0 × 10⁻⁵ each). The watchdog never fired
@@ -93,7 +93,7 @@ not a wrong sum. The missing completions are the class the watchdog was built fo
 did not catch: an addition whose producer register activated (the watchdog started) but
 where cancellation or the chain itself failed, or a hang that lasted beyond the 700 ms
 window but resolved before the watchdog's 530 ms deadline had expired in the run's own
-timeline — separating these needs a per-case dump and is the first item of A2's gate work. The hangs the watchdog is designed to catch (a transaction
+timeline — separating these needs a per-case dump and is the first item of A2's gate work. **Note (2026-09-14, step 6):** the classifier of these runs promoted a transaction to `fault` only if it had completed; a FAULT-ACCEPT without completion (the fault gate fires, the word is refused, the four phases run) was filed as `no_accept`. Under the corrected rule (`a2_alu_register.md` §2.3) most of these 24 are neural refusals, not hangs; the adder row's `no_accept` column is therefore an upper bound on hangs. The hangs the watchdog is designed to catch (a transaction
 that starts and never completes) did not occur in these runs; the two `no_accept` cases in
 the M1-build run were not converted to timeouts either, which means they were not
 "started and stalled" — most likely the producer register never activated (a failed load

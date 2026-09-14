@@ -19,8 +19,20 @@ from ..sim.model import Params
 
 
 def measure_contract(name: str, ch, params: Params, words: list[int], expected: list[int] | None = None,
-                     campaign_summary: dict | None = None, sweep: dict | None = None, notes: list[str] = ()) -> dict:
-    recs, sim, st = run_transactions(ch, params, words, expected=expected, max_steps_per_tx=20000)
+                     campaign_summary: dict | None = None, sweep: dict | None = None, notes: list[str] = (),
+                     runner=None, timing_assumptions: list[str] | None = None) -> dict:
+    """`runner()` (optional) replaces run_transactions for blocks with their own protocol (a
+    staged register: `run_commits`); it must return (records, sim, stats) with records carrying
+    load_step / accept_step / ready_step and stats carrying completed, correct, cycle_ms."""
+    if runner is None:
+        recs, sim, st = run_transactions(ch, params, words, expected=expected, max_steps_per_tx=20000)
+    else:
+        recs, sim, st = runner()
+        st = dict(st)
+        st.setdefault("completed", st.get("committed"))
+        st.setdefault("accept_latency_ms", st.get("accept_ms"))
+        st["cycle_ms"] = [c for c in st["cycle_ms"] if c is not None]
+        st.setdefault("spikes_per_tx", st["total_spikes"] / max(1, len(recs)))
     net, drive = ch.net, ch.drive
     roles = net.roles
     ev = sim.trace.events
@@ -52,11 +64,16 @@ def measure_contract(name: str, ch, params: Params, words: list[int], expected: 
         pulses = 1 + sum(1 for r in roles if r.startswith(f"{prefix}.reset_relay"))
         reset_energy[reg_name] = {"pulses": pulses, "quanta_per_pulse": int(q), "quanta_per_reset": int(q * pulses),
                                   "mv_equivalent_per_reset": round(q * pulses * params.w_unit, 1)}
-    # quiescent activity: spikes between READY and the next load
+    # quiescent activity: spikes between READY and the next load (a staged register's master
+    # legitimately holds its value across that gap, so its neurons are excluded)
+    master = getattr(ch, "master", None)
+    m_prefix = roles[master.reset_trigger][: -len(".reset")] + "." if master is not None else None
+    holders = np.array([m_prefix is not None and roles[n].startswith(m_prefix) for n in range(net.n)])
     quiet = 0
     for k, r in enumerate(recs[:-1]):
         nxt = recs[k + 1].load_step
-        quiet += int(((ev["step"] > r.ready_step) & (ev["step"] < nxt)).sum())
+        gap = (ev["step"] > r.ready_step) & (ev["step"] < nxt)
+        quiet += int((gap & ~holders[ev["neuron"]]).sum())
     contract = {
         "primitive": name,
         "profile": 3,
@@ -79,9 +96,9 @@ def measure_contract(name: str, ch, params: Params, words: list[int], expected: 
         "delay_jitter_tolerance": "not measured: per-synapse delays are shared topology in this backend",
         "stray_input_tolerance": sweep,
         "campaign": campaign_summary,
-        "timing_assumptions": [
-            "READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition",
-            "edge relays: relay fires ~2.5 ms after the source's first spike, its inhibitor's pulse lands ~5.3 ms after; ordering margin ~2.8 ms nominal",
+        "timing_assumptions": timing_assumptions or [
+            "READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition",
+            "edge relays: relay fires ~1.8 ms after the source's first spike, its inhibitor's pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence",
             "loads (upstream DATA) arrive only after READY",
         ],
         "notes": list(notes),

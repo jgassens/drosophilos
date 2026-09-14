@@ -66,7 +66,8 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
     return trigger, inh, edge
 
 
-def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2) -> int:
+def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),
+                   hold_strength: float = 0.25) -> int:
     """A relay that fires exactly once per activation of `source`, however long the source's
     train lasts (feed-forward inhibition from the same source). Used so that DATA and gate
     outputs ignite a latch once instead of driving it continuously, which would push the
@@ -79,12 +80,31 @@ def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength:
     loop it still lost ~0.1 % of the time at 4 % noise (campaign), dropping a bit each time.
     The inhibition (2.2x loop per spike) then outweighs the relay's drive for the rest of the
     train; the relay recovers from the resulting after-hyperpolarisation in ~50 ms, which
-    every relay here gets (its source restarts >= 100 ms later)."""
+    every relay here gets (its source restarts >= 100 ms later).
+
+    `hold_from`: extra trains that drive the inhibitor. The source-train inhibition only holds
+    the relay for a fast source (a 213 Hz latch train); a rate-mode gate fires at ~25-40 Hz,
+    the inhibition (peak ~22 mV, tau_m) has decayed to ~5 mV by the next gate spike, and the
+    relay fires again: measured every ~43 ms for a whole transaction. Each re-fire is an extra
+    ignition pulse into a running latch, which then reads ~10 % fast to every rate-mode gate
+    downstream and tips one-input ANDs (the ALU's 1 % fault rate; likely the adder's residual
+    3e-4). A gate -> latch relay therefore also takes the ignited latch's own train, through a
+    separate light interneuron (hold_strength x loop per spike, 0.25x: ~17 mV sustained, which
+    blocks the 12.6 mV re-fire pulse with ~11 mV to spare). It must be light: the relay's head
+    start over its own inhibitor is ~5 ms, so a residual hyperpolarisation above ~2 mV at the
+    next activation loses that race. Through the 2.2x inhibitor the hold sat at ~146 mV and
+    needed ~86 ms to decay, and a consumer reset is only ~85 ms before the next load: every
+    relay whose target had held in the previous transaction then failed (measured)."""
     relay = net.neuron(f"{name}.edge")
     inh = net.neuron(f"{name}.edge_inh")
     net.synapse(source, relay, drive.relay_in)
     net.synapse(source, inh, drive.pulse)
     net.synapse(inh, relay, -int(round(strength * drive.loop)))
+    if hold_from:
+        hinh = net.neuron(f"{name}.hold_inh")
+        for h in hold_from:
+            net.synapse(h, hinh, drive.pulse)
+        net.synapse(hinh, relay, -int(round(hold_strength * drive.loop)))
     return relay
 
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..protocol.celement import _ignite_from, add_and_latched, add_or_latched
+from ..protocol.celement import _ignite_from, add_and_latched, add_or_latched, add_veto_relay
 from ..protocol.latch import Latch, add_latch
 from .netlist import Drive, Netlist
 
@@ -70,6 +70,39 @@ class Gates:
         g, l = add_maj_latched(self.net, self.drive, name, [a, b, c])
         self.gates.append(g); self.latches.append(l)
         return l
+
+    # --- ordered (veto-relay) gates: every output is ignited by a one-shot relay driven by a
+    # rail of LATE, vetoed by a rail of EARLY. EARLY must be valid >= ~6 ms before LATE rises
+    # (see add_veto_relay). No rate-mode gate, no exposure window, ~5 ms after LATE.
+    def latch(self, name: str) -> Latch:
+        l = add_latch(self.net, self.drive, name)
+        self.latches.append(l)
+        return l
+
+    def veto(self, name: str, driver: int, vetoes: list[int], target: Latch) -> int:
+        return add_veto_relay(self.net, self.drive, name, driver, vetoes, target)
+
+    def and2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2) -> Rail2:
+        y1, y0 = self.latch(f"{name}.y1"), self.latch(f"{name}.y0")
+        self.veto(f"{name}.y1.a", LATE.r1.u, [EARLY.r0.u], y1)  # E1 and L1
+        self.veto(f"{name}.y0.a", LATE.r0.u, [], y0)  # L0
+        self.veto(f"{name}.y0.b", LATE.r1.u, [EARLY.r1.u], y0)  # E0 and L1  (so y0 = L0 or E0 once L is valid)
+        return Rail2(y0, y1)
+
+    def or2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2) -> Rail2:
+        y1, y0 = self.latch(f"{name}.y1"), self.latch(f"{name}.y0")
+        self.veto(f"{name}.y1.a", LATE.r1.u, [], y1)  # L1
+        self.veto(f"{name}.y1.b", LATE.r0.u, [EARLY.r0.u], y1)  # E1 and L0
+        self.veto(f"{name}.y0.a", LATE.r0.u, [EARLY.r1.u], y0)  # E0 and L0
+        return Rail2(y0, y1)
+
+    def xor2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2) -> Rail2:
+        y1, y0 = self.latch(f"{name}.y1"), self.latch(f"{name}.y0")
+        self.veto(f"{name}.y1.a", LATE.r0.u, [EARLY.r0.u], y1)  # E1 and L0
+        self.veto(f"{name}.y1.b", LATE.r1.u, [EARLY.r1.u], y1)  # E0 and L1
+        self.veto(f"{name}.y0.a", LATE.r1.u, [EARLY.r0.u], y0)  # E1 and L1
+        self.veto(f"{name}.y0.b", LATE.r0.u, [EARLY.r1.u], y0)  # E0 and L0
+        return Rail2(y0, y1)
 
     def and2(self, name: str, A: Rail2, B: Rail2) -> Rail2:
         y1 = self._and(f"{name}.y1", A.r1.u, B.r1.u)

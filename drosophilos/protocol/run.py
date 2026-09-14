@@ -70,10 +70,11 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
             sim.add_events(0, [load_step + offsets[i]], [P.rails[i][r].u], [drive.ignite])
         specs = faults.get(k, [])
         injected = []
+        exp = expected[k] if expected is not None else w  # the consumer's word (an adder/ALU expects its result)
         for spec in specs:
             if spec[0] == "corrupt":
                 i = spec[1]
-                r = 1 - ((w >> i) & 1)
+                r = 1 - ((exp >> i) & 1)
                 t = load_step + offsets[i] + 100  # 10 ms after the real bit
                 sim.add_events(0, [t], [Q.rails[i][r].u], [drive.ignite])
                 injected.append(("corrupt", i, t))
@@ -131,7 +132,6 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
         if status == "valid" and fault_spikes and accept_step is not None:
             # a fault after acceptance is flagged, the value stands (spec.md: flag only)
             pass
-        exp = expected[k] if expected is not None else w
         rec = TxRecord(exp, load_step, accept_step, cleared_step, ready_step, decoded, status,
                        fault_spikes, reset_step, injected)
         end = ready_step if ready_step is not None else sim.step_index

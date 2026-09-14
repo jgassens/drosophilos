@@ -1,0 +1,51 @@
+{
+ "transactions": 100000,
+ "counts": {
+  "ok": 100000,
+  "ok_stale_retry": 0,
+  "wrong_value": 0,
+  "fault": 0,
+  "timeout": 0,
+  "no_accept": 0,
+  "no_cleared": 0,
+  "no_ready": 0,
+  "late_activity": 0,
+  "wrong_master": 0,
+  "master_fault": 0,
+  "no_commit": 0,
+  "cascade": 0
+ },
+ "errors": 0,
+ "detected_by": {
+  "neural": 0,
+  "harness_only": 0,
+  "neural_recovered_retries": 0
+ },
+ "observed_non_ok_rate": 0.0,
+ "non_ok_upper_95": 2.9956874019427947e-05,
+ "silent_wrong_value_upper_95": 2.9956874019427947e-05,
+ "accept_latency_ms": {
+  "mean": 154.86720100000002,
+  "max": 186.8,
+  "p99": 169.70000000000002
+ },
+ "spikes_per_tx": {
+  "mean": 1928.89065,
+  "max": 2215
+ },
+ "perturbation": {
+  "weight_sigma": 0.04,
+  "th_sigma_mv": 0.2,
+  "bias_sigma_mv": 0.2,
+  "stray_rate_hz": 5.0,
+  "stray_quanta": 150,
+  "arrival_jitter_steps": 100
+ },
+ "perturbation_text": "w~LN(0,0.04), Vth\u00b10.2 mV, bias\u00b10.2 mV, stray 5.0 Hz\u00d7150 q, arrival jitter \u2264100 steps",
+ "neurons": 201,
+ "synapses": 395,
+ "tx_period_ms": 450.0,
+ "wall_minutes": 123.2681120634079,
+ "device": "cpu",
+ "dtype": "torch.float64"
+}

@@ -18,24 +18,24 @@ drive_quanta:
   ignite: 4655
   relay_in: 4655
 resources:
-  neurons: 194
-  synapses: 381
-  excitatory_synapses: 243
-  inhibitory_synapses: 138
-  total_abs_quanta: 1463055
+  neurons: 201
+  synapses: 395
+  excitatory_synapses: 250
+  inhibitory_synapses: 145
+  total_abs_quanta: 1494737
 latency:
-  accept_ms_mean: 155.6
-  accept_ms_max: 156.7
+  accept_ms_mean: 155.5
+  accept_ms_max: 156.8
 initiation_interval:
-  cycle_ms_mean: 333.6
-  cycle_ms_max: 334.7
+  cycle_ms_mean: 333.5
+  cycle_ms_max: 334.8
 activity:
-  spikes_per_transaction_total: 1685.2
+  spikes_per_transaction_total: 1951.0
   spikes_per_transaction_by_class:
-    latch: 1198.2
-    gate: 70.4
-    control: 416.6
-  output_port_spikes_per_transaction: 226.2
+    latch: 1197.3
+    gate: 70.7
+    control: 683.0
+  output_port_spikes_per_transaction: 226.0
   latch_member_rate_hz_while_holding: 212.8
   sustained_duty_cycle: a held latch fires continuously at the rate above until reset
   quiescent_spikes_between_ready_and_next_load: 0
@@ -54,105 +54,7 @@ fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source
   (no load); measured on the real connectome as isolation cost instead (H0)'
 delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
   backend'
-stray_input_tolerance:
-  note: measured on the M1 build (AND 0.75, 2x ignition); the final build has tighter
-    latch rates and a slower AND, so these are indicative, not exact
-  w0.06:
-    perturbation: w~LN(0,0.06), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0017
-    counts:
-      ok: 9983
-      wrong_value: 0
-      fault: 1
-      no_accept: 4
-      no_cleared: 0
-      no_ready: 0
-      late_activity: 12
-  w0.08:
-    perturbation: w~LN(0,0.08), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0173
-    counts:
-      ok: 9827
-      wrong_value: 1
-      fault: 2
-      no_accept: 63
-      no_cleared: 1
-      no_ready: 21
-      late_activity: 85
-  w0.10:
-    perturbation: w~LN(0,0.1), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0703
-    counts:
-      ok: 9297
-      wrong_value: 3
-      fault: 10
-      no_accept: 326
-      no_cleared: 14
-      no_ready: 92
-      late_activity: 258
-  th0.5:
-    perturbation: w~LN(0,0.04), Vth±0.5 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0026
-    counts:
-      ok: 9974
-      wrong_value: 0
-      fault: 0
-      no_accept: 11
-      no_cleared: 0
-      no_ready: 0
-      late_activity: 15
-  th1.0:
-    perturbation: w~LN(0,0.04), Vth±1.0 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.2886
-    counts:
-      ok: 7114
-      wrong_value: 33
-      fault: 196
-      no_accept: 1791
-      no_cleared: 85
-      no_ready: 297
-      late_activity: 484
-  stray20:
-    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 20.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0002
-    counts:
-      ok: 9998
-      wrong_value: 0
-      fault: 2
-      no_accept: 0
-      no_cleared: 0
-      no_ready: 0
-      late_activity: 0
-  stray50:
-    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 50.0 Hz×150 q, arrival
-      jitter ≤100 steps
-    error_rate: 0.0087
-    counts:
-      ok: 9913
-      wrong_value: 0
-      fault: 67
-      no_accept: 20
-      no_cleared: 0
-      no_ready: 0
-      late_activity: 0
-  jitter400:
-    perturbation: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q, arrival
-      jitter ≤400 steps
-    error_rate: 0.0
-    counts:
-      ok: 10000
-      wrong_value: 0
-      fault: 0
-      no_accept: 0
-      no_cleared: 0
-      no_ready: 0
-      late_activity: 0
+stray_input_tolerance: null
 campaign:
   final_build_1e5_mix_B:
     transactions: 100000
@@ -179,43 +81,51 @@ campaign:
       max: 184.8
       p99: 170.3
     neurons: 194
+    perturbation_text: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q,
+      arrival jitter ≤100 steps
+    tx_period_ms: 450.0
     wall_minutes: 105.81074861685435
-  m1_build_1e6_mix_B (AND 0.75, 2x ignition, no watchdog):
-    transactions: 1000000
+  relay_hold_build_1e5_mix_B:
+    transactions: 100000
     counts:
-      ok: 999978
+      ok: 100000
+      ok_stale_retry: 0
       wrong_value: 0
-      fault: 3
-      no_accept: 11
+      fault: 0
+      timeout: 0
+      no_accept: 0
       no_cleared: 0
       no_ready: 0
-      late_activity: 8
-    errors: 22
+      late_activity: 0
+      wrong_master: 0
+      master_fault: 0
+      no_commit: 0
+      cascade: 0
+    errors: 0
     detected_by:
-      neural: 3
-      harness_only: 19
-    observed_non_ok_rate: 2.2e-05
-    non_ok_upper_95: 3.141466232317455e-05
-    silent_wrong_value_upper_95: 2.9957277863525433e-06
+      neural: 0
+      harness_only: 0
+      neural_recovered_retries: 0
+    observed_non_ok_rate: 0.0
+    non_ok_upper_95: 2.9956874019427947e-05
+    silent_wrong_value_upper_95: 2.9956874019427947e-05
     accept_latency_ms:
-      mean: 109.45042015462171
-      max: 130.9
-      p99: 119.4
-    neurons: 125
-    wall_minutes: 327.3533274849256
+      mean: 154.86720100000002
+      max: 186.8
+      p99: 169.70000000000002
+    neurons: 201
+    perturbation_text: w~LN(0,0.04), Vth±0.2 mV, bias±0.2 mV, stray 5.0 Hz×150 q,
+      arrival jitter ≤100 steps
+    tx_period_ms: 450.0
+    wall_minutes: 123.2681120634079
 timing_assumptions:
-- READY/CLEARED = 11-hop delay chain (~58 ms) after the reset trigger; must exceed
+- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
   reset settling (~21 ms, 4 pulses) plus member recovery from ~-45 mV total inhibition
-- 'edge relays: relay fires ~2.5 ms after the source''s first spike, its inhibitor''s
-  pulse lands ~5.3 ms after; ordering margin ~2.8 ms nominal'
+- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s
+  pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence'
 - loads (upstream DATA) arrive only after READY
 notes:
-- four-phase dual-rail word transport, producer register -> consumer register with
-  completion tree, producer watchdog (55 hops ~ 290 ms) raising FAULT-ACCEPT on timeout
-- 'final build: AND input fraction 0.65, fault gates 0.55, ignition 1.8x need (doublet-free),
-  READY chain 15 hops (~80 ms)'
-- 'liveness: a transaction that never completes is refused neurally (TIMEOUT latch
-  -> FAULT-ACCEPT); stale state after a reset is harness-observed only (monitor rejected
-  on measurement, docs/a2_liveness.md)'
-- 'status: FROZEN for A2/B (2026-09-14): protocol, drives, chain lengths and the watchdog
-  are the M1 channel interface; changes require a new campaign'
+- 4-bit transport channel, watchdog 55 hops; relay-hold build (each gate-fed latch
+  holds its ignition relay)
+- 'status: FROZEN for A2/B (2026-09-14), re-issued the same day on the relay-hold
+  build after a 1e5 mix-B re-run with 0 non-ok (docs/a2_alu_register.md section 3.1)'

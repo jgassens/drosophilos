@@ -19,8 +19,10 @@ from .latch import Latch, add_edge_relay, add_latch
 def _ignite_from(net: Netlist, drive: Drive, name: str, gate: int, latch: Latch) -> None:
     """Gate -> latch through an edge relay: one ignition pulse per gate activation. A gate
     that kept pulsing the latch would add a second drive on top of the loop and let the
-    latch ride through the reset train (observed on valid and tree latches)."""
-    relay = add_edge_relay(net, drive, f"{name}.ign", gate)
+    latch ride through the reset train (observed on valid and tree latches). The ignited
+    latch's train holds the relay down (hold_from): a gate source is too slow to do that
+    itself, and a re-firing relay re-ignites the latch every ~43 ms (see add_edge_relay)."""
+    relay = add_edge_relay(net, drive, f"{name}.ign", gate, hold_from=[latch.u])
     net.synapse(relay, latch.u, drive.ignite)
 
 
@@ -71,3 +73,29 @@ def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: li
         level = nxt
         depth += 1
     return level[0], internal
+
+
+def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: list[int], target: Latch,
+                   veto_strength: float = 0.5) -> int:
+    """driver AND NOT(any veto), evaluated once at the driver's rise, as a one-shot ignition of
+    `target`. The driver is a latch train (so the relay's own feed-forward inhibition and the
+    target's train keep it to one pulse); each veto is a latch train that, while live, holds
+    the relay ~146 mV below rest through one inhibitory interneuron, against which the 12.6 mV
+    driver pulse cannot fire it. There is no exposure window: unlike a rate-mode AND, the
+    relay never integrates one input towards threshold.
+
+    Ordering assumption (bounded delay, stated per user): every veto rail must be established
+    >= ~15 ms before the driver rises (0.5x loop per veto spike: ~33 mV sustained, ~3 spikes
+    to block; it recovers in ~55 ms once the veto rail dies, so a vetoed relay may be driven
+    again 55 ms later. 2.2x would block on one spike but paralyse the relay for ~90 ms).
+    Dual-rail supplies NOT for free: to compute a AND b with b the earlier operand, veto with
+    b's other rail. No hold from the target is needed: the driver is a latch train, which the
+    relay's own source inhibition already turns into one shot."""
+    relay = add_edge_relay(net, drive, name, driver)
+    if vetoes:
+        v = net.neuron(f"{name}.veto")
+        for t in vetoes:
+            net.synapse(t, v, drive.pulse)
+        net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
+    net.synapse(relay, target.u, drive.ignite)
+    return relay

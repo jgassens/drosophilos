@@ -55,20 +55,43 @@ def clopper_pearson_upper(k: int, n: int, conf: float = 0.95) -> float:
 
 
 def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None,
-                 timeout_n: int = -1, stale_ns=()):
+                 timeout_n: int = -1, stale_ns=(), m_taps=None, m_done: int = -1, words=None, chain_fn=None):
     """Classify every transaction of one node from its (sorted) spike arrays. `debug`, if a
     list, receives (class, details) tuples for every non-ok transaction."""
     out = []
     n_tx = len(loads)
+    prev_m = None  # the master's decoded value at the end of the previous period (stateful programs)
     for k in range(n_tx):
         lo = loads[k]
         hi = loads[k + 1] if k + 1 < n_tx else steps[-1] + 1 if len(steps) else lo + 1
         m = (steps >= lo) & (steps < hi)
         st, nu = steps[m], neurons[m]
         cls, acc_lat = None, None
+        exp_k = expected[k]
+        if chain_fn is not None:  # expectation from the state the machine actually holds, not the precomputed chain
+            exp_k = chain_fn(prev_m, words[k])
+        m_val, m_status = None, None
+        if m_taps is not None:  # decode the master at the end of the period whatever happened
+            t_end = int(hi) - 1
+            act_m = set(nu[(st > t_end - window) & (st <= t_end)].tolist())
+            mv, ms = 0, "valid"
+            for i, (r0, r1) in enumerate(m_taps):
+                a0, a1 = r0 in act_m, r1 in act_m
+                if a0 and a1:
+                    ms = "fault"
+                elif not (a0 or a1):
+                    ms = "incomplete"
+                elif a1:
+                    mv |= 1 << i
+            m_val, m_status = (mv if ms == "valid" else None), ms
         acc = st[nu == comp]
-        if len(acc) == 0:
-            cls = "no_accept"
+        n_fault_early = int(np.isin(nu, faults).sum())
+        if exp_k is None:
+            cls = "cascade"  # the previous state was lost, so this transaction has no known expectation
+        elif len(acc) == 0:
+            # no completion: a FAULT-ACCEPT (fault gate fired, word refused by the machine) is a
+            # neural detection, not a hang. Campaigns before 2026-09-14 filed these as no_accept.
+            cls = "fault" if n_fault_early else "no_accept"
         else:
             s_acc = int(acc[0])
             acc_lat = s_acc - lo
@@ -85,7 +108,7 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
                     value |= 1 << i
             if status != "valid":
                 cls = "fault" if status == "fault" else "no_accept"
-            elif value != expected[k]:
+            elif value != exp_k:
                 cls = "wrong_value"
             elif (nu[st >= s_acc] == cleared).sum() == 0:
                 cls = "no_cleared"
@@ -113,6 +136,17 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
             cls = "timeout"
         if cls == "ok" and len(stale_ns) and np.isin(nu, stale_ns).any():
             cls = "ok_stale_retry"
+        if m_taps is not None and cls in ("ok", "late_activity", "ok_stale_retry"):
+            # staged commit: W_M must re-ignite after ACCEPT, and the master must hold the
+            # staged word at the end of the period (the next commit is a whole cycle away)
+            s_acc = int(acc[0])
+            if not ((nu == m_done) & (st > s_acc + 200)).any():
+                cls = "no_commit"
+            elif m_status != "valid":
+                cls = "master_fault"
+            elif m_val != exp_k:
+                cls = "wrong_master"
+        prev_m = m_val
         if cls not in ("ok", "late_activity") and debug is not None:
             # which neurons were active in the last 40 ms before the end of the window (or
             # around the first fault spike): translated to roles by the caller
@@ -131,7 +165,12 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
 def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 200, tx_per_chunk: int = 20,
                  tx_period_steps: int = 3200, pert: Perturbation = Perturbation(), seed: int = 0,
                  out_path: Path | None = None, expected_fn=None, word_fn=None, device: str = "cpu",
-                 dtype=torch.float64, verbose: bool = True, debug: bool = False) -> dict:
+                 dtype=torch.float64, verbose: bool = True, debug: bool = False, program_fn=None, chain_fn=None,
+                 on_chunk=None) -> dict:
+    """`program_fn(rng, loads) -> (words, expected, events)` replaces word_fn/expected_fn for
+    stateful programs (an accumulator): `events` are extra (step, neuron, quanta) host
+    injections for that node (initial image, COMMIT tokens). If the channel has a staged
+    register (`master` attribute), the master is checked after every commit."""
     ch: Channel = build_fn()
     net, drive = ch.net, ch.drive
     topo = net.topology()
@@ -145,7 +184,10 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
     rng = np.random.default_rng(seed)
     base_q = topo.quanta.astype(np.float64)
     totals = {"ok": 0, "ok_stale_retry": 0, "wrong_value": 0, "fault": 0, "timeout": 0, "no_accept": 0, "no_cleared": 0,
-              "no_ready": 0, "late_activity": 0}
+              "no_ready": 0, "late_activity": 0, "wrong_master": 0, "master_fault": 0, "no_commit": 0, "cascade": 0}
+    master = getattr(ch, "master", None)
+    m_taps = master.rail_taps if master is not None else None
+    m_done = master.completion.u if master is not None else -1
     timeout_n = P.watchdog.timeout.u if P.watchdog is not None else -1
     stale_ns = np.array([reg.monitor.stale.u for reg in (P, Q) if reg.monitor is not None], dtype=np.int64)
     lat_all, spikes_all = [], []
@@ -169,10 +211,19 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
         expected = np.zeros((B, K), dtype=np.int64)
         for b in range(B):
             st_, ne_, qu_ = [], [], []
+            prog = program_fn(rng, loads.tolist()) if program_fn else None
+            if prog is not None:
+                for (t_, n_, q_) in prog[2]:
+                    st_.append(int(t_)); ne_.append(int(n_)); qu_.append(int(q_))
             for k in range(K):
-                w = int(word_fn(rng)) if word_fn else int(rng.integers(0, 1 << ch.width))
-                words[b, k] = w
-                expected[b, k] = expected_fn(w) if expected_fn else w
+                if prog is not None:
+                    w = int(prog[0][k])
+                    words[b, k] = w
+                    expected[b, k] = int(prog[1][k])
+                else:
+                    w = int(word_fn(rng)) if word_fn else int(rng.integers(0, 1 << ch.width))
+                    words[b, k] = w
+                    expected[b, k] = expected_fn(w) if expected_fn else w
                 for i, r in rails_for(w, ch.width):
                     off = int(rng.integers(0, pert.arrival_jitter_steps + 1)) if pert.arrival_jitter_steps else 0
                     st_.append(loads[k] + off); ne_.append(P.rails[i][r].u); qu_.append(drive.ignite)
@@ -192,13 +243,16 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
         order = np.lexsort((ev["step"], ev["node"]))
         ev = ev[order]
         node_bounds = np.searchsorted(ev["node"], np.arange(B + 1))
+        if on_chunk is not None:  # debugging hook: the sorted events of this chunk and its schedule
+            on_chunk(ch, ev, words, expected, loads)
         chunk_counts = dict.fromkeys(totals, 0)
         lats, spk = [], []
         for b in range(B):
             sl = slice(node_bounds[b], node_bounds[b + 1])
             dbg = [] if debug else None
             res = _decode_node(ev["step"][sl], ev["neuron"][sl], taps, comp, cleared, ready, faults, consumer_set,
-                               loads.tolist(), expected[b].tolist(), window, dbg, timeout_n, stale_ns)
+                               loads.tolist(), expected[b].tolist(), window, dbg, timeout_n, stale_ns, m_taps, m_done,
+                               words[b].tolist(), chain_fn)
             if dbg:
                 for cls_, det in dbg:
                     if isinstance(det, dict) and "active" in det:
@@ -241,7 +295,7 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
                         "neural_recovered_retries": totals["ok_stale_retry"]},
         "observed_non_ok_rate": n_err / done,
         "non_ok_upper_95": clopper_pearson_upper(n_err, done),
-        "silent_wrong_value_upper_95": clopper_pearson_upper(totals["wrong_value"], done),
+        "silent_wrong_value_upper_95": clopper_pearson_upper(totals["wrong_value"] + totals["wrong_master"], done),
         "accept_latency_ms": {"mean": float(np.mean(lat_all) * params.dt), "max": float(np.max(lat_all) * params.dt),
                               "p99": float(np.percentile(lat_all, 99) * params.dt)} if lat_all else None,
         "spikes_per_tx": {"mean": float(np.mean(spikes_all)), "max": int(np.max(spikes_all))} if spikes_all else None,
@@ -271,9 +325,10 @@ if __name__ == "__main__":
     ap.add_argument("--jitter", type=int, default=100)
     ap.add_argument("--period", type=int, default=3200)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--watchdog-hops", type=int, default=55, help="the frozen 4-bit channel build uses 55")
     a = ap.parse_args()
     params = Params()
     pert = Perturbation(a.weight_sigma, a.th_sigma, a.bias_sigma, a.stray_hz, 150, a.jitter)
-    s = run_campaign(lambda: build_channel(params, a.width), params, a.n, batch=a.batch, tx_period_steps=a.period,
+    s = run_campaign(lambda: build_channel(params, a.width, watchdog_hops=a.watchdog_hops), params, a.n, batch=a.batch, tx_period_steps=a.period,
                      pert=pert, seed=a.seed, out_path=Path(a.out))
     print(json.dumps({k: v for k, v in s.items() if k != "perturbation"}, indent=1))
