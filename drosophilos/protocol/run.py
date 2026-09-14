@@ -13,6 +13,8 @@ Fault specs (per transaction, list of tuples):
     ("corrupt", bit)                      both rails of `bit` ignited at load
     ("stale", bit, rail, delay_steps)     a pulse on consumer rail (bit, rail) `delay_steps`
                                           after the consumer's reset trigger fires
+    ("stale_internal", role, delay_steps) an ignition pulse into the consumer neuron with
+                                          that role `delay_steps` after the reset trigger
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ class TxRecord:
     fault_spikes: int
     reset_step: int | None = None
     injected: list = field(default_factory=list)
+    timeout_spikes: int = 0
+    stale_retry_spikes: int = 0
 
 
 def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps_per_tx: int = 8000,
@@ -52,6 +56,8 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
     P, Q = ch.producer, ch.consumer
     accept_n, cleared_n, ready_n, qreset_n = Q.completion.u, P.ready, Q.ready, Q.reset_trigger
     fault_set = set(Q.fault)
+    if P.watchdog is not None:
+        fault_set.add(P.watchdog.timeout.u)  # a neural TIMEOUT is a FAULT-ACCEPT source too
     rail_taps = Q.rail_taps
     window = 2 * drive.loop_period_steps
     faults = faults or {}
@@ -81,7 +87,7 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
         first_fault = None
         decoded, status = None, "incomplete"
         pending_late = [s for s in specs if s[0] == "late_opposite"]
-        pending_stale = [s for s in specs if s[0] == "stale"]
+        pending_stale = [s for s in specs if s[0] in ("stale", "stale_internal")]
         deadline = load_step + max(offsets) + max_steps_per_tx
         while sim.step_index < deadline:
             sim.step()
@@ -108,9 +114,14 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
             if reset_step is None and qreset_n in fired:
                 reset_step = s
                 for spec in pending_stale:
-                    i, r, d = spec[1], spec[2], spec[3]
-                    sim.add_events(0, [s + d], [Q.rails[i][r].u], [drive.ignite])
-                    injected.append(("stale", i, r, s + d))
+                    if spec[0] == "stale":
+                        i, r, d = spec[1], spec[2], spec[3]
+                        sim.add_events(0, [s + d], [Q.rails[i][r].u], [drive.ignite])
+                        injected.append(("stale", i, r, s + d))
+                    else:
+                        role, d = spec[1], spec[2]
+                        sim.add_events(0, [s + d], [net.roles.index(role)], [drive.ignite])
+                        injected.append(("stale_internal", role, s + d))
                 pending_stale = []
             if cleared_step is not None and ready_n in fired:
                 ready_step = s
@@ -121,8 +132,19 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
             # a fault after acceptance is flagged, the value stands (spec.md: flag only)
             pass
         exp = expected[k] if expected is not None else w
-        records.append(TxRecord(exp, load_step, accept_step, cleared_step, ready_step, decoded, status,
-                                fault_spikes, reset_step, injected))
+        rec = TxRecord(exp, load_step, accept_step, cleared_step, ready_step, decoded, status,
+                       fault_spikes, reset_step, injected)
+        end = ready_step if ready_step is not None else sim.step_index
+        if P.watchdog is not None:
+            tu = P.watchdog.timeout.u
+            rec.timeout_spikes = int(((tr.events["neuron"] == tu) & (tr.events["step"] >= load_step) & (tr.events["step"] <= end)).sum())
+        for reg in (P, Q):
+            if reg.monitor is not None:
+                su = reg.monitor.stale.u
+                rec.stale_retry_spikes += int(((tr.events["neuron"] == su) & (tr.events["step"] >= load_step) & (tr.events["step"] <= end)).sum())
+        if rec.timeout_spikes and rec.status != "valid":
+            rec.status = "timeout"
+        records.append(rec)
         step = (ready_step if ready_step is not None else sim.step_index) + gap_steps
         if ready_step is None:
             break

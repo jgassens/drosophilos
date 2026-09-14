@@ -4,7 +4,7 @@ completion tree. Adder-internal latches and gates belong to the consumer's reset
 
 from __future__ import annotations
 
-from ..protocol.handshake import Channel, add_register, wire_fault_path
+from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault_path
 from ..protocol.latch import add_edge_relay, connect_trigger
 from ..sim.model import Params
 from .gates import Gates, Rail2
@@ -25,7 +25,8 @@ def operand_word(a: int, b: int, cin: int, width: int) -> int:
     return (a & ((1 << width) - 1)) | ((b & ((1 << width) - 1)) << width) | ((cin & 1) << (2 * width))
 
 
-def build_adder_channel(params: Params, width: int, drive: Drive | None = None) -> Channel:
+def build_adder_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
+                        watchdog_hops: int = 80) -> Channel:
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     P = add_register(net, drive, "P", 2 * width + 1, with_completion=False)
@@ -44,5 +45,7 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None) 
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     connect_trigger(net, drive, P.ready, Q.reset_trigger, Q.reset_edge)  # CLEARED
     wire_fault_path(net, drive, P, Q)
+    if liveness:
+        add_liveness(net, drive, P, Q, watchdog_hops)
     net.group("adder_latches", [x for l in G.latches for x in l.members])
     return Channel(net, drive, 2 * width + 1, P, Q)

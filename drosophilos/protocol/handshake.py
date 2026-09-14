@@ -17,6 +17,7 @@ from ..lib.netlist import Drive, Netlist
 from ..sim.model import Params
 from .celement import add_and_gate, add_completion_tree, add_or_latched
 from .latch import Latch, add_edge_relay, add_latch, add_ready, add_reset, connect_trigger
+from .watchdog import StaleMonitor, Watchdog, add_stale_monitor, add_watchdog
 
 
 @dataclass
@@ -31,6 +32,10 @@ class Register:
     internal: list = field(default_factory=list)
     reset_edge: int = -1
     fault_latch: Latch | None = None
+    last_reset_relay: int = -1
+    ready_chain: list = field(default_factory=list)
+    monitor: StaleMonitor | None = None
+    watchdog: Watchdog | None = None
 
     @property
     def rail_taps(self) -> list[list[int]]:
@@ -59,8 +64,10 @@ def add_register(net: Netlist, drive: Drive, name: str, width: int, with_complet
     reg = Register(rails, -1, -1, -1, valid, fault, completion, internal)
     latches = reg.all_latches()
     trig, inh, edge = add_reset(net, drive, name, latches, gates)
-    ready = add_ready(net, drive, name, trig)
+    ready = add_ready(net, drive, name, trig, hops=15)  # ~80 ms: leaves the stale monitor ~19 ms to land its block
     reg.reset_trigger, reg.reset_inh, reg.ready, reg.reset_edge = trig, inh, ready, edge
+    reg.last_reset_relay = max(x for x, r in enumerate(net.roles) if r.startswith(f"{name}.reset_relay"))
+    reg.ready_chain = [x for x, r in enumerate(net.roles) if r.startswith(f"{name}.ready_delay")]
     net.group(f"{name}.rail_taps", [t for pair in reg.rail_taps for t in pair])
     return reg
 
@@ -108,7 +115,25 @@ def wire_fault_path(net: Netlist, drive: Drive, P: Register, Q: Register) -> Lat
     return F
 
 
-def build_channel(params: Params, width: int, drive: Drive | None = None) -> Channel:
+def add_liveness(net: Netlist, drive: Drive, P: Register, Q: Register, watchdog_hops: int, monitor: bool = False) -> None:
+    """A2: watchdog on the producer (started by its rails, cancelled by ACCEPT / FAULT-ACCEPT).
+    The stale-state monitor is available but off by default: rejected on measurement. Its
+    per-latch detector (a two-input rate-mode AND, tap + ENABLE) sits at 75 % of threshold on
+    the tap alone for ~100 ms per transaction across a dozen latches, and one spurious spike
+    ignites STALE; at mix B that produced false retries in ~2 % of transactions, READY hangs,
+    and, through mid-transaction resets, wrong values. A safe fraction (0.55 + 0.55) detects
+    too slowly to beat READY. Stale state stays harness-observed (and rare: 8 per 10^6)."""
+    P.watchdog = add_watchdog(net, drive, "P.wd", [l.u for pair in P.rails for l in pair],
+                              [Q.completion.u, Q.fault_latch.u], watchdog_hops, P.reset_trigger, P.reset_edge, P.reset_inh)
+    if monitor:
+        for name, reg in (("P", P), ("Q", Q)):
+            taps = [l.u for l in reg.all_latches()] + ([reg.fault_latch.u] if reg.fault_latch is not None else [])
+            reg.monitor = add_stale_monitor(net, drive, f"{name}.mon", taps, reg.last_reset_relay, reg.ready,
+                                            reg.ready_chain[-3:], reg.reset_trigger, reg.reset_edge, reg.reset_inh)
+
+
+def build_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
+                  watchdog_hops: int = 40, monitor: bool = False) -> Channel:
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     P = add_register(net, drive, "P", width, with_completion=False)
@@ -123,6 +148,8 @@ def build_channel(params: Params, width: int, drive: Drive | None = None) -> Cha
     # consumed, and raise FAULT-ACCEPT so the four phases still complete and the channel
     # does not deadlock (spec.md §3). A fault after completion is a flag only.
     wire_fault_path(net, drive, P, Q)
+    if liveness:
+        add_liveness(net, drive, P, Q, watchdog_hops, monitor)
     net.group("accept", [Q.completion.u])
     net.group("cleared", [P.ready])
     net.group("ready", [Q.ready])

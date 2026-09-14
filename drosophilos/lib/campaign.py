@@ -54,7 +54,8 @@ def clopper_pearson_upper(k: int, n: int, conf: float = 0.95) -> float:
     return float(beta.ppf(conf, k + 1, n - k))
 
 
-def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None):
+def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None,
+                 timeout_n: int = -1, stale_ns=()):
     """Classify every transaction of one node from its (sorted) spike arrays. `debug`, if a
     list, receives (class, details) tuples for every non-ok transaction."""
     out = []
@@ -106,6 +107,12 @@ def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_se
         n_fault = int(np.isin(nu, faults).sum())
         if cls == "ok" and n_fault:
             cls = "fault"
+        # neural liveness events: a TIMEOUT latch spike is an architecturally detected refusal;
+        # a STALE latch spike on an otherwise ok transaction is a detected-and-recovered retry
+        if timeout_n >= 0 and (nu == timeout_n).any() and cls != "ok":
+            cls = "timeout"
+        if cls == "ok" and len(stale_ns) and np.isin(nu, stale_ns).any():
+            cls = "ok_stale_retry"
         if cls not in ("ok", "late_activity") and debug is not None:
             debug.append((cls, {"n_spikes_in_window": int(m.sum()), "accept": acc_lat}))
         out.append((cls, acc_lat, int(m.sum())))
@@ -123,11 +130,15 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
     taps = Q.rail_taps
     comp, cleared, ready = Q.completion.u, P.ready, Q.ready
     faults = np.array(Q.fault, dtype=np.int64)
-    consumer_set = {x for x, role in enumerate(net.roles) if role.startswith("Q.") and not role.startswith("Q.ready")}
+    consumer_set = {x for x, role in enumerate(net.roles)
+                    if role.startswith("Q.") and not role.startswith(("Q.ready", "Q.mon."))}
     window = 2 * drive.loop_period_steps
     rng = np.random.default_rng(seed)
     base_q = topo.quanta.astype(np.float64)
-    totals = {"ok": 0, "wrong_value": 0, "fault": 0, "no_accept": 0, "no_cleared": 0, "no_ready": 0, "late_activity": 0}
+    totals = {"ok": 0, "ok_stale_retry": 0, "wrong_value": 0, "fault": 0, "timeout": 0, "no_accept": 0, "no_cleared": 0,
+              "no_ready": 0, "late_activity": 0}
+    timeout_n = P.watchdog.timeout.u if P.watchdog is not None else -1
+    stale_ns = np.array([reg.monitor.stale.u for reg in (P, Q) if reg.monitor is not None], dtype=np.int64)
     lat_all, spikes_all = [], []
     done, chunk_id = 0, 0
     t_start = time.time()
@@ -178,7 +189,7 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
             sl = slice(node_bounds[b], node_bounds[b + 1])
             dbg = [] if debug else None
             res = _decode_node(ev["step"][sl], ev["neuron"][sl], taps, comp, cleared, ready, faults, consumer_set,
-                               loads.tolist(), expected[b].tolist(), window, dbg)
+                               loads.tolist(), expected[b].tolist(), window, dbg, timeout_n, stale_ns)
             if dbg:
                 for cls_, det in dbg:
                     if isinstance(det, list):
@@ -209,13 +220,13 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
             print(f"[campaign] chunk {chunk_id}: {n_chunk} tx in {wall:.0f} s, errors {errs or 'none'}, "
                   f"done {done}/{n_transactions}, elapsed {(time.time()-t_start)/60:.1f} min", flush=True)
         chunk_id += 1
-    n_err = sum(v for k_, v in totals.items() if k_ != "ok")
+    n_err = sum(v for k_, v in totals.items() if k_ not in ("ok", "ok_stale_retry"))
     summary = {
         "transactions": done, "counts": totals, "errors": n_err,
         # who noticed: only `fault` is raised by the neural machine itself; the other classes
         # are inferred by this harness from the spike trace (until neural timeouts exist)
-        "detected_by": {"neural": totals["fault"] + totals.get("timeout", 0) + totals.get("stale_retry", 0),
-                        "harness_only": n_err - totals["fault"] - totals.get("timeout", 0) - totals.get("stale_retry", 0)},
+        "detected_by": {"neural": totals["fault"] + totals["timeout"], "harness_only": n_err - totals["fault"] - totals["timeout"],
+                        "neural_recovered_retries": totals["ok_stale_retry"]},
         "observed_non_ok_rate": n_err / done,
         "non_ok_upper_95": clopper_pearson_upper(n_err, done),
         "silent_wrong_value_upper_95": clopper_pearson_upper(totals["wrong_value"], done),
