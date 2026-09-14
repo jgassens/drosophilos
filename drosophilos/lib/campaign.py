@@ -44,6 +44,16 @@ class Perturbation:
                 f"stray {self.stray_rate_hz} Hz×{self.stray_quanta} q, arrival jitter ≤{self.arrival_jitter_steps} steps")
 
 
+def clopper_pearson_upper(k: int, n: int, conf: float = 0.95) -> float:
+    """Exact one-sided upper confidence limit on a binomial rate (Clopper-Pearson):
+    the largest p such that P(X <= k | n, p) >= 1 - conf. For k = 0 this is 1 - (1-conf)^(1/n)."""
+    from scipy.stats import beta
+
+    if k >= n:
+        return 1.0
+    return float(beta.ppf(conf, k + 1, n - k))
+
+
 def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None):
     """Classify every transaction of one node from its (sorted) spike arrays. `debug`, if a
     list, receives (class, details) tuples for every non-ok transaction."""
@@ -202,7 +212,13 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
     n_err = sum(v for k_, v in totals.items() if k_ != "ok")
     summary = {
         "transactions": done, "counts": totals, "errors": n_err,
-        "error_rate_upper_95": (3.0 / done) if n_err == 0 else n_err / done,
+        # who noticed: only `fault` is raised by the neural machine itself; the other classes
+        # are inferred by this harness from the spike trace (until neural timeouts exist)
+        "detected_by": {"neural": totals["fault"] + totals.get("timeout", 0) + totals.get("stale_retry", 0),
+                        "harness_only": n_err - totals["fault"] - totals.get("timeout", 0) - totals.get("stale_retry", 0)},
+        "observed_non_ok_rate": n_err / done,
+        "non_ok_upper_95": clopper_pearson_upper(n_err, done),
+        "silent_wrong_value_upper_95": clopper_pearson_upper(totals["wrong_value"], done),
         "accept_latency_ms": {"mean": float(np.mean(lat_all) * params.dt), "max": float(np.max(lat_all) * params.dt),
                               "p99": float(np.percentile(lat_all, 99) * params.dt)} if lat_all else None,
         "spikes_per_tx": {"mean": float(np.mean(spikes_all)), "max": int(np.max(spikes_all))} if spikes_all else None,

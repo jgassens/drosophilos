@@ -119,7 +119,14 @@ Reference-exact float64 CPU backend; 5.5 h wall on the M1 Pro.
 | no accept (hang) | 11 | completion never fired |
 | no cleared / no ready | 0 / 0 | |
 | stale activity | 8 | a consumer latch survived the reset train |
-| total non-ok | 22 | 2.2e-05 per transaction |
+| total non-ok | 22 | observed 2.2 × 10⁻⁵; exact one-sided 95 % upper limit (Clopper–Pearson) 3.1 × 10⁻⁵ |
+
+**Who noticed.** Only the 3 false faults were raised by the neural machine itself (the
+fault latch). The 11 no-accept hangs and the 8 stale-activity cases were inferred by the
+benchmark harness from the spike trace (completion never appeared; consumer spikes after
+READY). DrosophilOS has no neural timeout yet, so those 19 are *harness-detected*, not
+*architecturally detected*. Converting them into neural fault/recovery events is the first
+A2 work (§9).
 
 ACCEPT latency: mean 109.5 ms, p99 119.4 ms, max 130.9 ms.
 Spikes per transaction: mean 1198, max 1853.
@@ -129,10 +136,13 @@ Spikes per transaction: mean 1198, max 1853.
 
 - Zero wrong values were ever consumed, in 10⁶ transactions at mix B and in the 10⁴-per-level
   sweep up to 6 % weight noise and ±0.5 mV threshold drift. With zero observed silent
-  failures in 10⁶ trials the 95 % upper bound on the silent-error rate is 3 × 10⁻⁶ — an
-  observed bound, not the 10⁻¹⁰ objective, which remains analytical and unproven.
-- The channel is not yet fully available at this perturbation level: 2.2 × 10⁻⁵ of
-  transactions end in a detected refusal or a hang. A second 2 × 10⁵ run at another seed
+  failures in 10⁶ trials the exact 95 % upper limit on the silent-error rate is 3.0 × 10⁻⁶ —
+  an observed bound, not the 10⁻¹⁰ objective, which remains analytical and unproven, and
+  which further brute-force simulation will not reach; it has to come from architectural
+  protection, detection, retry, redundancy and analysis.
+- The channel is not yet fully available at this perturbation level: an observed
+  2.2 × 10⁻⁵ (95 % upper limit 3.1 × 10⁻⁵) of transactions end in a refusal or a hang, and
+  only the refusals are detected neurally. A second 2 × 10⁵ run at another seed
   gave 2 in 2 × 10⁵, the same order. The one hang caught with a timeline was a completion
   latch still firing late in the reset train, i.e. a reset-margin case, not a protocol
   case. Timeouts (which the abstract machine already needs for lost tokens) would convert
@@ -140,6 +150,23 @@ Spikes per transaction: mean 1198, max 1853.
   recovery. Both are recorded as A2 work, not hidden.
 - At mix A (3 % / ±0.15 mV / 5 Hz / ≤ 10 ms) every sample so far has been clean; a 10⁶ run
   there was not made because it would only move the observed bound, not the mechanism.
+- The campaign ran on the 4-bit transport channel, not on the adder. The adders are built
+  from the same primitives and inherit their measured margins, but a 444-neuron network can
+  expose interactions the primitive margins do not predict; a 10⁵ composition campaign on
+  the ripple adder precedes freezing the channel contract (§9).
+
+**Verdict:** M1 is closed for functional correctness and safety (no silent errors), with a
+residual liveness/availability defect carried forward into A2/B — not "fully reliable".
+
+## 9. Opening sequence for A2/B (from the M1 review)
+
+1. Neural timeout / watchdog behaviour.
+2. Convert no-ACCEPT / no-READY into an explicit, recoverable, neurally raised transaction fault.
+3. Harden reset so that stale state after the train is either eliminated or detected
+   neurally before READY is issued.
+4. A 10⁵ random-addition campaign at mix B on the complete 4-bit adder.
+5. Freeze the M1 channel contract.
+6. Then the ALU, word register with staged commit, RAM, ROM and control machine.
 
 ## 6. What did not work, in the order it happened
 

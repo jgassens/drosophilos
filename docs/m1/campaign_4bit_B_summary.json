@@ -10,7 +10,6 @@
   "late_activity": 8
  },
  "errors": 22,
- "error_rate_upper_95": 2.2e-05,
  "accept_latency_ms": {
   "mean": 109.45042015462171,
   "max": 130.9,
@@ -34,5 +33,12 @@
  "tx_period_ms": 320.0,
  "wall_minutes": 327.3533274849256,
  "device": "cpu",
- "dtype": "torch.float64"
+ "dtype": "torch.float64",
+ "detected_by": {
+  "neural": 3,
+  "harness_only": 19
+ },
+ "observed_non_ok_rate": 2.2e-05,
+ "non_ok_upper_95": 3.141466232317455e-05,
+ "silent_wrong_value_upper_95": 2.9957277863525433e-06
 }

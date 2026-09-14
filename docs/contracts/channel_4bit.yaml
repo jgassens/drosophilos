@@ -162,7 +162,12 @@ campaign:
     no_ready: 0
     late_activity: 8
   errors: 22
-  error_rate_upper_95: 2.2e-05
+  detected_by:
+    neural: 3
+    harness_only: 19
+  observed_non_ok_rate: 2.2e-05
+  non_ok_upper_95: 3.141466232317455e-05
+  silent_wrong_value_upper_95: 2.9957277863525433e-06
   accept_latency_ms:
     mean: 109.45042015462171
     max: 130.9
@@ -182,5 +187,9 @@ timing_assumptions:
 notes:
 - four-phase dual-rail word transport, producer register -> consumer register with
   completion tree
-- 'campaign: 10^6 transactions at mix B, 0 wrong values consumed, 2.2e-5 detected
-  refusals/hangs'
+- 'campaign: 10^6 transactions at mix B, 0 wrong values consumed (95 % upper limit
+  3.0e-6); 22 non-ok (observed 2.2e-5, upper limit 3.1e-5): 3 raised neurally (fault
+  latch), 19 noticed by the harness only (no neural timeout yet)'
+- 'status: M1 closed for functional correctness and safety; liveness/availability
+  defect carried into A2/B; contract not frozen until the watchdog, stale-state detection
+  and the adder composition campaign land'

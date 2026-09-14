@@ -422,8 +422,11 @@ author. Connectome: MCNS v1.0, HHMI Janelia FlyEM project team and collaborators
 
 - 10⁶ four-bit transactions under perturbation (4 % weight noise, ±0.2 mV threshold and
   bias, 5 Hz × 2.6 mV stray input on every neuron, ≤ 10 ms arrival jitter): **0 wrong
-  values consumed**; 22 transactions (2.2 × 10⁻⁵) were refused or hung and were detected
-  (3 false faults, 11 no-accept, 8 stale-activity). ACCEPT latency p99 119 ms.
+  values consumed** (exact 95 % upper limit 3.0 × 10⁻⁶); 22 transactions (observed
+  2.2 × 10⁻⁵, upper limit 3.1 × 10⁻⁵) did not complete — 3 false faults raised by the
+  neural machine, 11 no-accept hangs and 8 stale-activity cases noticed only by the
+  benchmark harness, since no neural timeout exists yet. ACCEPT latency p99 119 ms.
+  The campaign ran on the transport channel; the adder has not had its own.
 - Stress sweep (10⁴ per level): arrival jitter to 40 ms is free; stray input to 20 Hz costs
   2 × 10⁻⁴ (false faults only); silent wrong values appear only at ≥ 8 % weight noise or
   ±1 mV threshold drift.
@@ -443,8 +446,11 @@ gates (a second reset wiped the next word). Each is in `docs/m1_report.md` §6 w
 measurement that condemned it.
 
 Still open: the residual 2 × 10⁻⁵ availability failures at mix B (one caught timeline shows a
-completion latch surviving the reset train); timeouts for lost tokens; the 10⁻¹⁰ objective
-remains analytical (the observed 95 % bound on silent errors is 3 × 10⁻⁶).
+completion latch surviving the reset train), which the machine itself does not yet detect;
+timeouts for lost tokens; a composition campaign on the adder; the 10⁻¹⁰ objective remains
+analytical (the exact 95 % upper limit on silent errors from 10⁶ trials is 3.0 × 10⁻⁶).
+Verdict: M1 closed for functional correctness and safety, with a liveness/availability
+defect carried into A2/B.
 
 ## The design rules M1 settled
 
