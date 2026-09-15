@@ -280,3 +280,68 @@ carried at the designed quanta with their scales, parasitic edges zeroed, a knoc
 reported as a labelled Profile 3 edge, an unplaced neuron as a synthetic one), simulated: one
 source spike fires the relay once and ignites the latch, which holds for 400 ms; and, when the
 MCNS data is present, the adder image in condition A on 5 chained additions, all correct.
+
+## Coverage against the weight bound
+
+Tool: `drosophilos/bench/h1_sweep.py`; data: `docs/h1_sweep.json`. Re-ran the placement and the
+simulation of §Result and §The placed adder, simulated at four values of `k_max` (the bound on the
+rescaling factor `count * 16 * k >= |q|`, k <= k_max), holding everything else fixed: the same
+adder netlist, `place_netlist(net, m, policy, restarts=4, time_limit_s=300, seed=0)` (best of 4
+restarts; the previous section used 8), and, per `k_max`, condition A (all missing edges added,
+parasitic zeroed), condition B (carried edges only) and condition C (B plus only the three
+broadcast hubs' missing edges — `Q.reset_inh`, `P.reset_inh`, `P.wd.cancel_inh`), 20 fresh
+additions each instead of 50. "hub" below means an edge touching one of those three roles; "hard"
+is every other designed edge (878 of the netlist's 1,146, close to but not exactly the 884 of the
+main placement's "hard" class, which also excludes the 4 mixed-sign edges).
+
+| k_max | carried | hard carried | hub carried | neurons placed | parasitic zeroed | A | B | C | seconds |
+|---|---|---|---|---|---|---|---|---|---|
+| 4 | 693 / 1,146 (60.5 %) | 659 / 878 (75.1 %) | 34 / 268 (12.7 %) | 613 / 614 | 14,166 | 20/20 | 0/20 | 0/20 | 39.7 |
+| 8 | 809 / 1,146 (70.6 %) | 699 / 878 (79.6 %) | 110 / 268 (41.0 %) | 614 / 614 | 13,942 | 20/20 | 0/20 | 0/20 | 79.5 |
+| 16 | 650 / 1,146 (56.7 %) | 650 / 878 (74.0 %) | 0 / 268 (0 %) | 522 / 614 | 10,159 | 20/20 | 0/20 | 0/20 | 515.7 |
+| 32 | 592 / 1,146 (51.7 %) | 592 / 878 (67.4 %) | 0 / 268 (0 %) | 462 / 614 | 5,908 | 20/20 | 0/20 | 0/20 | 444.5 |
+
+**Condition B does not compute a first sum at any of the four `k_max` values tested.** Even at
+`k_max = 8`, where 70.6 % of the edges are carried, no ACCEPT is reached in any of the 20 fresh
+additions (the same failure mode as the `k_max = 4` report: the producer loads, the arithmetic
+runs, nothing reaches the output register). Condition C, adding back only the three hubs' missing
+edges, does not help at any `k_max` either — consistent with the earlier finding that the hubs are
+purely a reset problem, upstream of what condition C restores. Condition A, which adds every
+missing edge, computes all 20 sums at every `k_max`, confirming the mapping and rescaling are
+sound at each bound.
+
+**What a looser bound buys.** Doubling `k_max` from 4 to 8 halves the anatomical synapse count an
+edge needs (`req_count = ceil(|q| / (k_max * 16))`), and the classes that need it most see the
+first gains: `cancel_inh -> hop`, the watchdog cancel hub's 100 inhibitory edges onto the delay
+chain (each needing >= 85 quanta at `k_max = 4`), goes from 94 missing to 31; hub coverage overall
+rises from 34/268 (12.7 %) to 110/268 (41.0 %), and the total carried fraction from 60.5 % to
+70.6 %, the best of the sweep. `reset_inh -> u` / `-> v` (the two reset hubs) shrink more slowly
+(62->56, 57->53 missing) because they are gated by a scarce real neuron with the right sign and
+fan-out, not only by the quanta bound. Past `k_max = 8` the numbers reverse, and not because the
+wiring runs out of headroom: at `k_max = 16` and `32`, far more anatomical edges clear the
+now-much-lower threshold, which roughly doubles the candidate-domain sizes the strict layer and its
+arc consistency have to carry: the same 4-restart, nominal-300-second budget that placed the
+`k_max = 8` design in 79.5 s took 515.7 s and 444.5 s and still left neurons unplaced (522/614 and
+462/614, against 613-614/614 at `k_max` <= 8) and both remaining hubs uncarried (0/268 — `hub_carried`
+drops to zero at exactly the point the search stops finishing). So the bound is the binding
+constraint on coverage only up to about `k_max = 8` for this circuit and this search budget; past
+that, the placement search's own scaling with domain size becomes the limiter, not the connectome.
+
+**What it costs.** Loosening `k_max` does not touch the parasitic-edge problem directly — Profile 2
+still zeroes every anatomical edge among the hosts that is not a carried designed edge, whatever
+the bound — but it changes how much there is to zero and how far a rescaling has to reach.
+Parasitic edges to zero fall from 14,166 at `k_max = 4` to 13,942 at `k_max = 8` (2,115 and 2,067 of
+them >= 57 synapses, strong enough alone to carry a latch loop's 3,621 quanta), a small drop from
+one more host placed and a few more anatomical edges absorbed as carried edges instead of parasitic
+ones. The larger drops at `k_max = 16` and `32` (10,159 and 5,908) are mostly an artifact of the
+search placing fewer neurons at all (522 and 462 of 614) rather than the bound doing less damage:
+fewer hosts means fewer anatomical edges among them, carried or parasitic, full stop. The rescaling
+cost is visible in the k histograms: at every `k_max` the carried edges' scale factors spread almost
+uniformly from near 0 to the ceiling, and the observed maximum sits within 1-2 % of `k_max` itself
+(3.99, 7.979, 15.958, 31.117) — raising the bound does not make the rescaling gentler on average, it
+raises how far a single synapse's weight can be pushed, and the edges that already needed the top of
+the range at `k_max = 4` still need close to the top of the new, wider range at every larger `k_max`
+tested. This is what Profile 2's "weights within bounds" buys and costs at each point: up to
+`k_max = 8`, real coverage of the resets and the cancel hub for synapse counts scaled as much as 8x
+past their raw anatomical weight; beyond it, the connectome has not changed, but the search needed
+to find that coverage has stopped keeping up with the time budget given here.

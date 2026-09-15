@@ -1,0 +1,909 @@
+{
+ "4": {
+  "k_max": 4,
+  "placement": {
+   "carried": 693,
+   "carried_fraction": 0.6047,
+   "hard_carried": 659,
+   "hard_total": 878,
+   "hub_carried": 34,
+   "hub_total": 268,
+   "neurons_placed": 613,
+   "neurons_total": 614,
+   "parasitic_to_zero": 14166,
+   "parasitic_ge_loop_threshold": 2115,
+   "search_seconds": 39.7
+  },
+  "host_types": {
+   "u": {
+    "DNge036": 2,
+    "DNge173": 2,
+    "lLN1_bc": 2,
+    "CL092": 2,
+    "PS274": 2,
+    "FR1": 2
+   },
+   "v": {
+    "lLN1_bc": 4,
+    "?": 3,
+    "GNG224": 2,
+    "AVLP433_b": 2,
+    "PS027": 2,
+    "FR1": 2
+   },
+   "reset": {
+    "CL212": 1,
+    "IN03A042": 1
+   },
+   "reset_inh": {
+    "GNG119": 1,
+    "AVLP001": 1
+   },
+   "reset_edge": {
+    "AVLP076": 1,
+    "IN03B021": 1
+   },
+   "reset_relay": {
+    "AVLP451": 1,
+    "AVLP572": 1,
+    "CB3019": 1,
+    "AN19B009": 1,
+    "IN17A017": 1,
+    "IN19B003": 1
+   },
+   "ready_delay": {
+    "lLN2T_c": 2,
+    "DNp45": 1,
+    "VES088": 1,
+    "GNG104": 1,
+    "VES005": 1,
+    "DNg13": 1
+   },
+   "ready": {
+    "IN19B021": 1,
+    "LHPV4b4": 1
+   },
+   "or": {
+    "GNG553": 1,
+    "AVLP369": 1,
+    "INXXX464": 1,
+    "CB1920": 1,
+    "AVLP403": 1,
+    "GNG212": 1
+   },
+   "edge": {
+    "IN19B012": 3,
+    "DNa02": 2,
+    "DNge059": 2,
+    "DNge043": 2,
+    "IN20A.22A006": 2,
+    "INXXX239": 2
+   },
+   "edge_inh": {
+    "PS279": 4,
+    "IN19A020": 3,
+    "GNG240": 2,
+    "PS307": 2,
+    "SMP147": 2,
+    "lLN2F_b": 2
+   },
+   "hold_inh": {
+    "GNG114": 1,
+    "SMP543": 1,
+    "IN13A010": 1,
+    "LHPV12a1": 1,
+    "GNG639": 1,
+    "PS059": 1
+   },
+   "and": {
+    "CRE103": 1,
+    "AVLP488": 1,
+    "CB0218": 1,
+    "AVLP329": 1,
+    "AVLP332": 1,
+    "DNa11": 1
+   },
+   "d": {
+    "lLN1_bc": 3,
+    "GNG014": 2,
+    "AOTU012": 2,
+    "DNpe005": 2,
+    "GNG021": 2,
+    "IN10B011": 2
+   },
+   "veto": {
+    "lLN2P_b": 3,
+    "DNge101": 2,
+    "IN19A004": 2,
+    "INXXX385": 2,
+    "GNG017": 1,
+    "GNG107": 1
+   },
+   "start": {
+    "GNG029": 1
+   },
+   "hop": {
+    "IN17A001": 5,
+    "INXXX464": 4,
+    "IN19B003": 3,
+    "IN03A001": 3,
+    "IN01A012": 2,
+    "IN07B001": 2
+   },
+   "cancel_inh": {
+    "IN14A002": 1
+   }
+  },
+  "k_histogram": {
+   "(0.00, 0.50]": 11,
+   "(0.50, 1.00]": 52,
+   "(1.00, 1.50]": 79,
+   "(1.50, 2.00]": 85,
+   "(2.00, 2.50]": 105,
+   "(2.50, 3.00]": 110,
+   "(3.00, 3.50]": 128,
+   "(3.50, 4.00]": 123
+  },
+  "k_observed_max": 3.99,
+  "conditions": {
+   "A": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 453,
+    "parasitic_kept": 0,
+    "no_accept": 0,
+    "chained_correct": 20
+   },
+   "B": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 0,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   },
+   "G": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 224,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   }
+  },
+  "missing_by_class_condition_B": {
+   "cancel_inh -> hop": [
+    94,
+    100
+   ],
+   "reset_inh -> u": [
+    62,
+    73
+   ],
+   "reset_inh -> v": [
+    57,
+    73
+   ],
+   "edge -> u": [
+    43,
+    76
+   ],
+   "edge_inh -> edge": [
+    31,
+    77
+   ],
+   "u -> edge": [
+    21,
+    41
+   ],
+   "veto -> edge": [
+    17,
+    56
+   ],
+   "u -> start": [
+    14,
+    18
+   ],
+   "v -> u": [
+    11,
+    72
+   ],
+   "u -> veto": [
+    10,
+    32
+   ],
+   "u -> v": [
+    9,
+    73
+   ],
+   "u -> edge_inh": [
+    9,
+    40
+   ],
+   "u -> and": [
+    8,
+    19
+   ],
+   "u -> or": [
+    7,
+    12
+   ],
+   "d -> veto": [
+    7,
+    24
+   ]
+  }
+ },
+ "8": {
+  "k_max": 8,
+  "placement": {
+   "carried": 809,
+   "carried_fraction": 0.7059,
+   "hard_carried": 699,
+   "hard_total": 878,
+   "hub_carried": 110,
+   "hub_total": 268,
+   "neurons_placed": 614,
+   "neurons_total": 614,
+   "parasitic_to_zero": 13942,
+   "parasitic_ge_loop_threshold": 2067,
+   "search_seconds": 79.5
+  },
+  "host_types": {
+   "u": {
+    "FR1": 3,
+    "INXXX252": 2,
+    "INXXX464": 2,
+    "AVLP434_a": 2,
+    "AN09B020": 1,
+    "AN05B096": 1
+   },
+   "v": {
+    "FR1": 3,
+    "SNta10": 2,
+    "AMMC-A1": 2,
+    "GNG122": 2,
+    "lLN1_bc": 2,
+    "IN17A044": 2
+   },
+   "reset": {
+    "IN19B012": 1,
+    "PLP228": 1
+   },
+   "reset_inh": {
+    "IN05B028": 1,
+    "AN02A002": 1
+   },
+   "reset_edge": {
+    "IN19A020": 1,
+    "PLP034": 1
+   },
+   "reset_relay": {
+    "DNg04": 2,
+    "?": 1,
+    "IN21A021": 1,
+    "IN03A004": 1,
+    "LAL018": 1
+   },
+   "ready_delay": {
+    "INXXX466": 1,
+    "IN19B003": 1,
+    "IN10B004": 1,
+    "ANXXX030": 1,
+    "AN27X011": 1,
+    "DNg97": 1
+   },
+   "ready": {
+    "PLP229": 1,
+    "IN17A039": 1
+   },
+   "or": {
+    "AN17A012": 1,
+    "IN19B003": 1,
+    "DM6_adPN": 1,
+    "VC3_adPN": 1,
+    "INXXX466": 1,
+    "SNta13": 1
+   },
+   "edge": {
+    "lLN2T_c": 2,
+    "CRE072": 2,
+    "?": 2,
+    "DNa13": 2,
+    "LC4": 2,
+    "AVLP285": 2
+   },
+   "edge_inh": {
+    "lLN2P_b": 2,
+    "?": 2,
+    "CL003": 2,
+    "PVLP080_a": 2,
+    "PVLP093": 2,
+    "LT51": 2
+   },
+   "hold_inh": {
+    "FB4C": 2,
+    "MBON30": 1,
+    "lLN2P_a": 1,
+    "lLN2P_b": 1,
+    "IN13B090": 1,
+    "CRE025": 1
+   },
+   "and": {
+    "CRE105": 2,
+    "IN20A.22A017": 1,
+    "IN01A023": 1,
+    "IN19A040": 1,
+    "DNa13": 1,
+    "AN04A001": 1
+   },
+   "d": {
+    "IN23B005": 2,
+    "PVLP061": 2,
+    "LC14a-1": 2,
+    "lLN2T_a": 2,
+    "DNae003": 2,
+    "lLN2X04": 2
+   },
+   "veto": {
+    "AN17B012": 2,
+    "DNge122": 2,
+    "AN05B029": 1,
+    "PS100": 1,
+    "IN16B016": 1,
+    "IN17B014": 1
+   },
+   "start": {
+    "INXXX216": 1
+   },
+   "hop": {
+    "VES204m": 3,
+    "aIPg6": 3,
+    "CL264": 2,
+    "VES053": 2,
+    "PS217": 2,
+    "CB0316": 2
+   },
+   "cancel_inh": {
+    "AN02A002": 1
+   }
+  },
+  "k_histogram": {
+   "(0.00, 1.00]": 17,
+   "(1.00, 2.00]": 92,
+   "(2.00, 3.00]": 118,
+   "(3.00, 4.00]": 108,
+   "(4.00, 5.00]": 118,
+   "(5.00, 6.00]": 124,
+   "(6.00, 7.00]": 111,
+   "(7.00, 8.00]": 121
+  },
+  "k_observed_max": 7.979,
+  "conditions": {
+   "A": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 337,
+    "parasitic_kept": 0,
+    "no_accept": 0,
+    "chained_correct": 20
+   },
+   "B": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 0,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   },
+   "G": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 150,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   }
+  },
+  "missing_by_class_condition_B": {
+   "reset_inh -> u": [
+    56,
+    73
+   ],
+   "reset_inh -> v": [
+    53,
+    73
+   ],
+   "edge -> u": [
+    32,
+    76
+   ],
+   "cancel_inh -> hop": [
+    31,
+    100
+   ],
+   "hop -> hop": [
+    27,
+    99
+   ],
+   "edge_inh -> edge": [
+    19,
+    77
+   ],
+   "veto -> edge": [
+    17,
+    56
+   ],
+   "u -> veto": [
+    13,
+    32
+   ],
+   "u -> start": [
+    9,
+    18
+   ],
+   "u -> v": [
+    8,
+    73
+   ],
+   "u -> edge": [
+    8,
+    41
+   ],
+   "v -> u": [
+    7,
+    72
+   ],
+   "u -> d": [
+    7,
+    15
+   ],
+   "u -> or": [
+    6,
+    12
+   ],
+   "reset_relay -> reset_inh": [
+    5,
+    6
+   ]
+  }
+ },
+ "16": {
+  "k_max": 16,
+  "placement": {
+   "carried": 650,
+   "carried_fraction": 0.5672,
+   "hard_carried": 650,
+   "hard_total": 878,
+   "hub_carried": 0,
+   "hub_total": 268,
+   "neurons_placed": 522,
+   "neurons_total": 614,
+   "parasitic_to_zero": 10159,
+   "parasitic_ge_loop_threshold": 2656,
+   "search_seconds": 515.7
+  },
+  "host_types": {
+   "u": {
+    "Tm3": 3,
+    "AVLP243": 2,
+    "AVLP164": 2,
+    "AVLP099": 2,
+    "Li33": 2,
+    "LgLG2": 2
+   },
+   "v": {
+    "T3": 3,
+    "AVLP243": 2,
+    "Tm38": 2,
+    "LgLG2": 2,
+    "MeTu1": 2,
+    "SMP516": 2
+   },
+   "reset": {
+    "ATL022": 1,
+    "MeVPOL1": 1
+   },
+   "reset_edge": {
+    "ATL017": 1,
+    "Pm11": 1
+   },
+   "reset_relay": {
+    "PS114": 2,
+    "SMP369": 1,
+    "Nod5": 1,
+    "PS048_b": 1,
+    "PS048_a": 1
+   },
+   "ready_delay": {
+    "AN19B019": 2,
+    "MeVPMe13": 2,
+    "AN07B004": 2,
+    "IB018": 1,
+    "DNae009": 1,
+    "GNG105": 1
+   },
+   "ready": {
+    "MeVPOL1": 1
+   },
+   "or": {
+    "SMP026": 1,
+    "AVLP302": 1
+   },
+   "edge": {
+    "DNp43": 2,
+    "SMP512": 2,
+    "5thsLNv_LNd6": 2,
+    "aMe4": 2,
+    "CRE072": 2,
+    "SMP175": 1
+   },
+   "edge_inh": {
+    "AVLP465": 3,
+    "LOLP1": 2,
+    "lLN2F_b": 2,
+    "aMe30": 2,
+    "CRE025": 2,
+    "LHCENT3": 1
+   },
+   "hold_inh": {
+    "SMP116": 1,
+    "LAL150": 1,
+    "CL231": 1
+   },
+   "and": {
+    "ATL018": 2,
+    "CRE024": 2,
+    "LHPV5e3": 1,
+    "CL303": 1
+   },
+   "d": {
+    "MeVCMe1": 2,
+    "AVLP520": 2,
+    "AVLP315": 2,
+    "DNp103": 2,
+    "AVLP280": 2,
+    "MeVPMe12": 2
+   },
+   "veto": {
+    "PVLP101": 2,
+    "aMe1": 2,
+    "PVLP018": 1,
+    "PVLP107": 1,
+    "PVLP017": 1,
+    "AVLP001": 1
+   },
+   "start": {
+    "AVLP117": 1
+   },
+   "hop": {
+    "lLN2T_a": 5,
+    "lLN2T_e": 4,
+    "lLN2T_c": 4,
+    "lLN2X04": 4,
+    "lLN2T_b": 4,
+    "SNta10": 4
+   }
+  },
+  "k_histogram": {
+   "(0.00, 2.00]": 40,
+   "(2.00, 4.00]": 72,
+   "(4.00, 6.00]": 88,
+   "(6.00, 8.00]": 82,
+   "(8.00, 10.00]": 79,
+   "(10.00, 12.00]": 111,
+   "(12.00, 14.00]": 85,
+   "(14.00, 16.00]": 93
+  },
+  "k_observed_max": 15.958,
+  "conditions": {
+   "A": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 496,
+    "parasitic_kept": 0,
+    "no_accept": 0,
+    "chained_correct": 20
+   },
+   "B": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 0,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   },
+   "G": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 258,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   }
+  },
+  "missing_by_class_condition_B": {
+   "cancel_inh -> hop": [
+    100,
+    100
+   ],
+   "reset_inh -> u": [
+    73,
+    73
+   ],
+   "reset_inh -> v": [
+    73,
+    73
+   ],
+   "edge -> u": [
+    33,
+    76
+   ],
+   "veto -> edge": [
+    19,
+    56
+   ],
+   "edge_inh -> edge": [
+    18,
+    77
+   ],
+   "u -> edge": [
+    17,
+    41
+   ],
+   "u -> and": [
+    16,
+    19
+   ],
+   "d -> d": [
+    16,
+    74
+   ],
+   "u -> edge_inh": [
+    16,
+    40
+   ],
+   "d -> veto": [
+    15,
+    24
+   ],
+   "u -> v": [
+    11,
+    73
+   ],
+   "v -> u": [
+    10,
+    72
+   ],
+   "u -> veto": [
+    9,
+    32
+   ],
+   "u -> or": [
+    8,
+    12
+   ]
+  }
+ },
+ "32": {
+  "k_max": 32,
+  "placement": {
+   "carried": 592,
+   "carried_fraction": 0.5166,
+   "hard_carried": 592,
+   "hard_total": 878,
+   "hub_carried": 0,
+   "hub_total": 268,
+   "neurons_placed": 462,
+   "neurons_total": 614,
+   "parasitic_to_zero": 5908,
+   "parasitic_ge_loop_threshold": 1778,
+   "search_seconds": 444.5
+  },
+  "host_types": {
+   "u": {
+    "AN17A062": 1,
+    "DNg100": 1,
+    "AN08B013": 1,
+    "GNG289": 1,
+    "AN08B023": 1,
+    "IN04B074": 1
+   },
+   "v": {
+    "IN03A031": 3,
+    "IN23B090": 1,
+    "LAL304m": 1,
+    "IN17A019": 1,
+    "GNG370": 1,
+    "DNg57": 1
+   },
+   "reset": {
+    "AVLP192_a": 1,
+    "TmY3": 1
+   },
+   "reset_edge": {
+    "AVLP481": 1,
+    "Mi4": 1
+   },
+   "reset_relay": {
+    "AVLP025": 1,
+    "CB1207_b": 1,
+    "AVLP194_c3": 1,
+    "T2": 1,
+    "Dm2": 1,
+    "MeTu1": 1
+   },
+   "ready_delay": {
+    "MeVC11": 2,
+    "MeVPMe12": 2,
+    "MeVPMe13": 2,
+    "AN19B001": 2,
+    "MeVPOL1": 2,
+    "DNp64": 1
+   },
+   "ready": {
+    "Mi1": 1
+   },
+   "or": {
+    "IN04B075": 1,
+    "AVLP385": 1,
+    "INXXX365": 1
+   },
+   "edge": {
+    "DNpe029": 2,
+    "IN23B018": 2,
+    "IN20A.22A006": 2,
+    "IN10B044": 2,
+    "AN12A003": 1,
+    "AVLP102": 1
+   },
+   "edge_inh": {
+    "IN12B054": 3,
+    "DNge153": 2,
+    "Pm9": 2,
+    "IN19A021": 2,
+    "IN19A001": 1,
+    "AVLP080": 1
+   },
+   "hold_inh": {
+    "IN16B082": 1,
+    "AVLP079": 1,
+    "INXXX287": 1,
+    "AVLP343": 1
+   },
+   "and": {
+    "CB2365": 2,
+    "IN20A.22A060": 1,
+    "ANXXX098": 1,
+    "CB2863": 1,
+    "ANXXX174": 1
+   },
+   "d": {
+    "LgLG3": 3,
+    "SNpp60": 3,
+    "ANXXX027": 2,
+    "INXXX027": 2,
+    "IN19B003": 2,
+    "ANXXX084": 2
+   },
+   "veto": {
+    "Tr flexor MN": 2,
+    "IN09B045": 1,
+    "IN01B006": 1,
+    "GNG346": 1,
+    "AN12B019": 1,
+    "IN01B048_a": 1
+   },
+   "start": {
+    "AN08B050": 1
+   },
+   "hop": {
+    "LC4": 20,
+    "MeTu1": 13,
+    "LPLC1": 6,
+    "L5": 2,
+    "L2": 2,
+    "Tm6": 2
+   }
+  },
+  "k_histogram": {
+   "(0.00, 4.00]": 41,
+   "(4.00, 8.00]": 77,
+   "(8.00, 12.00]": 84,
+   "(12.00, 16.00]": 77,
+   "(16.00, 20.00]": 84,
+   "(20.00, 24.00]": 95,
+   "(24.00, 28.00]": 68,
+   "(28.00, 32.00]": 66
+  },
+  "k_observed_max": 31.117,
+  "conditions": {
+   "A": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 554,
+    "parasitic_kept": 0,
+    "no_accept": 0,
+    "chained_correct": 20
+   },
+   "B": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 0,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   },
+   "G": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 258,
+    "parasitic_kept": 0,
+    "no_accept": 20,
+    "chained_correct": null
+   }
+  },
+  "missing_by_class_condition_B": {
+   "cancel_inh -> hop": [
+    100,
+    100
+   ],
+   "reset_inh -> u": [
+    73,
+    73
+   ],
+   "reset_inh -> v": [
+    73,
+    73
+   ],
+   "veto -> edge": [
+    40,
+    56
+   ],
+   "d -> d": [
+    31,
+    74
+   ],
+   "edge -> u": [
+    29,
+    76
+   ],
+   "u -> v": [
+    23,
+    73
+   ],
+   "v -> u": [
+    22,
+    72
+   ],
+   "edge_inh -> edge": [
+    18,
+    77
+   ],
+   "u -> veto": [
+    18,
+    32
+   ],
+   "d -> veto": [
+    18,
+    24
+   ],
+   "u -> and": [
+    13,
+    19
+   ],
+   "u -> start": [
+    13,
+    18
+   ],
+   "u -> d": [
+    9,
+    15
+   ],
+   "u -> or": [
+    7,
+    12
+   ]
+  }
+ }
+}
