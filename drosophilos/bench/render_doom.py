@@ -42,7 +42,7 @@ def main():
     at = lambda t: ((t & 255) // sx, (t >> 8) // sy)
     pixel_cell = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == f"input:{pix_s}"][0]
     store_cells = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == "input"]
-    n_tick = sum(1 for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == f"input:{tick_s}"])
+    n_tick = sum(1 for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == f"input:{tick_s}")
     # reference frames (the whole picture, every column)
     ref_sched = []
     for f in range(F):
