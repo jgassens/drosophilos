@@ -312,6 +312,9 @@ frame records equal to the interpreter's, no fault, with a barrier-free schedule
 the host: dealing tokens to copies, the per-copy token counts (image constants), and the
 tick's *input* (the game's controls, which are input by definition). The benchmark label
 for the frame loop's ordering moves from *hybrid* to *neural*; the dealing stays hybrid.
+Both drivers take `--pacing neural` (`bench/render_doom.py` deals columns,
+`bench/render_game.py` pixels); the per-copy counts are image constants, so the columns or
+pixels must divide evenly across the copies.
 
 ## 8. What it is not yet
 
