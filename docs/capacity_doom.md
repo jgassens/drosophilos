@@ -48,6 +48,13 @@ stage's operand gate). Tokens flow; no fetch, no decode, no PC. Measured pieces 
 | a column kernel of ~10 stages, 8 columns in flight | one column per ~0.4 s, a frame of 16,000 columns per ~1.8 hours on one kernel |
 | 1,000 brains × ~10 kernels per brain (15k neurons each) | ~10⁴ columns in flight: a frame in ~1–2 minutes of neural time |
 
+**Built and measured (2026-09-15, `docs/a3_kernels.md`):** the renderer's column loop as a
+four-cell kernel of 13.7k neurons runs one column per 1.18 s self-paced (4.5 s latency), eight
+columns correct, against ~32 s per column on the sequencer: ~27× per kernel. The "stage
+latency 0.3–0.5 s" above was optimistic: a cell is ~0.9 s (operand gates 60 ms, ALU ~400 ms,
+commit ~400 ms), so a frame of 16,000 columns on one kernel is ~5.2 hours, and the cluster
+estimate below scales accordingly (~3 minutes per frame at 10⁴ columns in flight).
+
 So the target regime for "Doom running on fruit-fly brains" is a frame per minute or two of
 neural time on the 1,000-brain cluster, with the world update on a few control brains at a
 tick per ~20 s. In simulation each neural second of 166 M neurons costs GPU hours; a frame is
@@ -56,10 +63,10 @@ inside the substrate, and every pixel of it is a spike-decoded word.
 
 ## 4. Consequences for the order of work
 
-1. **Kernel compiler before more ISA.** Compile a straight-line IR block (a loop body) into a
-   dataflow pipeline of the existing blocks; run the toy renderer's column loop as a kernel
-   with several columns in flight and measure the throughput gain. This is the plan's
-   "resident circuits" and the largest lever.
+1. **Kernel compiler before more ISA.** Done for straight-line bodies (`compiler/kernel.py`,
+   `lib/kernel.py`): the toy renderer's column loop runs as a kernel with the columns in flight
+   and a measured ~27× throughput gain. Next inside this item: select cells (branches inside a
+   body), multi-consumer values, per-frame parameter ports, 32-bit cells.
 2. **32-bit datapath as a resident kernel**, not as the sequencer's width: the multiplier is
    the cost driver and only the kernels need it.
 3. **Memory-serving nodes** with ROM as fetch relays (3 neurons per bit) for map and texture

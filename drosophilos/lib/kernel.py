@@ -27,10 +27,11 @@ import numpy as np
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
 from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
-from ..protocol.token import decode_at, rails_for
+from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .adder import extend_reset
+from .control import add_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
@@ -48,7 +49,11 @@ class Cell:
     reg: StagedRegister | None = None
     master: Register | None = None
     act: Latch | None = None
-    trigger_in: int = -1  # neuron to pulse to start the cell (driven by the upstream done relay)
+    trigger_in: int = -1  # neuron to pulse to request the cell (driven by the upstream done relay)
+    req: list = None  # kill pair [no request, request pending]
+    idle: list = None  # kill pair [busy, idle]
+    creq: list = None  # kill pair [nothing to commit, commit pending]
+    commit_pulse: int = -1
 
 
 @dataclass
@@ -61,6 +66,8 @@ class Pipeline:
     cells: list
     consts: dict = field(default_factory=dict)  # (name) -> Register-like of latches
     mems: dict = field(default_factory=dict)
+    image_latches: list = field(default_factory=list)  # levels the host lights once (idle, no-request, ...)
+    in_creq: list = None
 
     @property
     def output(self) -> Cell:
@@ -72,8 +79,27 @@ def _const_rails(net: Netlist, drive: Drive, name: str, n: int) -> list:
     return [[add_latch(net, drive, f"{name}.b{i}r{r}") for r in (0, 1)] for i in range(n)]
 
 
+class _N:
+    def __init__(self, u):
+        self.u = u
+
+
+def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20) -> None:
+    """One pulse on `target` when A and B are both true, issued at the later of their rises: A
+    and B are kill pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
+    d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
+    rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
+    ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
+    its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
+    are within the overlap; the target's consumers take a doublet as one event."""
+    a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
+    b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
+    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u], _N(target))
+    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u], _N(target))
+
+
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
-                   drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170) -> Pipeline:
+                   drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a": source, "b": source or None, "mem": name}
     where a source is "input", a cell name, or ("const", name). `consts`: name -> value (bits n).
     `mems`: name -> (n_words, contents dict)."""
@@ -90,8 +116,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     wire_fault_path(net, drive, P, S)
     add_liveness(net, drive, P, S, 55)
     in_reg = add_staged_commit(net, drive, "IN", S, P, ordered_grant=True)
+    in_creq = add_kill_pair(net, drive, "IN.creq")  # [nothing to commit, commit pending]
     rl = add_edge_relay(net, drive, "IN.autocommit", S.completion.u, fast_inhibitor=True)
-    net.synapse(rl, in_reg.commit_in, drive.ignite)
+    net.synapse(rl, in_creq[1].u, drive.ignite)
+    image = [in_creq[0]]
     const_rails = {name: _const_rails(net, drive, f"K.{name}", n) for name in (consts or {})}
     mem_objs = {name: add_memory(net, drive, f"MEM.{name}", nw, n) for name, (nw, _) in (mems or {}).items()}
     cells: dict[str, Cell] = {}
@@ -109,13 +137,32 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         name, op = cs["name"], cs["op"]
         A_rails, a_done = rails_of(cs["a"])
         Ccell = Cell(name, op, cs["a"], cs.get("b"), mem_objs.get(cs.get("mem")))
-        # trigger: the upstream master's done pulse lights ACT
+        # Back-pressure (the dataflow handshake): the upstream done pulse requests the cell
+        # (REQ); the cell starts when it is idle and a request is pending, in either order
+        # (guarded_pulse); starting clears REQ and IDLE. Without it a cell re-triggered in its
+        # reset tail lost the token (measured: a 990 ms run followed by an 873 ms upstream run).
         act = add_latch(net, drive, f"{name}.act")
         trig = net.neuron(f"{name}.trigger")
-        net.synapse(trig, act.u, drive.ignite)
+        req = add_kill_pair(net, drive, f"{name}.req")
+        idle = add_kill_pair(net, drive, f"{name}.idle")
+        net.synapse(trig, req[1].u, drive.ignite)
         if a_done is not None:
             net.synapse(a_done, trig, drive.relay_in)
-        act_d = add_delay_chain(net, drive, f"{name}.actd", act.u, act_hops)
+        start = net.neuron(f"{name}.start")
+        guarded_pulse(net, drive, f"{name}.go", req, idle, start)
+        for l in (act, req[0], idle[0]):
+            net.synapse(start, l.u, drive.ignite)
+        # The pair's own kill (r0's rise kills r1) is a relay driven by r0's train, and r0 was
+        # silent for only ~60 ms (killed by the request, re-lit by the start), inside its ~86 ms
+        # recovery: the request rail survived (measured). The start pulse kills them itself.
+        add_kill_train(net, drive, f"{name}.start.kill", start, [req[1], idle[1]])
+        image += [req[0], idle[1]]
+        # ACT^d is a chain of pulses from the start pulse, not from the ACT latch's train: relays
+        # driven by a train need ~86 ms of source silence before they fire again, and a chain
+        # fed by ACT keeps firing ~85 ms after ACT is cleared, so a cell restarted less than
+        # ~170 ms after its done pulse sampled nothing (measured). The ACT latch stays as the
+        # busy level for the reset domain.
+        act_d = add_delay_chain(net, drive, f"{name}.actd", start, act_hops)
         Sc = add_register(net, drive, f"{name}.Q", n + 3, with_completion=True)
         G = Gates(net, drive)
         if op == "LOAD":  # address = A (a master's level): read port driven by ACT^d into P-like rails
@@ -151,12 +198,45 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # the stage has no producer: a fault latch and a commit path
         F = _fault_latch(net, drive, name, Sc)
         reg = add_staged_commit(net, drive, name, Sc, _NoProducer(), ordered_grant=True)
+        creq = add_kill_pair(net, drive, f"{name}.creq")  # the commit waits for the consumer (wired below)
         rl = add_edge_relay(net, drive, f"{name}.autocommit", Sc.completion.u, fast_inhibitor=True)
-        net.synapse(rl, reg.commit_in, drive.ignite)
+        net.synapse(rl, creq[1].u, drive.ignite)
+        image.append(creq[0])
+        # idle again ~106 ms after the done pulse: the reset train's paralysis (~80 ms) is over
+        idle_d = add_delay_chain(net, drive, f"{name}.idled", reg.done_relay, idle_hops)
+        net.synapse(idle_d, idle[1].u, drive.ignite)
         Ccell.reg, Ccell.master, Ccell.act, Ccell.trigger_in = reg, reg.master, act, trig
+        Ccell.req, Ccell.idle, Ccell.creq = req, idle, creq
         cells[name] = Ccell
         order.append(Ccell)
-    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs)
+    # Commit gating: a producer rewrites its master only once every consumer of it has started
+    # on the previous value (its REQ cleared); otherwise the consumer's operand gates could
+    # sample a value in the middle of its rewrite, or miss one. Consumers of a master: the
+    # cells that read it as A or B. The output cell's master is read by the host: free.
+    always = add_kill_pair(net, drive, "FREE")  # [never, always]: a constant "consumer is free"
+    image.append(always[1])
+
+    def gate_commit(pname: str, creq, commit_in: int, consumers: list):
+        pulse = net.neuron(f"{pname}.commit_pulse")
+        net.synapse(pulse, commit_in, drive.ignite)
+        net.synapse(pulse, creq[0].u, drive.ignite)
+        add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])  # see the start pulse's kill
+        if not consumers:
+            guarded_pulse(net, drive, f"{pname}.cg", creq, always, pulse)
+        for k, c in enumerate(consumers):  # every consumer must be free: chain the guards
+            free = [c.req[1], c.req[0]]  # true when the consumer has no pending request
+            if len(consumers) == 1:
+                guarded_pulse(net, drive, f"{pname}.cg", creq, free, pulse)
+            else:
+                raise NotImplementedError("a master with several consumers needs a joined free rail")
+        return pulse
+
+    readers = {c.name: [d for d in order if d.a == c.name or d.b == c.name] for c in order}
+    for c in order:
+        c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, readers[c.name])
+    in_readers = [d for d in order if d.a == "input" or d.b == "input"]
+    gate_commit("IN", in_creq, in_reg.commit_in, in_readers)
+    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq)
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: v for k, (_, v) in (mems or {}).items()}
     return pl
@@ -229,14 +309,16 @@ def add_alu_logic_tokens(G: Gates, name: str, A_tok, B_tok, U, SUB, act_d, mul: 
                     G.veto(f"{name}.mux{i}r{r}u{k}", unit[i].latches[r].u, [U[k].r0.u], t)
             rails.append(t)
         R.append(Rail2(rails[0], rails[1]))
-    others = [U[k].r1.u for k in range(1, N_UNITS)]
-
     def gated_flag(fname, f):
+        # C and V: the adder's own flags when the adder is selected; otherwise a 0 token per run.
+        # The unit-select rails are levels here (lit once by the image), so the "not the adder"
+        # zero must be driven by ACT^d, a rise per run, not by the select rail's rise as in the
+        # sequencer's ALU (measured: the second token through an AND cell never completed its
+        # stage, the flag latches having been cleared by the first commit and never re-driven).
         y1, y0 = G.latch(f"{fname}1"), G.latch(f"{fname}0")
         G.veto(f"{fname}1.g", f.r1.u, [U[0].r0.u], y1)
         G.veto(f"{fname}0.g", f.r0.u, [U[0].r0.u], y0)
-        for k, t in enumerate(others):
-            G.veto(f"{fname}0.u{k + 1}", t, [], y0)
+        G.veto(f"{fname}0.na", act_d, [U[0].r1.u], y0)
         return Rail2(y0, y1)
 
     return R, gated_flag(f"{name}.c", cout), gated_flag(f"{name}.v", vraw)
@@ -252,8 +334,8 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
         for addr, v in pl.mem_contents[name].items():
             for i, r in rails_for(v, pl.n):
                 sim.add_events(node, [step], [mem.words[addr].rails[i][r].u], [pl.drive.ignite])
-    for role_idx, role in enumerate(pl.net.roles):
-        pass
+    for l in pl.image_latches:  # "no request", "idle", "nothing to commit", "always free"
+        sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
         unit, _ = ALU_OPS["MOV" if c.op == "LOAD" else c.op]
         for k in range(N_UNITS):
@@ -261,38 +343,60 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
             sim.add_events(node, [step], [pl.net.roles.index(f"{c.name}.u{k}r{r}.u")], [pl.drive.ignite])
 
 
-def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: float = 60000, gap_ms: float = 0,
+CELL_LATENCY_MS = 1000.0  # trigger -> done of an ALU or LOAD cell is ~880 ms (measured); MUL adds ~600
+
+
+def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: float = 60000, gap_ms: float | None = None,
                  sim=None) -> tuple[list, RefSim, dict]:
-    """Streams `tokens` into the input producer (each after the input stage's READY) and
-    decodes every commit of the output cell's master in order."""
+    """Streams `tokens` into the input producer (each after the input stage's READY, and no
+    sooner than `gap_ms` after the previous one) and decodes every commit of the output cell's
+    master in order. Steps the simulator one step at a time and reads the per-step spike
+    lists (a trace rebuild per poll is quadratic).
+
+    The gap is the host's rate limit: a cell re-triggered while busy drops the token (its ACT
+    latch is already lit, so the operand gates never sample again; measured with the input
+    register cycling at 680 ms against cells of 880 ms). Until the cells carry their own
+    back-pressure (a request latch per cell and commit gating), the transducer must not
+    offer tokens faster than the slowest cell."""
     net, drive = pl.net, pl.drive
+    if gap_ms is None:
+        gap_ms = 0.0  # the cells carry their own back-pressure; the input stage's READY paces the host
+    gap = int(gap_ms / params.dt)
     sim = sim or RefSim(net.topology(), params)
     load_pipeline_image(sim, pl)
     sim.run(3000)  # the image's completions settle
     P, S = pl.input_producer, pl.input_reg.stage
     out = pl.output.master
     window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
-    loads, outs, last_wm = [], [], None
-    k = 0
+    ready_n, comp_n = S.ready, out.completion.u
+    loads, outs, last_wm, last_ready = [], [], None, None
+    n_ready, k = 0, 0
+    pending = []  # (step, decode window end) for output completions to decode once the word is stable
     while sim.step_index < int(max_ms / params.dt):
-        ev = sim.trace.events
-        n_ready = int((ev["neuron"] == S.ready).sum())  # the input stage's READY count so far
-        if k < len(tokens) and n_ready >= k:  # token k goes in after the k-th READY (the first at once)
-            t = sim.step_index + 5 + int(gap_ms / params.dt)
+        if k < len(tokens) and n_ready >= k and (not loads or sim.step_index >= loads[-1] + gap):  # after the k-th READY
+            t = sim.step_index + 5
             for i, r in rails_for(tokens[k], pl.n):
                 sim.add_events(0, [t], [P.rails[i][r].u], [drive.ignite])
             loads.append(t)
             k += 1
-        sim.run(200)
-        ev = sim.trace.events
-        recent = ev["step"] >= sim.step_index - 200
-        st, fired = ev["step"][recent], ev["neuron"][recent]
-        for s_ in st[fired == out.completion.u]:
+        sim.step()
+        s_ = sim.step_index - 1
+        if pending and s_ >= pending[0] + window:
+            st = pending.pop(0)
+            outs.append((st, decode_recent(sim, out.rail_taps, st + window, window)[0]))
+            if len(outs) >= len(tokens):
+                break
+        if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
+            continue
+        fired = sim._spk_neuron[-1]
+        if ready_n in fired and (last_ready is None or s_ - last_ready > 3 * period):
+            n_ready += 1
+        if ready_n in fired:
+            last_ready = s_
+        if comp_n in fired:
             if last_wm is None or s_ - last_wm > 3 * period:
-                outs.append((int(s_), decode_at(sim.trace, out.rail_taps, int(s_), window)[0]))
-            last_wm = int(s_)
-        if len(outs) >= len(tokens):
-            break
+                pending.append(s_)
+            last_wm = s_
     stats = {"neurons": net.n, "tokens": len(tokens), "outputs": len(outs),
              "first_output_ms": (outs[0][0] - loads[0]) * params.dt if outs else None,
              "per_token_ms": ((outs[-1][0] - outs[0][0]) / max(1, len(outs) - 1)) * params.dt if len(outs) > 1 else None}

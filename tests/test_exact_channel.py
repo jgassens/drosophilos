@@ -25,12 +25,12 @@ def sender():
     P = [None] * 64
     P[0:4] = [("MOV", 0), ("LOAD", 0), ("ORM", 1), ("STORE", 7)]  # send payload | seq
     P[4:8] = [("LOAD", 2), ("JNZ", 7), ("JMP", 4), ("HALT", 7)]  # wait until acked, then halt
-    h = {16: ("STORE", 3), 17: ("LOAD", 5), 18: ("JZ", 27),  # save; timeout?
-         19: ("CLR", 5), 20: ("LOAD", 4), 21: ("ADD", 1), 22: ("STORE", 4),  # retries++
-         23: ("LOAD", 0), 24: ("ORM", 1), 25: ("STORE", 7), 26: ("JMP", 34),  # resend
-         27: ("LOAD", 6), 28: ("AND", 8), 29: ("XORM", 1), 30: ("JNZ", 33),  # ack's seq == seq ?
-         31: ("MOV", 1), 32: ("STORE", 2),  # acked
-         33: ("CLR", 6), 34: ("LOAD", 3), 35: ("IRET", 0)}
+    h = {16: ("STORE", 3), 17: ("LOAD", 5), 18: ("JZ", 28),  # save; timeout?
+         19: ("MOV", 0), 20: ("STORE", 5), 21: ("LOAD", 4), 22: ("ADD", 1), 23: ("STORE", 4),  # status <- 0; retries++
+         24: ("LOAD", 0), 25: ("ORM", 1), 26: ("STORE", 7), 27: ("JMP", 35),  # resend
+         28: ("LOAD", 6), 29: ("AND", 8), 30: ("XORM", 1), 31: ("JNZ", 34),  # ack's seq == seq ?
+         32: ("MOV", 1), 33: ("STORE", 2),  # acked
+         34: ("CLR", 6), 35: ("LOAD", 3), 36: ("IRET", 0)}
     for k, v in h.items():
         P[k] = v
     return [P[k] if P[k] is not None else ("HALT", k) for k in range(64)]

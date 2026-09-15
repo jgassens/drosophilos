@@ -70,8 +70,10 @@ def lower(prog: Program) -> list[tuple]:
             elif op == "CALL":
                 inline_id[0] += 1
                 body(ins.target, f"{suffix}@{inline_id[0]}")
+                place(f"__ret{suffix}@{inline_id[0]}")
             elif op == "RET":
-                pass  # the inlined body simply continues
+                if ins is not prog.functions[fn][-1]:  # an early return: jump past the inlined body
+                    emit("JMP", f"__ret{suffix}")  # (review finding: it fell through before)
             elif op == "HALT":
                 emit("HALT", len(words))
             else:

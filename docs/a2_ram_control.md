@@ -89,10 +89,14 @@ Cost for 16 program words: ~250 neurons.
 
 `build_machine(timer_hops=k, status_word=w)`: a delay chain started by the output port
 word's completion (a send) and cancelled by the input port word's completion train (the
-reply). On expiry it ignites the status word's rails to the constant 1 and raises the
-interrupt, so one handler serves both events and tells them apart by loading the status
-word; it then `CLR`s the status and re-sends (a STORE to the port word re-completes it, which
-re-exports its rails and restarts the timer). A word completing without a STORE (the status
+reply). On expiry it writes the constant 1 into the status word through a write port of its
+own (word reset, READY, copy from a latched constant-1 level that the image asserts) and
+raises the interrupt, so one handler serves both events and tells them apart by loading the
+status word; it then stores 0 back and re-sends (a STORE to the port word re-completes it,
+which re-exports its rails and restarts the timer). The status word is loaded with 0 at
+power-up and must never be emptied: the exact-channel sender first cleared it with `CLR`,
+and the next reply's handler then `LOAD`ed an empty word, which reads as both rails and halts
+the machine as a fault (found on the Stage C clean-link test). A word completing without a STORE (the status
 word, or the data image at power-up) must not light NEXT: the "store pending" state is a
 kill pair now, and every "written" pulse into NEXT is vetoed by "no store pending".
 Measured: with no link, two timeouts 1.6 s apart run the handler twice, the counter reads 2,
@@ -132,7 +136,7 @@ Five mechanisms, each found from the spike anatomy of one run and fixed on measu
 
 | finding | fix |
 |---|---|
-| A stage fault caught **after** the grant found the master already reset: "discarded, M untouched" only held before the grant (same hole in the RAM write port) | The grant is guarded: the COMMIT token's pulse (`commit_in`) is delayed ~64 ms before it can grant, so a rail arriving up to ~60 ms after completion is refused with M untouched; the copy relays are vetoed by the fault latch, so a fault caught later leaves M empty or partial, which M's completion and fault gates turn into a fail-stop, never a silently wrong master. Both blocks. |
+| A stage fault caught **after** the grant found the master already reset: "discarded, M untouched" only held before the grant (same hole in the RAM write port) | The grant is guarded: the COMMIT token's pulse (`commit_in`) is delayed ~64 ms before it can grant, so a rail arriving up to ~25 ms after completion is refused with M untouched (the second review measured the window: the grant lands at W_S + 79 ms against a fault gate of 54.5 ms, not the ~60 ms first claimed; see §3.2); the copy relays are vetoed by the fault latch, so a fault caught later leaves M empty or partial, which M's completion and fault gates turn into a fail-stop, never a silently wrong master. Both blocks. |
 | `classify_machine_run` skipped undecodable commits and could call a run with a faulted master "ok" | An undecodable committed word is `master_fault`, checked first |
 | P-fetch veto margin after a LOAD flip was 62 ms against the 55 ms rule (7 ms slack) | P fetch at +166 ms, data read at +187 (two more hops each) |
 | A fault after W_S strands the FSM in COMMIT, not FETCH as the note said | Note corrected (fail-stop in either state) |
@@ -140,7 +144,20 @@ Five mechanisms, each found from the spike anatomy of one run and fixed on measu
 | Dead code and drift (`gates.swap`, `Memory.not_word`, stale docstrings) | Removed / corrected |
 
 Audited clean by the review: the ordered-gate veto tables, the Z tree-node choice, reset
-domains, power-up sequencing, encoders, simulator parity. The guard also changed how a
+domains, power-up sequencing, encoders, simulator parity.
+
+### 3.2 Second review (2026-09-14, on `26fa035`; Kimi stalled, the `claude-fable` fallback reviewed) and what changed
+
+| finding | fix |
+|---|---|
+| The exact-channel sender `LOAD`s the timer's status word, which is empty until the first timeout; an empty read is both rails and the machine halts (reproduced: A faults at PC 17 with `acked` = 0) | The status word is a memory word from power-up (0), written to 1 by the timer through a write port of its own and stored back to 0 by the handler (§2.2); both scenarios of the exact channel now pass |
+| The refusal window after completion is ~25 ms (ordered grant), not ~60: a late rail at 30–50 ms leaves M double-railed with NEXT lit; at 60–160 ms M empty with the FSM hung in COMMIT and no timeout | Claim corrected above. A **commit watchdog** (`commit_wd_hops`, ~800 ms from COMMIT's rise, vetoed by FETCH and NEXT) lights a TIMEOUT latch and clears the stage: the hang is a counted fail-stop. The 30–50 ms case remains a silent-error window for the perturbation campaign to size |
+| Any hardware-completed word (a link arrival, the timer's status) during a STORE's pending window fires that word's "written" pulse into NEXT ~300 ms before the commit: the store is lost and the machine hangs | The written / cleared pulses into NEXT are vetoed by the mismatching address rails, so only the addressed word's completion counts |
+| Timing audit: LINK.out re-fire gap 4–8 ms over the 86 ms recovery; the STORE port's copy relays after `CLR; STORE` to the same word have no margin; the P-fetch veto margin is 9.7 ms | Recorded as the margins the mix-B machine campaign must exercise (queued on Juno); not changed |
+| A late ACK after a timeout: INTP.clear merges the two interrupts and the held input word cancels the resend's timer | Open: the protocol needs the receive credit (CLR of the port word) to re-arm the timer; noted in `docs/stage_c_flylink.md` |
+| `lower.py` dropped RET, so an early `return` in a function fell through into the rest of the inlined body | An early RET is a JMP to a label placed after the inlined body |
+| The golden shim's ports were `u8` while the IR uses the program width; `in_read()` re-reads one static word | The shim's port type follows the width. One input word per run is a v0 limit of the sequencer (the kernel path streams input) |
+| §6 of this document still said there was no interrupt, port or IR interpreter | Corrected | The guard also changed how a
 COMMIT is issued: `StagedRegister.commit_in` is fired once (by the FSM's token relay or by
 the host), lighting the COMMIT latch and starting the guard; a chain fed by the latch's
 train would have re-ignited the guarded latch continuously (measured: the grant fired
@@ -203,6 +220,9 @@ residuals, ~400 ms the ALU, ~300 ms the commit and ~70 ms the PC update. Four fi
 machine's neurons are memory (program words as latches, data words as masters with their
 own completion and reset). The machine is fail-stop: a refused instruction (stage fault or
 watchdog) clears the producer and stage and leaves the FSM in FETCH; recovery, retry and the
-protected commit controller are Stage C/F work. Programs are 8 words; a wider address is a
-namespace with allocated words only. There is no call stack, no interrupt, and no I/O port
-yet: those and the IR interpreter as the compiler's oracle are the rest of Stage B.
+protected commit controller are Stage C/F work. A wider address is a namespace with
+allocated words only. Calls are inlined by the lowering (no call stack); interrupts land at
+safe points (§2.1); the ports are memory-mapped words exported and imported by FlyLink
+(`docs/stage_c_flylink.md`); the IR interpreter is the compiler's oracle (§5). The sequencer
+executes one input word per run and about one instruction per second: the hot loops belong
+to resident kernels (`docs/a3_kernels.md`).

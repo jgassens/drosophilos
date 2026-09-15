@@ -62,6 +62,7 @@ class WritePort:
     copies: list  # COPY_w latch per word
     done: list  # "written" pulse relay per word
     domain_latches: list  # latches the caller must put in its reset domain (the COPY_w)
+    copy_relays: list  # [w][i][r]: the copy relay neurons (a second port on the same word vetoes them)
 
 
 def add_write_port(net: Netlist, drive: Drive, name: str, mem: Memory, trigger: int, addr_taps, data_taps,
@@ -69,7 +70,7 @@ def add_write_port(net: Netlist, drive: Drive, name: str, mem: Memory, trigger: 
     """`trigger`: a train or a single pulse that starts the write; `addr_taps[j][r]`,
     `data_taps[i][r]`: taps of the address and data rails (levels valid before the trigger).
     `extra_vetoes`: taps that must be silent for the write to happen (e.g. "op is not WRITE")."""
-    selects, copies, done, dom = [], [], [], []
+    selects, copies, done, dom, cps = [], [], [], [], []
     for w, word in enumerate(mem.words):
         vn = add_veto_neuron(net, drive, f"{name}.w{w}.notw", address_vetoes(addr_taps, w) + list(extra_vetoes))
         # word-select: one pulse into the word's edge-detected reset trigger
@@ -80,12 +81,11 @@ def add_write_port(net: Netlist, drive: Drive, name: str, mem: Memory, trigger: 
         net.synapse(ws, word.reset_trigger, drive.relay_in)
         copy = add_latch(net, drive, f"{name}.w{w}.copy")
         net.synapse(word.ready, copy.u, drive.ignite)  # the word is empty and recovered: copy
-        for i in range(mem.width):
-            for r in (0, 1):
-                add_veto_relay(net, drive, f"{name}.w{w}.cp{i}r{r}", copy.u, [data_taps[i][1 - r]] + list(copy_vetoes), word.rails[i][r])
+        cps.append([[add_veto_relay(net, drive, f"{name}.w{w}.cp{i}r{r}", copy.u, [data_taps[i][1 - r]] + list(copy_vetoes), word.rails[i][r])
+                     for r in (0, 1)] for i in range(mem.width)])
         d = add_edge_relay(net, drive, f"{name}.w{w}.done", word.completion.u, fast_inhibitor=True)
         selects.append(ws); copies.append(copy); done.append(d); dom.append(copy)
-    return WritePort(selects, copies, done, dom)
+    return WritePort(selects, copies, done, dom, cps)
 
 
 def add_read_port(net: Netlist, drive: Drive, name: str, mem: Memory, driver: int, addr_taps, target_rails,

@@ -52,8 +52,8 @@ import numpy as np
 
 from ..protocol.celement import add_delay_chain, add_veto_neuron, add_veto_relay
 from ..protocol.handshake import Register
-from ..protocol.latch import Latch, add_edge_relay, add_latch
-from ..protocol.token import decode_at, rails_for
+from ..protocol.latch import connect_trigger, Latch, add_edge_relay, add_latch
+from ..protocol.token import decode_at, decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .alu import N_UNITS, OPS as ALU_OPS, alu_reference
@@ -266,7 +266,7 @@ class Machine:
 
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
                   ir_hops: int = 15, p_hops: int = 31, rd_hops: int = 35, act_hops: int = 17, next_hops: int = 12,
-                  watchdog_hops: int = 170, handler_pc: int | None = None, port_out_word: int | None = None,
+                  watchdog_hops: int = 170, commit_wd_hops: int = 150, handler_pc: int | None = None, port_out_word: int | None = None,
                   port_in_word: int | None = None, timer_hops: int | None = None, status_word: int | None = None,
                   x_word: int | None = None, mul: bool = False) -> Machine:
     """`handler_pc`: enables safe-point interrupts with the handler at that program word.
@@ -343,15 +343,18 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     add_veto_relay(net, drive, "FSM.done_next", R.done_relay, [sp[1].u, FETCH.u, NEXT.u], NEXT)
     wp = add_write_port(net, drive, "ST", dmem, R.done_relay, addr_taps, [[M.rails[i][0].u, M.rails[i][1].u] for i in range(n)],
                         extra_vetoes=[ir_store[0].u], copy_vetoes=[S.fault_latch.u, ir_clr[1].u])
+    # The written / cleared pulses count only for the addressed word: a word completed by
+    # hardware (a link arrival, the timer's status) while a STORE to another word is pending
+    # would otherwise light NEXT ~300 ms early and lose the store (review finding, 2026-09-14).
     for w, d in enumerate(wp.done):  # the word is written: NEXT
-        add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u, sp[0].u], NEXT)
+        add_veto_relay(net, drive, f"FSM.wdone{w}", d, [FETCH.u, NEXT.u, sp[0].u] + address_vetoes(addr_taps, w), NEXT)
     for w, word in enumerate(dmem.words):  # a CLR is done when the word's READY fires (it stays empty)
-        add_veto_relay(net, drive, f"FSM.wclr{w}", word.ready, [FETCH.u, NEXT.u, sp[0].u, ir_clr[0].u], NEXT)
+        add_veto_relay(net, drive, f"FSM.wclr{w}", word.ready, [FETCH.u, NEXT.u, sp[0].u, ir_clr[0].u] + address_vetoes(addr_taps, w), NEXT)
     if x_word is not None:  # indexed store: the same trigger, the index word's rails as the address
         wpi = add_write_port(net, drive, "STI", dmem, R.done_relay, x_taps, [[M.rails[i][0].u, M.rails[i][1].u] for i in range(n)],
                              extra_vetoes=[ir_storei[0].u], copy_vetoes=[S.fault_latch.u])
         for w, d in enumerate(wpi.done):
-            add_veto_relay(net, drive, f"FSM.widone{w}", d, [FETCH.u, NEXT.u, sp[0].u], NEXT)
+            add_veto_relay(net, drive, f"FSM.widone{w}", d, [FETCH.u, NEXT.u, sp[0].u] + address_vetoes(x_taps, w), NEXT)
         for l in wpi.domain_latches:
             for x in l.members:
                 net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
@@ -359,6 +362,14 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     for l in wp.domain_latches:  # COPY_w: cleared with the stage
         for x in l.members:
             net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
+    # Commit watchdog: a stage fault after the grant, or a late rail, can leave the FSM in COMMIT
+    # with the master empty and nothing else running (review finding: no timeout covered it).
+    # COMMIT's rise starts a chain; if COMMIT still holds when it ends, a TIMEOUT latch lights
+    # (fail-stop; the runner and the campaign classifier count it), and it clears the stage.
+    cwd = add_delay_chain(net, drive, "FSM.cwd", COMMIT.u, commit_wd_hops)
+    cto = add_latch(net, drive, "FSM.cwd.timeout")
+    add_veto_relay(net, drive, "FSM.cwd.fire", cwd, [FETCH.u, NEXT.u], cto)
+    connect_trigger(net, drive, cto.u, S.reset_trigger, S.reset_edge)
     # NEXT: jump taken? (JZ and Z) or (JNZ and not Z); Z is the master's bit n+1
     z0, z1 = M.rails[n + 1][0].u, M.rails[n + 1][1].u
     add_veto_relay(net, drive, "JT.z", NEXT.u, [ir_jz[0].u, z0], jt)
@@ -421,12 +432,41 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
             net.synapse(dmem.words[port_in_word].completion.u, cancel, drive.pulse)
         for h in chain:
             net.synapse(cancel, h, -int(round(1.5 * drive.loop)))
-        st_word = dmem.words[status_word]
-        net.synapse(prev, st_word.rails[0][1].u, drive.ignite)  # status <- 1
-        for i in range(1, n):
-            net.synapse(prev, st_word.rails[i][0].u, drive.ignite)
+        # status <- 1 through a proper write (reset, READY, copy of a constant-1 level): the word
+        # holds 0 between timeouts, so a handler can LOAD it on either path (an empty word would
+        # double-rail a LOAD and halt the machine; measured on the exact-channel test)
+        one = [[add_latch(net, drive, f"TIMER.one.b{i}r{r}") for r in (0, 1)] for i in range(n)]
+        wps = add_write_port(net, drive, "TIMER.wr", Memory([dmem.words[status_word]], n), prev, [],
+                             [[one[i][0].u, one[i][1].u] for i in range(n)])
+        for l in wps.domain_latches:  # the COPY latch clears with the stage
+            for x in l.members:
+                net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
+        # Two ports share the status word, and every port's COPY latch lights at the word's
+        # READY: without a guard the timer's reset also copies the master (the STORE port's data)
+        # into the word, double-railing it (measured: the handler's first LOAD of the status
+        # halted the machine). Each port marks "my write is in flight" from its select until the
+        # word completes, and that level vetoes the other port's copies (>= 40 ms set-up: READY
+        # comes after the word's hold recovery). A program must not STORE to the status word
+        # while the timer runs (both marks lit would leave the word empty).
+        tsel, msel = add_latch(net, drive, "TIMER.sel"), add_latch(net, drive, "TIMER.msel")
+        net.synapse(prev, tsel.u, drive.ignite)
+        others = [wp] + ([wpi] if x_word is not None else [])
+        for port in others:
+            net.synapse(port.selects[status_word], msel.u, drive.ignite)
+            for pair in port.copy_relays[status_word]:
+                for relay in pair:
+                    net.synapse(tsel.u, relay, -int(round(0.5 * drive.loop)))
+        for pair in wps.copy_relays[0]:
+            for relay in pair:
+                net.synapse(msel.u, relay, -int(round(0.5 * drive.loop)))
+        add_kill_train(net, drive, "TIMER.sel.kill", wp.done[status_word], [tsel, msel])
         net.synapse(prev, intp[1].u, drive.ignite)
-    return Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp[1], wp.done, intp, handler_pc, lr, link_out, port_in_word)
+        m_status_one = one
+    mach = Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp[1], wp.done, intp, handler_pc, lr, link_out, port_in_word)
+    mach.status_word = status_word
+    mach.status_one = locals().get("m_status_one")
+    mach.commit_timeout = cto
+    return mach
 
 
 # ------------------------------------------------------------------------------ runner
@@ -449,6 +489,11 @@ def load_image(sim, m: Machine, program: list[tuple], dmem: dict | None, node: i
         for i, r in rails_for(v, m.n):
             sim.add_events(node, [step], [m.dmem.words[addr].rails[i][r].u], [m.drive.ignite])
     sim.add_events(node, [step], [m.net.roles.index("SPr0.u")], [m.drive.ignite])  # "no store pending" is a rail
+    if getattr(m, "status_word", None) is not None:  # the timer's status word starts at 0; its constant-1 source is a level
+        for i, r in rails_for(0, m.n):
+            sim.add_events(node, [step], [m.dmem.words[m.status_word].rails[i][r].u], [m.drive.ignite])
+        for i, r in rails_for(1, m.n):
+            sim.add_events(node, [step], [m.status_one[i][r].u], [m.drive.ignite])
     if m.intp is not None:  # "no interrupt pending" and "not masked" are asserted rails, not silence
         sim.add_events(node, [step], [m.intp[0].u], [m.drive.ignite])
         mask_r0 = m.net.roles.index("MASKr0.u")
@@ -471,6 +516,7 @@ def run_machine(m: Machine, params: Params, program: list[tuple], dmem: dict | N
     window = 2 * drive.loop_period_steps
     fault_set = set(m.acc.reg.stage.fault) | {m.acc.reg.stage.fault_latch.u}
     timeout_n = m.acc.producer.watchdog.timeout.u if m.acc.producer.watchdog is not None else -1
+    cto_n = m.commit_timeout.u if getattr(m, "commit_timeout", None) is not None else -1
     pc_taps = {l.u: k for k, l in enumerate(m.pc.lines)}
     w_taps = {w.completion.u: k for k, w in enumerate(m.dmem.words)}
     last = {}
@@ -492,17 +538,17 @@ def run_machine(m: Machine, params: Params, program: list[tuple], dmem: dict | N
             if not rise:
                 continue
             if n_ == wm:
-                commits.append((s_, decode_at(sim.trace, M.rail_taps, s_, window)[0]))
+                commits.append((s_, decode_recent(sim, M.rail_taps, s_, window)[0]))
                 last_event = s_
             elif n_ in pc_taps:
                 pcs.append((s_, pc_taps[n_]))
                 last_event = s_
             elif n_ in w_taps:
                 k = w_taps[n_]
-                writes.append((s_, k, decode_at(sim.trace, m.dmem.words[k].rail_taps, s_, window)[0]))
+                writes.append((s_, k, decode_recent(sim, m.dmem.words[k].rail_taps, s_, window)[0]))
             elif n_ in fault_set:
                 faults += 1
-            elif n_ == timeout_n:
+            elif n_ == timeout_n or n_ == cto_n:
                 timeouts += 1
         if s_ - last_event > idle and s_ > 3000:
             break

@@ -34,13 +34,30 @@ The pixel equals (A's result + 1) as the two references compute it. This is the 
 plan's Demo 1 minus the H0 circuit beside it: input-dependent neural storage, arithmetic, a
 neural branch, a validated result sent to a second node, and a neurally computed pixel.
 
-## What it is not yet (the rest of Stage C)
+## The exact channel (second milestone, in test)
 
-One message per input word. The exact-channel machinery is not built: sequence and epoch
-fields, credits (the receiver must clear its port word before the next message), ACCEPT back
-to the sender, timeout and retransmit, duplicate rejection, corruption detection, reordering,
-backpressure and recovery. The port codec is a bare rail-rise export, not the FlyLink packet
-of `docs/spec.md` §3.4 with its provenance rule.
+`tests/test_exact_channel.py`: the alternating-bit protocol on two machines. A sends
+`seq | payload` (bit 3 the sequence bit, bits 0-2 the payload) by storing to its port word; B's
+arrival handler acknowledges at once on the reverse link (stores the sequence bit to its own
+port word), compares the sequence bit with the one it expects, and on a match consumes the
+payload, emits it as a pixel, counts the delivery and flips its expected bit; a duplicate
+(same bit) is acknowledged but not delivered. A's handler tells a reply from a timeout by
+loading the send timer's status word: on a timeout it counts the retry and re-sends; on a
+reply it checks the ACK's sequence bit and records "acked". Both handlers empty their input
+port word (`CLR`) before returning, which is the receive credit.
+
+Found on the first clean-link run: A's status word was *empty* on the reply path (the timer
+had never written it), a LOAD of an empty word reads as both rails, and the machine halted as
+a fault, so `acked` stayed 0 although B had delivered once. The rule it settles: **every
+word a handler may read on any path must hold a value on every path**. The status word now
+starts at 0 in the image, the timer writes 1 through a write port of its own, and the handler
+stores 0 back instead of emptying it (`docs/a2_ram_control.md` §2.2).
+
+Still not built: epochs, credits beyond one message in flight, corruption detection at the
+receiver (a corrupted rail event is a double rail, refused by the completion tree as a fault,
+but nothing yet turns that refusal into a retransmit request), reordering, and the FlyLink
+packet format of `docs/spec.md` §3.4 with its provenance rule; the port codec is a bare
+rail-rise export.
 
 ## A rule found on the way
 

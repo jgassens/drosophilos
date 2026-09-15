@@ -91,10 +91,10 @@ def test_send_timer_expires_and_handler_retransmits():
     re-sends once; after the second timeout it stops. Word 3 = counter, 4 = saved acc,
     5 = status (written by the timer), 7 = output port."""
     main = [("MOV", 9), ("STORE", 7), ("JMP", 3), ("JMP", 2)] + [("HALT", k) for k in range(4, 8)]
-    handler = [("STORE", 4), ("LOAD", 5), ("JZ", 19), ("LOAD", 3), ("ADD", 1), ("STORE", 3), ("CLR", 5), ("SUB", 2), ("JZ", 19),
-               ("LOAD", 4), ("STORE", 7), ("LOAD", 4), ("IRET", 0)]
-    program = main + handler + [("HALT", k) for k in range(21, 32)]
-    assert len(program) == 32 and program[19] == ("LOAD", 4)
+    handler = [("STORE", 4), ("LOAD", 5), ("JZ", 21), ("LOAD", 3), ("ADD", 1), ("STORE", 3), ("MOV", 0), ("STORE", 5), ("LOAD", 3), ("SUB", 2), ("JZ", 21),
+               ("LOAD", 4), ("STORE", 7), ("LOAD", 4), ("IRET", 0)]  # 8..22; status <- 0 by a STORE (a CLR would empty it)
+    program = main + handler + [("HALT", k) for k in range(23, 32)]
+    assert len(program) == 32 and program[21] == ("LOAD", 4)
     m = build_machine(PARAMS, n=4, n_prog=32, n_data=8, handler_pc=8, port_out_word=7, timer_hops=300, status_word=5)
     run, sim = run_machine(m, PARAMS, program, {3: 0}, max_ms=36000, idle_ms=6000)
     final = {3: 0}

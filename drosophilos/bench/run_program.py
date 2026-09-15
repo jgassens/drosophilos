@@ -17,7 +17,7 @@ from ..compiler.golden import run_golden
 from ..compiler.lower import lower
 from ..isa.ir import interpret
 from ..lib.control import build_machine, load_image, reference_run
-from ..protocol.token import decode_at
+from ..protocol.token import decode_recent
 from ..sim.model import Params
 
 
@@ -72,7 +72,7 @@ def main():
         st = ev["step"][(ev["neuron"] == wm) & (ev["step"] >= sim.step_index - chunk - 1)]
         for s_ in st:
             if last is None or s_ - last > 3 * period:
-                v = decode_at(sim.trace, out.rail_taps, int(s_), window)[0]
+                v = decode_recent(sim, out.rail_taps, int(s_), window)[0]
                 got.append(v)
                 print((chr(v) if a.chars else f"{v} ") if v is not None else "? ", end="", flush=True)
             last = int(s_)

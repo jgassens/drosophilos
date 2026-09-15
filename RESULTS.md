@@ -817,8 +817,35 @@ How it is known to have worked, with nothing taken on trust from the machine:
   **store-pending as a two-rail pair** so hardware-written words never advance the PC. A
   no-link send timed out twice and the handler retransmitted once (neural test).
 - **Exact channel** over FlyLink (alternating bit, immediate ACK on a reverse link, retransmit
-  on timeout, duplicate rejection by sequence): programs written; the clean-link and
-  dropped-event scenarios are running (slow tests).
+  on timeout, duplicate rejection by sequence): programs written (`tests/test_exact_channel.py`).
+  The first clean-link run delivered the payload once and acknowledged it, but the sender never
+  recorded the ACK: its handler `LOAD`ed the timer's status word to tell a reply from a
+  timeout, and that word was empty (the timer had never written it; an earlier version emptied
+  it with `CLR`), so the read double-railed and the machine halted as a fault. The status word
+  is now a proper memory word: 0 at power-up, written to 1 by the timer through a write port of
+  its own (the two ports sharing the word veto each other's copies), stored back to 0 by the
+  handler. Both scenarios now pass on the reference simulator: clean link — received 5,
+  delivered once, pixel 5, acked, no retries, 4 rail events each way; one dropped rail event —
+  the timeout fires, the handler re-sends once (retries 1), delivered once and acked.
+- **Kernel compiler** (`compiler/kernel.py`, `lib/kernel.py`, `bench/run_kernel.py`): a loop
+  body of the IR becomes a resident pipeline, one cell per operation, the induction variable
+  streamed by the host, loop-invariant variables as image-time parameters, arrays as memories
+  addressed by the index (the base folds away). The renderer's column loop compiles to four
+  cells (ADD, AND, LOAD map, LOAD htab; 13,727 neurons at 8 bits) and the kernel reference
+  equals the IR interpreter's pixels for three headings. **Neural: 8 columns, 8 correct
+  pixels, one per 1.18 s self-paced, 4.5 s latency** — against ~32 s per column on the
+  sequencer, a ~27× gain at the machine's neuron count. Getting there took a handshake
+  between cells (request / idle / commit-pending kill pairs and a two-relay "both true"
+  element) after four measured failures of the un-handshaked pipeline; `docs/a3_kernels.md`.
+- **Second review** (Kimi stalled; the `claude-fable` fallback reviewed `26fa035`): the empty
+  status word found independently; the refusal window after completion corrected to ~25 ms;
+  a commit watchdog added (a hung COMMIT is now a counted timeout); the written/cleared pulses
+  into NEXT are address-qualified (a hardware-completed word no longer advances a pending
+  STORE); an early `return` no longer falls through; the golden shim's ports follow the
+  width. `docs/a2_ram_control.md` §3.2.
+- **Runner speed**: polling a live simulator through its sorted trace was quadratic; every
+  runner now reads the per-step spike lists (`protocol.token.decode_recent`). A 13 s kernel
+  run: 25 s wall instead of 50+ minutes.
 
 - **Stage D shape, on the references**: `examples/tick.c`, a toy world update in the shape of
   `p_tick` (player moves by the input velocity with wall collision, a monster steps toward the
