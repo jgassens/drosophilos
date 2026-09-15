@@ -168,8 +168,12 @@ def build_staged_register(params: Params, width: int, drive: Drive | None = None
 
 
 def build_accumulator(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                      watchdog_hops: int = 150, act_hops: int = 11, ordered_grant: bool = False, mul: bool = False) -> StagedChannel:
-    """P(B, U, SUB) + master[0:n] as A -> ALU -> stage(R, C, Z, V) -> commit -> master."""
+                      watchdog_hops: int | None = None, act_hops: int = 11, ordered_grant: bool = False, mul: bool = False) -> StagedChannel:
+    """P(B, U, SUB) + master[0:n] as A -> ALU -> stage(R, C, Z, V) -> commit -> master. The
+    producer watchdog must outlast the slowest op: 150 hops (~0.8 s) without the multiplier,
+    250 (~1.3 s) with it (a 4-bit MUL takes 0.93-1.08 s; measured timeouts otherwise)."""
+    if watchdog_hops is None:
+        watchdog_hops = 250 if mul else 150
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     pw = width + N_UNITS + 1

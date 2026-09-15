@@ -837,6 +837,12 @@ How it is known to have worked, with nothing taken on trust from the machine:
   sequencer, a ~27× gain at the machine's neuron count. Getting there took a handshake
   between cells (request / idle / commit-pending kill pairs and a two-relay "both true"
   element) after four measured failures of the un-handshaked pipeline; `docs/a3_kernels.md`.
+- **The world update as a state kernel**: `examples/tick.c`'s tick (calls inlined, four `if`s
+  as select cells, three loop-carried variables as feedback edges with image-lit initial
+  state, two outputs per tick) compiles to 13 cells (28,420 neurons) and runs three ticks
+  neurally with every output correct, one tick per 6.0 s against ~45 s on the sequencer.
+  The builder now joins a cell's requests over every source and gates a commit on every
+  reader (`docs/a3_kernels.md` §4).
 - **Second review** (Kimi stalled; the `claude-fable` fallback reviewed `26fa035`): the empty
   status word found independently; the refusal window after completion corrected to ~25 ms;
   a commit watchdog added (a hung COMMIT is now a counted timeout); the written/cleared pulses

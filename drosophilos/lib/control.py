@@ -266,7 +266,7 @@ class Machine:
 
 def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, drive: Drive | None = None, *,
                   ir_hops: int = 15, p_hops: int = 31, rd_hops: int = 35, act_hops: int = 17, next_hops: int = 12,
-                  watchdog_hops: int = 170, commit_wd_hops: int = 150, handler_pc: int | None = None, port_out_word: int | None = None,
+                  watchdog_hops: int | None = None, commit_wd_hops: int = 150, handler_pc: int | None = None, port_out_word: int | None = None,
                   port_in_word: int | None = None, timer_hops: int | None = None, status_word: int | None = None,
                   x_word: int | None = None, mul: bool = False) -> Machine:
     """`handler_pc`: enables safe-point interrupts with the handler at that program word.
@@ -281,6 +281,8 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     != 0) from an arrival and retransmit (STORE the output word again)."""
     drive = drive or Drive.from_params(params)
     a = max(1, (max(n_prog, n_data) - 1).bit_length())
+    if watchdog_hops is None:
+        watchdog_hops = 260 if mul else 170  # the producer watchdog must outlast a MUL (~1.1 s)
     acc = build_accumulator(params, n, drive=drive, watchdog_hops=watchdog_hops, act_hops=act_hops, ordered_grant=True, mul=mul)
     net = acc.net
     P, S, M, R = acc.producer, acc.reg.stage, acc.reg.master, acc.reg

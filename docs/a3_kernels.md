@@ -94,13 +94,45 @@ The kernel reference (`compiler/kernel.kernel_reference`) equals the IR interpre
 three headings, and the neural pipeline equals the kernel reference for eight columns
 (`tests/test_kernel.py`, the slow test ~30 s).
 
-## 4. What it is not yet
+## 4. State kernels: the world update as dataflow (2026-09-15)
 
-- One consumer per master: a value read by two cells needs a joined "free" rail (a C-element
-  over the consumers' REQ-false rails); `NotImplementedError` today.
-- Straight-line bodies only: no branch inside the body (a select cell — both arms computed, one
-  chosen by a condition token — is the dataflow form of `if`), no loop-carried values other than
-  the streamed induction variable, one OUT per token.
+`examples/tick.c` is the Stage D shape: `p_move` (the player moves by the input velocity and
+is clamped by two walls) and `m_move` (the monster steps toward the player; contact costs
+health), three ticks, two pixel records per tick. Its loop body has calls, four `if`s and
+three loop-carried variables. The compiler now handles all three:
+
+- **Calls** are inlined (the closing RET dropped; an early RET is rejected).
+- **`if` / `if-else`** become select cells: both arms are computed and a SEL cell picks per
+  bit from the arms' levels by the condition cell's Z flag (four veto relays per bit, no
+  ALU). A JZ over the then-arm means "the arm applies when the condition is not zero"; the
+  compiler orders the arms accordingly. Nested ifs recurse; a variable defined on one arm
+  only is rejected.
+- **State** (read before written, and written): the variable's reads before its first write
+  refer to the cell that writes it last, a feedback edge to a cell built later. That cell
+  carries `init` (the prologue's constant) and the image lights its master and the readers'
+  requests for it, so the first token finds the state there. A cell whose every cell source
+  is a feedback edge is paced by the input token (`trigger: ["input"]`): the tick.
+- **Several outputs**: every OUT names an output cell; the host decodes each master.
+
+Two changes to the builder came with it. A cell is requested by **every** cell source's done
+pulse (one REQ pair per source, joined by chained guards), not by its first operand's alone:
+with one request a cell could sample a second operand mid-rewrite. And a producer's commit
+waits for **every** reader (chained guards through "passed" pairs). The renderer's kernel and
+the fan-out test run unchanged on the new builder.
+
+| tick kernel | value |
+|---|---|
+| cells | 13 (5 SEL, 5 ALU, 3 state carriers among them), 28,420 neurons |
+| ticks | 3, both outputs correct on every tick (px 25/30/35, mx 88/86/84) |
+| latency per tick | 5.98 s (the state loop is ~9 cells deep and cannot overlap ticks) |
+| the same on the sequencer | 133 instructions / 3 ticks ≈ 45 s per tick |
+| gain | ~7.5× (a dependent loop pipelines nothing; the gain is the sequencer's overhead) |
+| simulation | 75 s wall for 22 s of neural time |
+
+## 5. What it is not yet
+
+- Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel
+  of its own with a stream, and joining two kernels is the next compiler step.
 - Kernel parameters are image-time constants; a per-frame parameter (the heading) needs a
   parameter port the host rewrites between frames, which is a staged register like the input.
 - The cells are 8-bit; the Q16.16 datapath of `minidoom` needs 32-bit cells and a multiplier

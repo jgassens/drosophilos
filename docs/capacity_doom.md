@@ -65,8 +65,10 @@ inside the substrate, and every pixel of it is a spike-decoded word.
 
 1. **Kernel compiler before more ISA.** Done for straight-line bodies (`compiler/kernel.py`,
    `lib/kernel.py`): the toy renderer's column loop runs as a kernel with the columns in flight
-   and a measured ~27× throughput gain. Next inside this item: select cells (branches inside a
-   body), multi-consumer values, per-frame parameter ports, 32-bit cells.
+   and a measured ~27× throughput gain; select cells, fan-out values, feedback state and
+   several outputs followed, and the toy world update runs as a state kernel (6 s per tick,
+   ~7.5× the sequencer: a dependent loop gains only the sequencer's overhead). Next inside
+   this item: nested loops as joined kernels, per-frame parameter ports, 32-bit cells.
 2. **32-bit datapath as a resident kernel**, not as the sequencer's width: the multiplier is
    the cost driver and only the kernels need it.
 3. **Memory-serving nodes** with ROM as fetch relays (3 neurons per bit) for map and texture

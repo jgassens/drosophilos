@@ -1,21 +1,24 @@
 """Resident kernels: a loop body as a spatial dataflow pipeline (plan: the default execution
 model; `docs/capacity_doom.md` §3).
 
-A pipeline is a chain of cells. Every cell owns a master register (its output value, a
-level) and is triggered by the upstream master's commit-done pulse:
+A pipeline is a graph of cells. Every cell owns a master register (its output value, a
+level) and a datapath on the levels of its sources:
 
-    trigger pulse -> ACT latch -> ACT delayed -> operand gates: A^d, B^d tokens from the
-    source masters (or a constant) -> the ALU (or a RAM read for a load cell) -> stage ->
-    automatic COMMIT at completion -> master rewritten -> done pulse -> next cell
+    requests (one kill pair per source: its done pulse) + IDLE -> start pulse -> ACT, ACT^d
+    -> operand gates sample the sources -> ALU / RAM read / select -> stage -> commit
+    request -> commit once every consumer has started on the previous value -> master
+    rewritten -> done pulse -> the consumers' requests
 
-Sources are levels (masters or constants), so a cell may read a master that its producer
-is about to rewrite: the operand gate snapshots the level ~60 ms after the trigger and the
-producer's next commit is a full cell latency away (>= 400 ms), so no back-pressure is
-needed at one token per cell latency. The input cell is a staged register whose producer
-the host loads (transduced input), one token at a time after READY; the output cell's
-done pulse is the pixel record, decoded by the host from the master's rails.
+Cell kinds: ALU ops (ADD SUB AND OR XOR MOV MUL) on sources a, b; LOAD (RAM read at
+address a); SEL (c != 0 ? a : b, c a cell whose Z flag decides). Sources: "input" (the
+input register the host loads, one token after each READY), ("const", name), or a cell
+name. A source built later than its reader is a feedback edge (loop-carried state): the
+reader's request for it is asserted by the image, and the cell carries `init`, the state's
+value at power-up. A cell listing "input" in `trigger` is requested by every input token
+even if it does not read it (a state update paced by the tick). `outputs` names the cells
+the host decodes at each completion (default: the last cell).
 
-No fetch, no decode, no PC: the kernel is the program.
+No fetch, no decode, no PC: the kernel is the program. `docs/a3_kernels.md`.
 """
 
 from __future__ import annotations
@@ -42,18 +45,31 @@ from .staged import StagedRegister, add_staged_commit
 @dataclass
 class Cell:
     name: str
-    op: str  # ALU op name (ADD, SUB, AND, OR, XOR, MOV, MUL) or "LOAD" (RAM read at address = A)
-    a: object  # source: a Cell, "input", or ("const", value)
-    b: object = None  # source for B (ALU cells): a Cell, ("const", value) or None for LOAD
+    op: str  # ADD SUB AND OR XOR MOV MUL | LOAD | SEL
+    a: object  # source: a Cell name, "input", or ("const", name)
+    b: object = None  # ALU second operand / SEL's "c == 0" arm; None for LOAD
+    c: object = None  # SEL's condition cell (its Z flag)
     mem: Memory | None = None  # for LOAD cells
+    init: int | None = None  # state cells: the master's value at power-up
+    trigger: tuple = ()  # extra request sources ("input")
     reg: StagedRegister | None = None
     master: Register | None = None
     act: Latch | None = None
-    trigger_in: int = -1  # neuron to pulse to request the cell (driven by the upstream done relay)
-    req: list = None  # kill pair [no request, request pending]
-    idle: list = None  # kill pair [busy, idle]
-    creq: list = None  # kill pair [nothing to commit, commit pending]
+    stage: Register | None = None
+    reqs: dict = field(default_factory=dict)  # source name -> kill pair [no request, pending]
+    idle: list = None
+    creq: list = None
+    start: int = -1
     commit_pulse: int = -1
+    feedback: set = field(default_factory=set)  # sources that are feedback edges
+
+    @property
+    def sources(self) -> list:
+        out = []
+        for src in (self.a, self.b, self.c):
+            if src is not None and src not in out:
+                out.append(src)
+        return out
 
 
 @dataclass
@@ -68,10 +84,11 @@ class Pipeline:
     mems: dict = field(default_factory=dict)
     image_latches: list = field(default_factory=list)  # levels the host lights once (idle, no-request, ...)
     in_creq: list = None
+    outputs: list = field(default_factory=list)  # output cells
 
     @property
     def output(self) -> Cell:
-        return self.cells[-1]
+        return self.outputs[-1]
 
 
 def _const_rails(net: Netlist, drive: Drive, name: str, n: int) -> list:
@@ -98,14 +115,38 @@ def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, targe
     add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u], _N(target))
 
 
+def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
+    """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse)."""
+    cur = pairs[0]
+    for k, pr in enumerate(pairs[1:]):
+        last = k == len(pairs) - 2
+        if last:
+            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target)
+            return
+        passed = add_kill_pair(net, drive, f"{name}.p{k}")
+        pk = net.neuron(f"{name}.p{k}.pulse")
+        guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, pk)
+        net.synapse(pk, passed[1].u, drive.ignite)
+        add_kill_train(net, drive, f"{name}.p{k}.kill0", pk, [passed[0]])
+        net.synapse(reset_pulse, passed[0].u, drive.ignite)
+        add_kill_train(net, drive, f"{name}.p{k}.kill1", reset_pulse, [passed[1]])
+        image.append(passed[0])
+        cur = passed
+    always = add_kill_pair(net, drive, f"{name}.always")  # one pair: guard it against a constant true
+    image.append(always[1])
+    guarded_pulse(net, drive, f"{name}.g", cur, always, target)
+
+
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
-                   drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20) -> Pipeline:
-    """`spec`: cells in order, each {"name", "op", "a": source, "b": source or None, "mem": name}
-    where a source is "input", a cell name, or ("const", name). `consts`: name -> value (bits n).
-    `mems`: name -> (n_words, contents dict)."""
+                   drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
+                   outputs: list | None = None) -> Pipeline:
+    """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
+    the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
+    `outputs`: names of the cells the host decodes (default: the last)."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
-    # input register: producer P (host-loaded) -> stage -> master, auto-commit at completion
+    image: list = []
+    # ---- input register: producer P (host-loaded) -> stage -> master, commit gated by its readers
     P = add_register(net, drive, "IN.P", n, with_completion=False)
     S = add_register(net, drive, "IN.Q", n, with_completion=True)
     for i in range(n):
@@ -119,68 +160,107 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     in_creq = add_kill_pair(net, drive, "IN.creq")  # [nothing to commit, commit pending]
     rl = add_edge_relay(net, drive, "IN.autocommit", S.completion.u, fast_inhibitor=True)
     net.synapse(rl, in_creq[1].u, drive.ignite)
-    image = [in_creq[0]]
+    image.append(in_creq[0])
     const_rails = {name: _const_rails(net, drive, f"K.{name}", n) for name in (consts or {})}
     mem_objs = {name: add_memory(net, drive, f"MEM.{name}", nw, n) for name, (nw, _) in (mems or {}).items()}
+
+    # ---- pass 1: every cell's stage, master, handshake pairs (sources may be built later: feedback)
     cells: dict[str, Cell] = {}
-    order = []
+    order: list[Cell] = []
+    for cs in spec:
+        c = Cell(cs["name"], cs["op"], cs["a"], cs.get("b"), cs.get("c"), mem_objs.get(cs.get("mem")), cs.get("init"),
+                 tuple(cs.get("trigger", ())))
+        c.stage = add_register(net, drive, f"{c.name}.Q", n + 3, with_completion=True)
+        c.act = add_latch(net, drive, f"{c.name}.act")
+        c.idle = add_kill_pair(net, drive, f"{c.name}.idle")
+        image.append(c.idle[1])
+        _fault_latch(net, drive, c.name, c.stage)
+        c.reg = add_staged_commit(net, drive, c.name, c.stage, _NoProducer(), ordered_grant=True)
+        c.master = c.reg.master
+        c.creq = add_kill_pair(net, drive, f"{c.name}.creq")
+        rl = add_edge_relay(net, drive, f"{c.name}.autocommit", c.stage.completion.u, fast_inhibitor=True)
+        net.synapse(rl, c.creq[1].u, drive.ignite)
+        image.append(c.creq[0])
+        idle_d = add_delay_chain(net, drive, f"{c.name}.idled", c.reg.done_relay, idle_hops)
+        net.synapse(idle_d, c.idle[1].u, drive.ignite)  # idle again ~106 ms after done: the reset's paralysis is over
+        c.start = net.neuron(f"{c.name}.start")
+        cells[c.name] = c
+        order.append(c)
+    for c in order:
+        if c.init is not None:
+            for i, r in rails_for(c.init, n):
+                image.append(c.master.rails[i][r])
 
     def rails_of(src):
         if src == "input":
-            return [[in_reg.master.rails[i][0], in_reg.master.rails[i][1]] for i in range(n)], in_reg.done_relay
+            return [[in_reg.master.rails[i][0], in_reg.master.rails[i][1]] for i in range(n)]
         if isinstance(src, tuple) and src[0] == "const":
-            return const_rails[src[1]], None
-        c = cells[src]
-        return [[c.master.rails[i][0], c.master.rails[i][1]] for i in range(n)], c.reg.done_relay
+            return const_rails[src[1]]
+        return [[cells[src].master.rails[i][0], cells[src].master.rails[i][1]] for i in range(n)]
 
-    for cs in spec:
-        name, op = cs["name"], cs["op"]
-        A_rails, a_done = rails_of(cs["a"])
-        Ccell = Cell(name, op, cs["a"], cs.get("b"), mem_objs.get(cs.get("mem")))
-        # Back-pressure (the dataflow handshake): the upstream done pulse requests the cell
-        # (REQ); the cell starts when it is idle and a request is pending, in either order
-        # (guarded_pulse); starting clears REQ and IDLE. Without it a cell re-triggered in its
-        # reset tail lost the token (measured: a 990 ms run followed by an 873 ms upstream run).
-        act = add_latch(net, drive, f"{name}.act")
-        trig = net.neuron(f"{name}.trigger")
-        req = add_kill_pair(net, drive, f"{name}.req")
-        idle = add_kill_pair(net, drive, f"{name}.idle")
-        net.synapse(trig, req[1].u, drive.ignite)
-        if a_done is not None:
-            net.synapse(a_done, trig, drive.relay_in)
-        start = net.neuron(f"{name}.start")
-        guarded_pulse(net, drive, f"{name}.go", req, idle, start)
-        for l in (act, req[0], idle[0]):
-            net.synapse(start, l.u, drive.ignite)
+    def done_of(src):
+        return in_reg.done_relay if src == "input" else cells[src].reg.done_relay
+
+    # ---- pass 2: requests, start, datapath
+    built = set()
+    for c in order:
+        req_sources = [s for s in c.sources if isinstance(s, str)] + [t for t in c.trigger if t not in c.sources]
+        for src in req_sources:
+            pair = add_kill_pair(net, drive, f"{c.name}.req.{src}")
+            c.reqs[src] = pair
+            trig = net.neuron(f"{c.name}.trigger.{src}")
+            net.synapse(done_of(src), trig, drive.relay_in)
+            net.synapse(trig, pair[1].u, drive.ignite)
+            if src != "input" and src not in built:  # feedback: the state is there at power-up
+                c.feedback.add(src)
+                image.append(pair[1])
+                assert cells[src].init is not None, f"{c.name} reads {src} before it is written: it needs an init"
+            else:
+                image.append(pair[0])
+        _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
+        for l in [c.act, c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
+            net.synapse(c.start, l.u, drive.ignite)
         # The pair's own kill (r0's rise kills r1) is a relay driven by r0's train, and r0 was
         # silent for only ~60 ms (killed by the request, re-lit by the start), inside its ~86 ms
         # recovery: the request rail survived (measured). The start pulse kills them itself.
-        add_kill_train(net, drive, f"{name}.start.kill", start, [req[1], idle[1]])
-        image += [req[0], idle[1]]
-        # ACT^d is a chain of pulses from the start pulse, not from the ACT latch's train: relays
-        # driven by a train need ~86 ms of source silence before they fire again, and a chain
-        # fed by ACT keeps firing ~85 ms after ACT is cleared, so a cell restarted less than
-        # ~170 ms after its done pulse sampled nothing (measured). The ACT latch stays as the
-        # busy level for the reset domain.
-        act_d = add_delay_chain(net, drive, f"{name}.actd", start, act_hops)
-        Sc = add_register(net, drive, f"{name}.Q", n + 3, with_completion=True)
+        add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()])
+        # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
+        # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
+        act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
         G = Gates(net, drive)
-        if op == "LOAD":  # address = A (a master's level): read port driven by ACT^d into P-like rails
+        Sc = c.stage
+        name = c.name
+        if c.op == "LOAD":  # address = A (a level): read port driven by ACT^d into token latches, PASSB through the ALU
+            A_rails = rails_of(c.a)
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
-            addr_taps = [[A_rails[j][0].u, A_rails[j][1].u] for j in range(max(1, (Ccell.mem.n_words - 1).bit_length()))]
-            add_read_port(net, drive, f"{name}.rd", Ccell.mem, act_d, addr_taps, [[l for l in pair] for pair in Bt])
-            # PASSB through the ALU: U = PASSB constant rails, SUB = 0, A = don't care (use the read as B)
+            addr_taps = [[A_rails[j][0].u, A_rails[j][1].u] for j in range(max(1, (c.mem.n_words - 1).bit_length()))]
+            add_read_port(net, drive, f"{name}.rd", c.mem, act_d, addr_taps, [[l for l in pair] for pair in Bt])
             U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
             A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
-            for i in range(n):  # A tokens = 0 (unused by PASSB)
+            for i in range(n):
                 G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
             R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+        elif c.op == "SEL":  # c != 0 ? a : b, per bit from the condition's Z rails and the arms' levels
+            A_rails, B_rails = rails_of(c.a), rails_of(c.b)
+            zr = cells[c.c].master.rails[n + 1]  # [Z0 = c != 0, Z1 = c == 0]
+            R = []
+            for i in range(n):
+                r0, r1 = G.latch(f"{name}.s{i}r0"), G.latch(f"{name}.s{i}r1")
+                G.veto(f"{name}.s{i}r1.a", act_d, [zr[1].u, A_rails[i][0].u], r1)  # c != 0 and a = 1
+                G.veto(f"{name}.s{i}r0.a", act_d, [zr[1].u, A_rails[i][1].u], r0)
+                G.veto(f"{name}.s{i}r1.b", act_d, [zr[0].u, B_rails[i][0].u], r1)  # c == 0 and b = 1
+                G.veto(f"{name}.s{i}r0.b", act_d, [zr[0].u, B_rails[i][1].u], r0)
+                R.append(Rail2(r0, r1))
+            C = Rail2(G.latch(f"{name}.c0"), G.latch(f"{name}.c1"))
+            V = Rail2(G.latch(f"{name}.v0"), G.latch(f"{name}.v1"))
+            G.veto(f"{name}.c0.g", act_d, [], C.r0)
+            G.veto(f"{name}.v0.g", act_d, [], V.r0)
         else:
-            unit, sub = ALU_OPS[op]
-            B_rails, _ = rails_of(cs["b"])
-            U = _unit_rails(net, drive, f"{name}.u", op, G)
+            unit, sub = ALU_OPS[c.op]
+            A_rails, B_rails = rails_of(c.a), rails_of(c.b)
+            U = _unit_rails(net, drive, f"{name}.u", c.op, G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub.g", act_d, [], SUB.r1 if sub else SUB.r0)
             A_tok, B_tok = [], []
@@ -192,51 +272,28 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 G.veto(f"{name}.b{i}r0.g", act_d, [B_rails[i][1].u], b0)
                 G.veto(f"{name}.b{i}r1.g", act_d, [B_rails[i][0].u], b1)
                 A_tok.append(Rail2(a0, a1)); B_tok.append(Rail2(b0, b1))
-            R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(op == "MUL"))
+            R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
         wire_alu(net, drive, R, C, V, Sc)
-        extend_reset(net, drive, Sc, G.latches + [act], G.gates)
-        # the stage has no producer: a fault latch and a commit path
-        F = _fault_latch(net, drive, name, Sc)
-        reg = add_staged_commit(net, drive, name, Sc, _NoProducer(), ordered_grant=True)
-        creq = add_kill_pair(net, drive, f"{name}.creq")  # the commit waits for the consumer (wired below)
-        rl = add_edge_relay(net, drive, f"{name}.autocommit", Sc.completion.u, fast_inhibitor=True)
-        net.synapse(rl, creq[1].u, drive.ignite)
-        image.append(creq[0])
-        # idle again ~106 ms after the done pulse: the reset train's paralysis (~80 ms) is over
-        idle_d = add_delay_chain(net, drive, f"{name}.idled", reg.done_relay, idle_hops)
-        net.synapse(idle_d, idle[1].u, drive.ignite)
-        Ccell.reg, Ccell.master, Ccell.act, Ccell.trigger_in = reg, reg.master, act, trig
-        Ccell.req, Ccell.idle, Ccell.creq = req, idle, creq
-        cells[name] = Ccell
-        order.append(Ccell)
-    # Commit gating: a producer rewrites its master only once every consumer of it has started
-    # on the previous value (its REQ cleared); otherwise the consumer's operand gates could
-    # sample a value in the middle of its rewrite, or miss one. Consumers of a master: the
-    # cells that read it as A or B. The output cell's master is read by the host: free.
-    always = add_kill_pair(net, drive, "FREE")  # [never, always]: a constant "consumer is free"
-    image.append(always[1])
+        extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+        built.add(c.name)
 
-    def gate_commit(pname: str, creq, commit_in: int, consumers: list):
+    # ---- commit gating: a producer rewrites its master only once every reader of it has started
+    # on the previous value (its request for this source cleared), so a reader's operand gates
+    # never sample a value mid-rewrite and never miss one. The host reads the outputs: free.
+    def gate_commit(pname: str, creq, commit_in: int, readers: list):
         pulse = net.neuron(f"{pname}.commit_pulse")
         net.synapse(pulse, commit_in, drive.ignite)
         net.synapse(pulse, creq[0].u, drive.ignite)
-        add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])  # see the start pulse's kill
-        if not consumers:
-            guarded_pulse(net, drive, f"{pname}.cg", creq, always, pulse)
-        for k, c in enumerate(consumers):  # every consumer must be free: chain the guards
-            free = [c.req[1], c.req[0]]  # true when the consumer has no pending request
-            if len(consumers) == 1:
-                guarded_pulse(net, drive, f"{pname}.cg", creq, free, pulse)
-            else:
-                raise NotImplementedError("a master with several consumers needs a joined free rail")
+        add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])
+        frees = [[r.reqs[pname][1], r.reqs[pname][0]] for r in readers]  # true when the reader has no pending request
+        _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse)
         return pulse
 
-    readers = {c.name: [d for d in order if d.a == c.name or d.b == c.name] for c in order}
     for c in order:
-        c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, readers[c.name])
-    in_readers = [d for d in order if d.a == "input" or d.b == "input"]
-    gate_commit("IN", in_creq, in_reg.commit_in, in_readers)
-    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq)
+        c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, [r for r in order if c.name in r.reqs])
+    gate_commit("input", in_creq, in_reg.commit_in, [r for r in order if "input" in r.reqs])
+    outs = [cells[o] for o in (outputs or [order[-1].name])]
+    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs)
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: v for k, (_, v) in (mems or {}).items()}
     return pl
@@ -326,7 +383,8 @@ def add_alu_logic_tokens(G: Gates, name: str, A_tok, B_tok, U, SUB, act_d, mul: 
 
 # ------------------------------------------------------------------------------ running
 def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None:
-    """Constants, memories and every cell's unit-select rails are levels the host lights once."""
+    """Constants, memories, state inits, every cell's unit-select rails and the handshake's
+    resting levels are lit once by the host."""
     for name, rails in pl.consts.items():
         for i, r in rails_for(pl.const_values[name], pl.n):
             sim.add_events(node, [step], [rails[i][r].u], [pl.drive.ignite])
@@ -334,44 +392,39 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
         for addr, v in pl.mem_contents[name].items():
             for i, r in rails_for(v, pl.n):
                 sim.add_events(node, [step], [mem.words[addr].rails[i][r].u], [pl.drive.ignite])
-    for l in pl.image_latches:  # "no request", "idle", "nothing to commit", "always free"
+    for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
+        if c.op == "SEL":
+            continue
         unit, _ = ALU_OPS["MOV" if c.op == "LOAD" else c.op]
         for k in range(N_UNITS):
             r = 1 if k == unit else 0
             sim.add_events(node, [step], [pl.net.roles.index(f"{c.name}.u{k}r{r}.u")], [pl.drive.ignite])
 
 
-CELL_LATENCY_MS = 1000.0  # trigger -> done of an ALU or LOAD cell is ~880 ms (measured); MUL adds ~600
-
-
-def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: float = 60000, gap_ms: float | None = None,
-                 sim=None) -> tuple[list, RefSim, dict]:
+def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: float = 60000, gap_ms: float = 0.0,
+                 sim=None, per_token: int | None = None) -> tuple[list, RefSim, dict]:
     """Streams `tokens` into the input producer (each after the input stage's READY, and no
-    sooner than `gap_ms` after the previous one) and decodes every commit of the output cell's
-    master in order. Steps the simulator one step at a time and reads the per-step spike
-    lists (a trace rebuild per poll is quadratic).
-
-    The gap is the host's rate limit: a cell re-triggered while busy drops the token (its ACT
-    latch is already lit, so the operand gates never sample again; measured with the input
-    register cycling at 680 ms against cells of 880 ms). Until the cells carry their own
-    back-pressure (a request latch per cell and commit gating), the transducer must not
-    offer tokens faster than the slowest cell."""
+    sooner than `gap_ms` after the previous one) and decodes every completion of each output
+    cell's master in order. Steps the simulator one step at a time and reads the per-step
+    spike lists (a trace rebuild per poll is quadratic). Returns the first output's list of
+    (step, value) as before; `stats["outputs_by_cell"]` holds every output's list. The run ends
+    when every output has produced `per_token` values per token (default 1) or at `max_ms`."""
     net, drive = pl.net, pl.drive
-    if gap_ms is None:
-        gap_ms = 0.0  # the cells carry their own back-pressure; the input stage's READY paces the host
-    gap = int(gap_ms / params.dt)
     sim = sim or RefSim(net.topology(), params)
     load_pipeline_image(sim, pl)
     sim.run(3000)  # the image's completions settle
     P, S = pl.input_producer, pl.input_reg.stage
-    out = pl.output.master
     window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
-    ready_n, comp_n = S.ready, out.completion.u
-    loads, outs, last_wm, last_ready = [], [], None, None
-    n_ready, k = 0, 0
-    pending = []  # (step, decode window end) for output completions to decode once the word is stable
+    gap = int(gap_ms / params.dt)
+    ready_n = S.ready
+    comp = {c.completion.u: c for c in (o.master for o in pl.outputs)}
+    outs = {c.name: [] for c in pl.outputs}
+    last_wm = {u: None for u in comp}
+    loads, last_ready, n_ready, k = [], None, 0, 0
+    pending = []  # (completion step, output cell)
+    want = (per_token or 1) * len(tokens)
     while sim.step_index < int(max_ms / params.dt):
         if k < len(tokens) and n_ready >= k and (not loads or sim.step_index >= loads[-1] + gap):  # after the k-th READY
             t = sim.step_index + 5
@@ -381,23 +434,25 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: flo
             k += 1
         sim.step()
         s_ = sim.step_index - 1
-        if pending and s_ >= pending[0] + window:
-            st = pending.pop(0)
-            outs.append((st, decode_recent(sim, out.rail_taps, st + window, window)[0]))
-            if len(outs) >= len(tokens):
-                break
+        while pending and s_ >= pending[0][0] + window:
+            st, cell = pending.pop(0)
+            outs[cell.name].append((st, decode_recent(sim, cell.master.rail_taps, st + window, window)[0]))
+        if all(len(v) >= want for v in outs.values()):
+            break
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
             continue
         fired = sim._spk_neuron[-1]
-        if ready_n in fired and (last_ready is None or s_ - last_ready > 3 * period):
-            n_ready += 1
         if ready_n in fired:
+            if last_ready is None or s_ - last_ready > 3 * period:
+                n_ready += 1
             last_ready = s_
-        if comp_n in fired:
-            if last_wm is None or s_ - last_wm > 3 * period:
-                pending.append(s_)
-            last_wm = s_
-    stats = {"neurons": net.n, "tokens": len(tokens), "outputs": len(outs),
-             "first_output_ms": (outs[0][0] - loads[0]) * params.dt if outs else None,
-             "per_token_ms": ((outs[-1][0] - outs[0][0]) / max(1, len(outs) - 1)) * params.dt if len(outs) > 1 else None}
-    return outs, sim, stats
+        for u, master in comp.items():
+            if u in fired:
+                if last_wm[u] is None or s_ - last_wm[u] > 3 * period:
+                    pending.append((s_, next(o for o in pl.outputs if o.master is master)))
+                last_wm[u] = s_
+    first = outs[pl.outputs[0].name]
+    stats = {"neurons": net.n, "tokens": len(tokens), "outputs": len(first), "outputs_by_cell": outs,
+             "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
+             "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
+    return first, sim, stats
