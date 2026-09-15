@@ -30,12 +30,17 @@ def main():
     ap.add_argument("--max-ms", type=float, default=1800000)
     ap.add_argument("--out", default="data/a2/game")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
-    ks = compile_program(prog, params={"heading": a.heading})
-    tick_stream = ks.streams[1]
     W, H, B, F = a.width, a.height, a.nodes, a.frames
+    if a.pacing == "neural" and (W * H) % B:
+        raise SystemExit(f"neural pacing: the pixel count {W * H} must be a multiple of the copies {B}")
+    per_node_pixels = (W * H) // B
+    ks = compile_program(prog, params={"heading": a.heading}, pacing=a.pacing,
+                         counts={"input": per_node_pixels} if a.pacing == "neural" else None)
+    tick_stream = ks.streams[1]
     sx, sy = 160 // W, 100 // H
     toks = [((y * sy) << 8) | (x * sx) for y in range(H) for x in range(W)]
     at = lambda t: ((t & 255) // sx, (t >> 8) // sy)
@@ -58,15 +63,16 @@ def main():
     for b in range(B):
         sc, owed = [], 0
         for f in range(F):
-            sc += [("input", t, owed) for t in deal[b]]
+            bar = (lambda x: x) if a.pacing == "host" else (lambda x: 0)  # neural pacing: no host barrier
+            sc += [("input", t, bar(owed)) for t in deal[b]]
             owed += len(deal[b])
-            sc.append((tick_stream, a.turn, owed))
+            sc.append((tick_stream, a.turn, bar(owed)))
             owed += n_tick_outs
         scheds.append(sc)
         expect.append(owed)
     P = Params()
-    pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams)
-    print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {len(toks)} pixels x {F} frames", flush=True)
+    pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams, phases=ks.phases)
+    print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {len(toks)} pixels x {F} frames, pacing {a.pacing}", flush=True)
     import torch
     dtype = torch.float32 if (a.device == "mps" or a.fp32) else None
     t0 = time.time()
