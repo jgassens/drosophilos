@@ -30,6 +30,7 @@ def main():
     ap.add_argument("--max-ms", type=float, default=3600000)
     ap.add_argument("--out", default="data/a2/doom1")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     ks = compile_program(prog, params={"px": 128, "py": 128, "heading": 0})
@@ -78,7 +79,7 @@ def main():
         st = {"neural_ms": sim.step_index * P.dt, "faults": st["faults"], "timeouts": st["timeouts"], "bad_outputs": st["bad_outputs"]}
     else:
         import torch
-        dtype = torch.float32 if a.device == "mps" else None
+        dtype = torch.float32 if (a.device == "mps" or a.fp32) else None
         outs, sim, st = run_pipeline_batched(pl, P, scheds, max_ms=a.max_ms, device=a.device, expect_outputs=expect, dtype=dtype)
     wall = time.time() - t0
     wrong = missing = 0

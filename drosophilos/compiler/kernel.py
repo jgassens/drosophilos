@@ -454,7 +454,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     return spec
 
 
-def compile_program(prog: Program, params: dict | None = None, fn: str = "main") -> KernelSpec:
+def compile_program(prog: Program, params: dict | None = None, fn: str = "main", pacing: str = "host",
+                    counts: dict | None = None) -> KernelSpec:
     """A function with a loop nest of depth two (a frame loop around a column loop) as one
     pipeline with two token streams: the outer loop's body without the inner loop is the
     outer kernel (stream "input:<outer var>": the tick), the inner loop is the inner kernel
@@ -508,6 +509,33 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main")
         if idx:
             spec.streams.append(ivar)
             spec.stream_keys[ivar] = key
+    spec.phases = None
+    if pacing == "neural":
+        # Stage F2, first step: a wrapping counter per inner stream (cnt = cnt == K-1 ? 0 : cnt + 1,
+        # requested by the pass's output cell), the phases in program order, the tick last.
+        # `counts[stream]` is the number of tokens of that stream per frame on this copy.
+        phases = []
+        for idx, (_, ib, ivar, _, _) in enumerate(inners):
+            key = "input" if idx == 0 else f"input:{ivar}"
+            kname = "input" if idx == 0 else ivar
+            K = (counts or {}).get(kname)
+            if K is None:
+                raise NotAKernel(f"neural pacing needs the token count per frame of stream {kname}")
+            out_cell = next(o for o in reversed(spec.outputs) if next(c for c in spec.cells if c["name"] == o)["stream"] == key)
+            pfx = f"ph{idx}_"
+            spec.consts[f"k{K - 1}"] = K - 1
+            spec.consts["k1"] = 1
+            spec.consts["k0"] = 0
+            spec.cells.append({"name": f"{pfx}xor", "op": "XOR", "a": f"{pfx}cnt", "b": ("const", f"k{K - 1}"), "stream": key, "trigger": [out_cell]})
+            spec.cells.append({"name": f"{pfx}add", "op": "ADD", "a": f"{pfx}cnt", "b": ("const", "k1"), "stream": key, "trigger": [out_cell]})
+            spec.cells.append({"name": f"{pfx}cnt", "op": "SEL", "a": f"{pfx}add", "b": ("const", "k0"), "c": f"{pfx}xor", "stream": key, "init": 0})
+            phases.append((kname, f"{pfx}cnt", "wrap"))
+        # the tick phase ends when the tick kernel's last state carrier has landed (its done), or
+        # at the token's done if the tick kernel has no cells
+        tick_cells = [c["name"] for c in spec.cells if c["stream"] == okey]
+        last_state = next((cn for cn in reversed(tick_cells) if cn in spec.state_cells.values()), tick_cells[-1] if tick_cells else None)
+        phases.append((ovar, last_state, "each"))
+        spec.phases = phases
     return spec
 
 

@@ -66,6 +66,7 @@ def main():
     ap.add_argument("--max-ms", type=float, default=90000)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     P = Params()
     ks, pl, tokens, ref = block(a.block, P)
@@ -74,9 +75,11 @@ def main():
     rng = np.random.default_rng(a.seed)
     n_steps = int(a.max_ms / P.dt) + 5000
     t0 = time.time()
-    sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device)
+    import torch
+    dtype = torch.float32 if a.fp32 else torch.float64
+    sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype)
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
-                                         expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim)
+                                         expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype)
     ok = wrong = missing = 0
     per_node = []
     for b in range(B):

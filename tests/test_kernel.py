@@ -404,3 +404,24 @@ def test_compiler_rejects_what_the_kernels_cannot_carry():
     prog = compile_c("static u8 c, x, f, p; int main(void) { f = 1; while (f != 0) { p = 2; while (p != 0) { x = in_read(); if (x != 0) { c = 1; } else { c = 2; } out_pixel(c); p = p - 1; } f = f - 1; } return 0; }")
     ks = compile_program(prog)  # an if on a second stream's token
     assert "SEL" in [c["op"] for c in ks.cells]
+
+
+@pytest.mark.slow
+def test_neural_pacing_replaces_the_host_barriers():
+    """Stage F2, first step: the phase order (columns, pixels, tick) is enforced by phase gates in
+    the substrate; the host deals the tokens in program order with no barrier at all."""
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(TWO_PASS)
+    ks = compile_program(prog, params={"heading": 1}, pacing="neural", counts={"input": 4, "p": 8})
+    assert ks.phases == [("input", "ph0_cnt", "wrap"), ("p", "ph1_cnt", "wrap"), ("f", "f0_add", "each")]
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams, phases=ks.phases)
+    pix = [(r << 2) | c for r in range(2) for c in range(4)]
+    sched = []
+    for f in range(2):
+        sched += [("input", c, 0) for c in range(4)] + [("p", t, 0) for t in pix] + [("f", f, 0)]  # no barriers
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=200000, expect_outputs=8 + 16 + 2)
+    pixel_cell = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == "input:p"][0]
+    got = [v for _, v in st["outputs_by_cell"][pixel_cell]]
+    assert got == interpret(prog, pix + pix)["outs"], (st["outputs_by_cell"], st)
+    assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
+    print("neural pacing", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})

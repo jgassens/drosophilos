@@ -30,6 +30,7 @@ def main():
     ap.add_argument("--max-ms", type=float, default=1800000)
     ap.add_argument("--out", default="data/a2/game")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     ks = compile_program(prog, params={"heading": a.heading})
@@ -67,7 +68,7 @@ def main():
     pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams)
     print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {len(toks)} pixels x {F} frames", flush=True)
     import torch
-    dtype = torch.float32 if a.device == "mps" else None
+    dtype = torch.float32 if (a.device == "mps" or a.fp32) else None
     t0 = time.time()
     outs, sim, st = run_pipeline_batched(pl, P, scheds, max_ms=a.max_ms, device=a.device, expect_outputs=expect, dtype=dtype)
     wall = time.time() - t0

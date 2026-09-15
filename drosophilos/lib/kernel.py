@@ -159,11 +159,18 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
 
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
-                   outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None) -> Pipeline:
+                   outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
+                   phases: list | None = None) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
-    stream names (default ["input"]; a stream NAME is the source "input:NAME")."""
+    stream names (default ["input"]; a stream NAME is the source "input:NAME"). `phases`:
+    neural pacing (Stage F2's first step) — [(stream, counter cell or None), ...] in the order
+    the phases run each frame: a stream's register commits only while its phase's OK pair is
+    true; the pair is set by the previous phase's end and cleared by this phase's end, where a
+    phase ends when its counter cell (a wrapping count of the phase's tokens, built by the
+    compiler) returns to zero, or, with no counter, at each token's done. The host then only
+    deals tokens in program order; the phase order is the substrate's."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
@@ -489,9 +496,44 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
 
     for c in order:
         c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, [r for r in order if c.name in r.reqs])
+    ok_pairs = {}
+    if phases:
+        for ph in phases:
+            ok_pairs[ph[0]] = add_kill_pair(net, drive, f"PHASE.{ph[0]}.ok")  # [not this phase, this phase]
+        image.append(ok_pairs[phases[0][0]][1])  # the first phase is open at power-up
+        for k, ph in enumerate(phases):
+            st, counter, mode = (ph + ("wrap",))[:3]
+            nxt = phases[(k + 1) % len(phases)][0]
+            # the phase's end pulse: "wrap" — the counter's done delayed 6 hops (its master's Z
+            # rail is established by then), vetoed by Z0 (count != 0); "each" — every done of the
+            # named cell (a tick phase ends when the tick kernel's state has landed, not when the
+            # tick token did: measured, the next frame's columns read the old heading otherwise)
+            cc = cells[counter] if counter is not None else None
+            if cc is not None and mode == "wrap":
+                drv = add_delay_chain(net, drive, f"PHASE.{st}.endd", cc.reg.done_relay, 6)
+                end = net.neuron(f"PHASE.{st}.end")
+                add_veto_relay(net, drive, f"PHASE.{st}.wrap", drv, [cc.master.rails[n + 1][0].u], _N(end))
+            else:
+                src_done = cc.reg.done_relay if cc is not None else inputs[st][0].done_relay
+                end = add_delay_chain(net, drive, f"PHASE.{st}.endd", src_done, 6)
+            for pr, r in ((ok_pairs[st], 0), (ok_pairs[nxt], 1)):  # this phase closes, the next opens
+                net.synapse(end, pr[r].u, drive.ignite)
+            add_kill_train(net, drive, f"PHASE.{st}.kill", end, [ok_pairs[st][1], ok_pairs[nxt][0]])
+        for st in ok_pairs:
+            if st != phases[0][0]:
+                image.append(ok_pairs[st][0])
     for st, (reg, _, creq) in inputs.items():
         key = "input" if st == streams[0] else f"input:{st}"
-        gate_commit(key, creq, reg.commit_in, [r for r in order if key in r.reqs])
+        readers = [r for r in order if key in r.reqs]
+        if st in ok_pairs:
+            pulse = net.neuron(f"{key}.commit_pulse")
+            net.synapse(pulse, reg.commit_in, drive.ignite)
+            net.synapse(pulse, creq[0].u, drive.ignite)
+            add_kill_train(net, drive, f"{key}.commit.kill", pulse, [creq[1]])
+            frees = [[r.reqs[key][1], r.reqs[key][0]] for r in readers]
+            _chain_true(net, drive, f"{key}.cg", [creq] + frees + [ok_pairs[st]], pulse, image, pulse)
+        else:
+            gate_commit(key, creq, reg.commit_in, readers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()})

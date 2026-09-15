@@ -27,6 +27,7 @@ def main():
     ap.add_argument("--max-ms", type=float, default=600000)
     ap.add_argument("--out", default="data/a2/frame")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     ks = compile_kernel(prog, loop_body(prog), "i", params={"heading": a.heading})
@@ -43,7 +44,7 @@ def main():
     deal = [toks[b::a.nodes] for b in range(a.nodes)]  # round-robin: node b renders pixels b, b+B, ...
     t0 = time.time()
     import torch
-    dtype = torch.float32 if a.device == "mps" else None  # Apple's GPU has no float64
+    dtype = torch.float32 if (a.device == "mps" or a.fp32) else None  # Apple's GPU has no float64
     outs, sim, st = run_pipeline_batched(pl, P, deal, max_ms=a.max_ms, device=a.device, dtype=dtype)
     wall = time.time() - t0
     out_cell = ks.outputs[0]
