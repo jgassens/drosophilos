@@ -38,6 +38,7 @@ No fetch, no decode, no PC: the kernel is the program. `docs/a3_kernels.md`.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -798,12 +799,25 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 
 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
-                         expect_outputs: list | None = None, dtype=None, sim=None) -> tuple[list, object, dict]:
+                         expect_outputs: list | None = None, dtype=None, sim=None,
+                         progress: "float | callable | None" = 300) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
     outputs node b owes (default: one per token). Returns per node the dict of output lists
-    (cell -> [(step, value)]), the simulator, and stats."""
+    (cell -> [(step, value)]), the simulator, and stats.
+
+    `progress`: the interval in wall seconds between calls (default 300; None or 0 disables,
+    uses the default printer), a callable(dict) (called at the default 300 s interval), or a
+    (seconds, callable) pair for a custom interval with a custom callable. The default
+    callable prints one flushed line per call: elapsed wall time, neural ms simulated, steps/s
+    over the interval, outputs collected so far / expected, nodes that have finished their
+    schedule, and faults/timeouts so far. The report dict passed to any callable carries the
+    same fields under `elapsed_s`, `neural_ms`, `steps_per_s`, `outputs`, `expected_outputs`,
+    `nodes_done`, `total_nodes`, `faults`, `timeouts`, plus `outs` — the per-node dict of
+    output lists collected so far (the same live object the run fills in, for a caller that
+    wants to assemble and write a partial result while the run continues). Wall time is
+    polled only every ~1000 steps, so the per-step cost of the run loop is unchanged."""
     import torch
     from ..sim.lif_torch import TorchSim
     net, drive = pl.net, pl.drive
@@ -842,6 +856,25 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
     want = expect_outputs or [len(sc) for sc in scheds]
     done_nodes = [False] * B
+
+    def default_progress(report: dict) -> None:
+        print(f"progress: {report['elapsed_s']:.0f}s elapsed, {report['neural_ms']:.0f} ms neural, "
+              f"{report['steps_per_s']:.0f} steps/s, outputs {report['outputs']}/{report['expected_outputs']}, "
+              f"nodes done {report['nodes_done']}/{report['total_nodes']}, "
+              f"faults {report['faults']}, timeouts {report['timeouts']}", flush=True)
+
+    if isinstance(progress, tuple):
+        progress_interval, progress_fn = progress
+    elif callable(progress):
+        progress_interval, progress_fn = 300, progress
+    else:
+        progress_interval, progress_fn = progress, default_progress
+    t_start = time.time()
+    t_last_report = t_start
+    step_last_report = sim.step_index
+    STEP_CHECK = 1000
+    steps_since_check = 0
+
     while sim.step_index < int(max_ms / params.dt):
         for b in range(B):
             if k[b] < len(scheds[b]):
@@ -857,6 +890,19 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     k[b] += 1
         sim.step()
         s_ = sim.step_index - 1
+        steps_since_check += 1
+        if progress_interval and steps_since_check >= STEP_CHECK:
+            steps_since_check = 0
+            now = time.time()
+            if now - t_last_report >= progress_interval:
+                steps_per_s = (sim.step_index - step_last_report) / (now - t_last_report)
+                progress_fn({
+                    "elapsed_s": now - t_start, "neural_ms": sim.step_index * params.dt, "steps_per_s": steps_per_s,
+                    "outputs": sum(sum(len(v) for v in o.values()) for o in outs), "expected_outputs": sum(want),
+                    "nodes_done": sum(done_nodes), "total_nodes": B,
+                    "faults": len(seen_f), "timeouts": len(seen_t), "outs": outs,
+                })
+                t_last_report, step_last_report = now, sim.step_index
         if len(sim._spk_step) > 8 * window:  # keep the recent spikes only: 128 nodes' whole run was OOM-killed at 96 GB
             del sim._spk_step[: -4 * window]; del sim._spk_neuron[: -4 * window]; del sim._spk_node[: -4 * window]
         while pending and s_ >= pending[0][0] + window:

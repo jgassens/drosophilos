@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--json", default=None)
     ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
+    ap.add_argument("--progress", type=float, default=300, help="seconds between progress lines (0 disables)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     W, H, B, F = a.width, a.height, a.nodes, a.frames
@@ -75,17 +76,38 @@ def main():
     print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {len(toks)} pixels x {F} frames, pacing {a.pacing}", flush=True)
     import torch
     dtype = torch.float32 if (a.device == "mps" or a.fp32) else None
-    t0 = time.time()
-    outs, sim, st = run_pipeline_batched(pl, P, scheds, max_ms=a.max_ms, device=a.device, expect_outputs=expect, dtype=dtype)
-    wall = time.time() - t0
-    wrong = missing = 0
-    for f in range(F):
+
+    def frame_complete(f, node_outs):
+        return all(len(node_outs[b][pixel_cell]) >= (f + 1) * len(deal[b]) for b in range(B))
+
+    def assemble_frame(f, node_outs):
         got = {}
         for b in range(B):
-            vals = [v for _, v in outs[b][pixel_cell]][f * len(deal[b]):(f + 1) * len(deal[b])]
+            vals = [v for _, v in node_outs[b][pixel_cell]][f * len(deal[b]):(f + 1) * len(deal[b])]
             for t, v in zip(deal[b], vals):
                 got[at(t)] = v
         write_png(got, W, H, f"{a.out}_{f}_neural.png")
+        return got
+
+    written = set()
+
+    def on_progress(report):
+        print(f"progress: {report['elapsed_s']:.0f}s elapsed, {report['neural_ms']:.0f} ms neural, "
+              f"{report['steps_per_s']:.0f} steps/s, outputs {report['outputs']}/{report['expected_outputs']}, "
+              f"nodes done {report['nodes_done']}/{report['total_nodes']}, "
+              f"faults {report['faults']}, timeouts {report['timeouts']}", flush=True)
+        for f in range(F):
+            if f not in written and frame_complete(f, report["outs"]):
+                assemble_frame(f, report["outs"])
+                written.add(f)
+
+    t0 = time.time()
+    outs, sim, st = run_pipeline_batched(pl, P, scheds, max_ms=a.max_ms, device=a.device, expect_outputs=expect, dtype=dtype,
+                                          progress=(a.progress, on_progress) if a.progress else None)
+    wall = time.time() - t0
+    wrong = missing = 0
+    for f in range(F):
+        got = assemble_frame(f, outs)
         wrong += sum(1 for xy, v in ref_frames[f].items() if got.get(xy) != v)
         missing += sum(1 for xy in ref_frames[f] if xy not in got)
     print(f"neural slideshow: {F} frames of {len(toks)} pixels in {st['neural_ms'] / 1000:.1f} s of neural time ({wall:.0f} s wall on {a.device}); "

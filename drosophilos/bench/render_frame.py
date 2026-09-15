@@ -28,6 +28,7 @@ def main():
     ap.add_argument("--out", default="data/a2/frame")
     ap.add_argument("--json", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
+    ap.add_argument("--progress", type=float, default=300, help="seconds between progress lines (0 disables)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     ks = compile_kernel(prog, loop_body(prog), "i", params={"heading": a.heading})
@@ -45,7 +46,8 @@ def main():
     t0 = time.time()
     import torch
     dtype = torch.float32 if (a.device == "mps" or a.fp32) else None  # Apple's GPU has no float64
-    outs, sim, st = run_pipeline_batched(pl, P, deal, max_ms=a.max_ms, device=a.device, dtype=dtype)
+    outs, sim, st = run_pipeline_batched(pl, P, deal, max_ms=a.max_ms, device=a.device, dtype=dtype,
+                                          progress=a.progress or None)
     wall = time.time() - t0
     out_cell = ks.outputs[0]
     got = {}
