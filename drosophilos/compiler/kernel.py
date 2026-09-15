@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from ..isa.ir import ALU_OPS as IR_OPS, Instr, Program, _to_signed
+from ..isa.ir import ALU_OPS as IR_OPS, Instr, Program, _to_signed, apply as ir_apply
 
 
 class NotAKernel(Exception):
@@ -195,9 +195,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         return name
 
     def fold(op, a, b):
-        if op in ("ADD", "SUB", "MUL"):
-            return IR_OPS[op](_to_signed(a, width), _to_signed(b, width), width).value & mask
-        return IR_OPS[op](a, b, width).value & mask
+        return ir_apply(op, a, b, width)
 
     def walk(instrs, env):
         """Compiles a straight-line stretch with structured ifs; returns nothing, mutates env."""
@@ -278,7 +276,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 if ins.dst == stream:
                     continue
                 if is_const(a):
-                    env[ins.dst] = const(IR_OPS[op](cval(a), ins.imm, width).value)
+                    env[ins.dst] = const(ir_apply(op, cval(a), ins.imm, width))
                     continue
                 env[ins.dst] = cell(op, a, imm=ins.imm)
                 written.add(ins.dst)
@@ -458,13 +456,9 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
             elif c["op"] == "SEL":
                 v = get(c["a"]) if get(c["c"]) != 0 else get(c["b"])
             elif c["op"] in ("SHL", "SHR"):
-                v = IR_OPS[c["op"]](get(c["a"]), c["imm"], w).value & mask
+                v = ir_apply(c["op"], get(c["a"]), c["imm"], w)
             else:
-                a, b = get(c["a"]), get(c["b"])
-                if c["op"] in ("ADD", "SUB", "MUL"):
-                    v = IR_OPS[c["op"]](_to_signed(a, w), _to_signed(b, w), w).value & mask
-                else:
-                    v = IR_OPS[c["op"]](a, b, w).value & mask
+                v = ir_apply(c["op"], get(c["a"]), get(c["b"]), w)
             val[c["name"]] = v
             last[c["name"]] = v
             if c["name"] in state:

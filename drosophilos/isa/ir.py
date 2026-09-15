@@ -27,7 +27,19 @@ from dataclasses import dataclass, field
 from . import semantics as sem
 
 ALU_OPS = {"ADD": sem.add_wrap, "SUB": sem.sub_wrap, "AND": sem.and_, "OR": sem.or_, "XOR": sem.xor, "MUL": sem.mul_wrap,
-           "SHL": sem.shl, "SHR": sem.shr}  # SHL/SHR: by a constant (imm), logical, on the unsigned pattern
+           "SHL": sem.shl, "SHR": sem.shru}  # SHL/SHR: by a constant (imm); SHR is the logical shift (unsigned words)
+
+
+def apply(op: str, a: int, b: int, w: int) -> int:
+    """One ALU op on unsigned w-bit patterns, through the semantics spec: ADD/SUB/MUL/SHL take
+    the signed reading of `a` (and `b`), the logical ops and SHR the unsigned pattern; the
+    result is the unsigned w-bit pattern."""
+    mask = (1 << w) - 1
+    if op in ("ADD", "SUB", "MUL"):
+        return ALU_OPS[op](_to_signed(a, w), _to_signed(b, w), w).value & mask
+    if op == "SHL":
+        return ALU_OPS[op](_to_signed(a, w), b, w).value & mask
+    return ALU_OPS[op](a & mask, b & mask, w).value & mask
 
 
 @dataclass
@@ -114,7 +126,7 @@ def interpret(prog: Program, inputs: list[int], max_steps: int = 10000) -> dict:
                 val = ALU_OPS["MUL"](_to_signed(a, w), _to_signed(b, w), w).value & mask
                 flags = {"z": int(val == 0), "c": 0, "v": 0}
             else:
-                val = ALU_OPS[ins.op](a, b, w).value & mask
+                val = apply(ins.op, a, b, w)
                 flags = {"z": int(val == 0), "c": 0, "v": 0}
             mem[prog.variables[ins.dst]] = val
         elif ins.op == "JMP":
