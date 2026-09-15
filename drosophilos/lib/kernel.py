@@ -547,3 +547,86 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
     return first, sim, stats
+
+
+def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
+                         expect_outputs: list | None = None, dtype=None) -> tuple[list, object, dict]:
+    """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
+    node per copy, the cluster's "many brains running the same kernel on different tokens").
+    `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
+    outputs node b owes (default: one per token). Returns per node the dict of output lists
+    (cell -> [(step, value)]), the simulator, and stats."""
+    import torch
+    from ..sim.lif_torch import TorchSim
+    net, drive = pl.net, pl.drive
+    B = len(schedules)
+    kw = {"dtype": dtype} if dtype is not None else {}
+    sim = TorchSim(net.topology(), params, n_nodes=B, device=device, **kw)
+    for b in range(B):
+        load_pipeline_image(sim, pl, node=b)
+    sim.run(3000)
+    first_stream = next(iter(pl.inputs))
+    scheds = []
+    for sc in schedules:
+        out = []
+        for t in sc:
+            out.append((t[0], t[1], t[2] if len(t) > 2 else 0) if isinstance(t, tuple) else (first_stream, t, 0))
+        scheds.append(out)
+    window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
+    ready_of = {st: reg.stage.ready for st, (reg, _) in pl.inputs.items()}
+    watch = {}  # neuron -> ("ready", stream) | ("out", cell)
+    for st, rn in ready_of.items():
+        watch[rn] = ("ready", st)
+    for o in pl.outputs:
+        watch[o.master.completion.u] = ("out", o)
+    watch_ids = np.array(sorted(watch), dtype=np.int64)
+    n_ready = [{st: 0 for st in pl.inputs} for _ in range(B)]
+    loaded = [{st: 0 for st in pl.inputs} for _ in range(B)]
+    last_ready = [{st: None for st in pl.inputs} for _ in range(B)]
+    last_wm = [{o.name: None for o in pl.outputs} for _ in range(B)]
+    outs = [{o.name: [] for o in pl.outputs} for _ in range(B)]
+    loads = [[] for _ in range(B)]
+    k = [0] * B
+    pending = []  # (step, node, cell)
+    want = expect_outputs or [len(sc) for sc in scheds]
+    done_nodes = [False] * B
+    while sim.step_index < int(max_ms / params.dt):
+        for b in range(B):
+            if k[b] < len(scheds[b]):
+                st, value, min_outs = scheds[b][k[b]]
+                n_out = sum(len(v) for v in outs[b].values())
+                if n_ready[b][st] >= loaded[b][st] and n_out >= min_outs:
+                    t = sim.step_index + 5
+                    Pst = pl.inputs[st][1]
+                    ev_n = [Pst.rails[i][r].u for i, r in rails_for(value, pl.n)]
+                    sim.add_events(b, [t] * len(ev_n), ev_n, [drive.ignite] * len(ev_n))
+                    loads[b].append(t)
+                    loaded[b][st] += 1
+                    k[b] += 1
+        sim.step()
+        s_ = sim.step_index - 1
+        while pending and s_ >= pending[0][0] + window:
+            stp, b, cell = pending.pop(0)
+            outs[b][cell.name].append((stp, decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window, node=b)[0]))
+        for b in range(B):
+            if not done_nodes[b] and k[b] >= len(scheds[b]) and sum(len(v) for v in outs[b].values()) >= want[b]:
+                done_nodes[b] = True
+        if all(done_nodes) and not pending:
+            break
+        if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
+            continue
+        nr, nd = sim._spk_neuron[-1], sim._spk_node[-1]
+        m = np.isin(nr, watch_ids)
+        for u, b in zip(nr[m].tolist(), nd[m].tolist()):
+            kind, what = watch[u]
+            if kind == "ready":
+                if last_ready[b][what] is None or s_ - last_ready[b][what] > 3 * period:
+                    n_ready[b][what] += 1
+                last_ready[b][what] = s_
+            else:
+                if last_wm[b][what.name] is None or s_ - last_wm[b][what.name] > 3 * period:
+                    pending.append((s_, b, what))
+                last_wm[b][what.name] = s_
+    stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
+             "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt}
+    return outs, sim, stats

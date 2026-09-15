@@ -34,24 +34,29 @@ def decode_at(trace: SpikeTrace, rail_neurons: list[list[int]], step: int, windo
     return (value if status == "valid" else None), status
 
 
-def recent_active(sim, step: int, window: int) -> set:
+def recent_active(sim, step: int, window: int, node: int | None = None) -> set:
     """Neurons that spiked in (step - window, step], read from the simulator's per-step spike
-    lists. For polling a live simulator: `sim.trace` rebuilds and sorts the whole event array
-    on every access, which made a runner quadratic in the run length (measured: a 40 s run of
-    13k neurons took 50+ minutes in the sort and 70 s without it)."""
+    lists (of one node of a batched simulator when `node` is given). For polling a live
+    simulator: `sim.trace` rebuilds and sorts the whole event array on every access, which
+    made a runner quadratic in the run length (measured: a 40 s run of 13k neurons took 50+
+    minutes in the sort and 70 s without it)."""
     active = set()
-    for st, nr in zip(reversed(sim._spk_step), reversed(sim._spk_neuron)):
+    nodes = getattr(sim, "_spk_node", None) if node is not None else None
+    for k in range(len(sim._spk_step) - 1, -1, -1):
+        st, nr = sim._spk_step[k], sim._spk_neuron[k]
         s_ = int(st[0])
         if s_ <= step - window:
             break
         if s_ <= step:
+            if nodes is not None:
+                nr = nr[nodes[k] == node]
             active.update(nr.tolist())
     return active
 
 
-def decode_recent(sim, rail_neurons: list[list[int]], step: int, window: int):
+def decode_recent(sim, rail_neurons: list[list[int]], step: int, window: int, node: int | None = None):
     """`decode_at` on a live simulator without building the trace (same result)."""
-    active = recent_active(sim, step, window)
+    active = recent_active(sim, step, window, node)
     value, status = 0, "valid"
     for i, (r0, r1) in enumerate(rail_neurons):
         a0, a1 = r0 in active, r1 in active

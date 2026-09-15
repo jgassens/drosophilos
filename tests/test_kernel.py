@@ -232,3 +232,18 @@ def test_neural_two_loop_renderer_two_frames():
     assert pixels == [x for k, x in enumerate(ir) if k % 9 != 8] and records == [0, 1], (by, st)
     assert st["faults"] == 0 and st["timeouts"] == 0
     print("two-loop renderer", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+@pytest.mark.slow
+def test_batched_nodes_run_the_renderer_on_different_columns():
+    """Two copies of the column kernel on the batched simulator, each with half the columns:
+    the cluster's shape (one kernel per brain, the host dealing tokens)."""
+    from drosophilos.compiler.kernel import kernel_outputs
+    from drosophilos.lib.kernel import run_pipeline_batched
+    prog = compile_c(RENDER)
+    ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems)
+    outs, sim, st = run_pipeline_batched(pl, PARAMS, [[0, 1, 2, 3], [4, 5, 6, 7]], max_ms=30000)
+    ref = kernel_reference(ks, list(range(8)))
+    assert [v for _, v in outs[0]["c3_load"]] == ref[:4] and [v for _, v in outs[1]["c3_load"]] == ref[4:], (outs, st)
+    print("batched", st)
