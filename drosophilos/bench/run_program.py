@@ -17,7 +17,7 @@ from ..compiler.golden import run_golden
 from ..compiler.lower import lower
 from ..isa.ir import interpret
 from ..lib.control import build_machine, load_image, reference_run
-from ..protocol.token import decode_recent
+from ..protocol.token import decode_recent, recent_spikes
 from ..sim.model import Params
 
 
@@ -68,9 +68,7 @@ def main():
     chunk = 2000
     while sim.step_index < max_steps and len(got) < len(gold["outs"]):
         sim.run(chunk)
-        ev = sim.trace.events
-        st = ev["step"][(ev["neuron"] == wm) & (ev["step"] >= sim.step_index - chunk - 1)]
-        for s_ in st:
+        for s_ in recent_spikes(sim, wm, sim.step_index - chunk - 1):  # never poll sim.trace: it sorts everything
             if last is None or s_ - last > 3 * period:
                 v = decode_recent(sim, out.rail_taps, int(s_), window)[0]
                 got.append(v)

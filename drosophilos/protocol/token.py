@@ -62,3 +62,16 @@ def decode_recent(sim, rail_neurons: list[list[int]], step: int, window: int):
         elif a1:
             value |= 1 << i
     return value, status
+
+
+def recent_spikes(sim, neuron: int, since_step: int) -> list:
+    """Steps in (since_step, now] at which `neuron` spiked, from the per-step spike lists
+    (node 0 of a batched simulator)."""
+    out = []
+    for st, nr in zip(reversed(sim._spk_step), reversed(sim._spk_neuron)):
+        s_ = int(st[0])
+        if s_ <= since_step:
+            break
+        if neuron in nr:
+            out.append(s_)
+    return out[::-1]

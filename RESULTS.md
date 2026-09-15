@@ -844,8 +844,10 @@ How it is known to have worked, with nothing taken on trust from the machine:
   STORE); an early `return` no longer falls through; the golden shim's ports follow the
   width. `docs/a2_ram_control.md` §3.2.
 - **Runner speed**: polling a live simulator through its sorted trace was quadratic; every
-  runner now reads the per-step spike lists (`protocol.token.decode_recent`). A 13 s kernel
-  run: 25 s wall instead of 50+ minutes.
+  runner now reads the per-step spike lists (`protocol.token.decode_recent`,
+  `recent_spikes`). A 13 s kernel run: 25 s wall instead of 50+ minutes; Hello World (31.8 s
+  neural, 12.7k neurons): 57 s wall on one CPU core instead of 1,878 s. The simulator was never
+  the bottleneck; the polling was.
 
 - **Stage D shape, on the references**: `examples/tick.c`, a toy world update in the shape of
   `p_tick` (player moves by the input velocity with wall collision, a monster steps toward the

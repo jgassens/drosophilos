@@ -71,8 +71,9 @@ Two rules found on the way, now stated in the code:
   start and commit pulses kill the rails they clear with their own kill trains.
 - **Poll a live simulator from its per-step spike lists.** The trace property sorts the whole
   event array on every access; the first runner read it every 200 steps and a 40 s run took
-  fifty minutes in the sort (70 s without). `protocol.token.decode_recent` now serves every
-  runner, the machine's included.
+  fifty minutes in the sort (70 s without). `protocol.token.decode_recent` and `recent_spikes`
+  now serve every runner, the machine's included: Hello World's 31.8 s of neural time takes
+  57 s of wall time on one core, not 1,878.
 
 ## 3. Measured (clean model, Profile 3, 2026-09-15)
 

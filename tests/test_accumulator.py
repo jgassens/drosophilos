@@ -44,7 +44,7 @@ def test_random_program_matches_reference():
     words, expected = _program(instrs, acc0)
     for w, (op, b) in zip(words, instrs):
         assert decode_alu_word(w, W, with_a=False) == (None, b, op)
-    sc = build_accumulator(PARAMS, W)
+    sc = build_accumulator(PARAMS, W, mul=True)
     recs, sim, st = run_commits(sc, PARAMS, words, expected, commit_delay_steps=[int(rng.integers(0, 4000)) for _ in instrs],
                                 init_master=acc0)
     assert st["committed"] == len(instrs) and st["correct"] == len(instrs), [(i, r.decoded_master, r.expected, r.status) for i, r in zip(instrs, recs)]
