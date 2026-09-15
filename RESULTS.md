@@ -844,7 +844,11 @@ timing; with only the carried 61 % it computes none (the channel stalls before i
 with the parasitic edges kept at anatomical weight it computes none either (they light the
 output rails within 15 ms). The 191 missing logic edges are what a first sum needs; the 251
 broadcast (reset) edges are what the second needs. That is the exact size of the gap between
-the fly's wiring and a working adder under the H0 weight rules.
+the fly's wiring and a working adder under the H0 weight rules. Loosening the weight bound
+(k_max 4 → 8) or splitting each broadcast neuron into a tree of identical copies
+(`Netlist.split_hubs`, no timing change) each shrinks the gap by about a fifth (to 337 or 346
+added edges) and they do not add up; the bare placement still computes nothing, and a reset
+that reaches half its latches is no reset (`docs/h1_placement.md`, the last three sections).
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

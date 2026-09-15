@@ -353,3 +353,52 @@ tested. This is what Profile 2's "weights within bounds" buys and costs at each 
 `k_max = 8`, real coverage of the resets and the cancel hub for synapse counts scaled as much as 8x
 past their raw anatomical weight; beyond it, the connectome has not changed, but the search needed
 to find that coverage has stopped keeping up with the time budget given here.
+
+## Broadcast neurons split into trees
+
+Tool: `Netlist.split_hubs(max_fanout)` (`drosophilos/lib/netlist.py`) and
+`drosophilos/bench/h1_split.py`; data: `docs/h1_split.json`. A neuron with more than
+`max_fanout` outgoing synapses keeps the first `max_fanout` and hands the rest, in slices, to
+new copies of itself that receive every input the original receives — so they spike when it
+spikes (verified spike-for-spike on the adder over 20 additions, `tests/test_netlist_split.py`):
+no hop is added, no timing changes, and the placement search sees small motifs where it saw a
+broadcast. Sources whose fan-out the copies raise are split in turn (a cycle raises `ValueError`).
+The three broadcast neurons and, through their inputs, the reset relays and a few chain nodes
+split into 40–49 extra neurons; then the placement, the image and conditions A (all missing
+edges added, parasitic zeroed), B (carried only) and F (all but the hub class added), 20
+additions each, four restarts, seed 0.
+
+| netlist | k_max | carried | hard | hub (reset and cancel outputs) | tree inputs | placed | A | B | F fresh / chained | Profile 3 edges A needs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| unsplit (§Result) | 4 | 704 / 1,146 (61 %) | 697 / 884 | 7 / 258 (3 %) | — | 612 / 614 | 50/50 | 0/50 | 50/50 / 1/50 | 442 |
+| unsplit (sweep) | 8 | 809 / 1,146 (71 %) | 699 / 878 | 110 / 268 (41 %) | — | 614 / 614 | 20/20 | 0/20 | — | 337 |
+| max_fanout 8 | 4 | 771 / 1,293 (60 %) | 637 / 888 | 92 / 265 (35 %) | 43 / 140 | 658 / 663 | 20/20 | 0/20 | 20/20 / 1/20 | 517 |
+| max_fanout 8 | 8 | 884 / 1,293 (68 %) | 689 / 888 | 130 / 265 (49 %) | 65 / 140 | 663 / 663 | 20/20 | 0/20 | 20/20 / 1/20 | 403 |
+| max_fanout 16 | 4 | 721 / 1,194 (60 %) | 604 / 888 | 101 / 258 (39 %) | 16 / 48 | 628 / 629 | 20/20 | 0/20 | 20/20 / 1/20 | 471 |
+| max_fanout 16 | 8 | 847 / 1,194 (71 %) | 678 / 888 | 150 / 258 (58 %) | 20 / 48 | 627 / 629 | 20/20 | 0/20 | 20/20 / 1/20 | **346** |
+
+**What the split buys.** The reset and cancel *outputs* go from unplaceable to ordinary: the
+hub class rises from 7 of 258 edges at the H0 bound to 92–150, because a copy that inhibits
+eight or sixteen latch members is a motif the antennal lobe and the gnathal ganglion have in
+quantity (§What the wiring lacks). But every copy needs the original's four inputs — the reset
+trigger and three relays — so those excitatory neurons must now reach 16 (or 8) inhibitory
+hosts each, and the fan-out problem reappears one hop upstream as the tree-input class: 43 of
+140 carried at `max_fanout = 8`, and only 1–2 of the 16 copies of `Q.reset_inh` receive all
+their inputs at any setting. Splitting those relays in turn (the transform does it) moves the
+problem one hop further up, to the register's completion neuron, which is where it ends. The
+count that matters for a Profile 2 image is the last column, the edges a working adder still
+needs from Profile 3: 442 at the H0 bound unsplit, 337 at `k_max = 8` unsplit, 346 split at
+`max_fanout = 16` — the split and the looser bound each buy about a fifth, and they do not add.
+The hard edges lose a little (697 → 678 at `k_max` 8, fan-out 16) because the four-restart
+budget is shared with more neurons.
+
+**Whether the placed adder now computes.** Condition B (carried edges only) computes no sum in
+any configuration, as before: the missing edges are still spread through the logic (`edge → u`
+41–50 of 76 missing, `reset_inh → u/v` 31–43 of 73 each, `cancel_inh → hop` 35–72 of 100). With
+the logic completed and only the split resets left as placed (F), every configuration computes
+the first sum and 1 of 20 when chained — a reset that reaches 58 % of its targets is not a
+reset, since one latch left lit stalls the next word. So splitting is the right shape (it turns
+the impossible neuron into possible ones) but not a sufficient one: the reset's *inputs* need a
+different design — a reset that each register motif derives locally from a signal it already
+receives (its own completion or the consumer's ACCEPT), instead of a tree that must be driven
+from one point — and that is a circuit change, not a placement change.
