@@ -90,6 +90,10 @@ uv run pytest
   and sends, B's arrival interrupt computes and emits the pixel (`docs/stage_c_flylink.md`).
   The exact channel (alternating bit, immediate ACK, timeout and retransmit, duplicate
   rejection) passes its clean-link and dropped-event scenarios on two neural machines.
+- **A frame rendered in the substrate.** `examples/frame.c`: a 160 × 100 Doom-like view, one
+  token per pixel, on 128 copies of a 16-cell pixel kernel (65k neurons each) on one H200 —
+  all 16,000 pixels equal to the reference in 411 s of neural time; a three-frame slideshow
+  with a tick kernel turning the view likewise (`RESULTS.md`, `docs/img/frame160_neural.png`).
 - **Resident kernels.** A loop body compiles to a spatial dataflow pipeline of ALU and
   memory-read cells with a neural handshake between them; the toy renderer's column loop
   runs one column per 1.18 s, ~27× the sequencer, on 13.7k neurons; the toy world update

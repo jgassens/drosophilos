@@ -223,8 +223,11 @@ copies a frame is ~150 s of neural time; on 1,000 brains ~20 s. `bench/render_fr
 deals a frame (or a subsample of it) to B nodes and writes the neural picture beside the
 reference (`display/frame.py`, the host's only addition being the palette).
 
-The reference frames (`data/a2/frame_reference_h0.png`, `_h10.png`) show the room turning
-with the heading. `examples/game.c` puts the frame loop inside a tick loop whose token is the
+**Measured (Juno, one H200, 128 copies):** the full 160 × 100 frame, 16,000 of 16,000 pixels
+equal to the reference, 411 s of neural time, 7,992 s of wall time (`docs/img/frame160_neural.png`
+beside `frame160_reference.png`). The three-frame 80 × 50 slideshow with the tick turning the
+view: 12,000 pixels, all correct, 344 s of neural time, 7,381 s of wall time
+(`docs/img/game80_{0,1,2}_neural.png`). `examples/game.c` puts the frame loop inside a tick loop whose token is the
 turn (`heading = (heading + turn) & 63`): `compile_program` makes it a tick kernel and a
 pixel kernel, `bench/render_game.py` deals each frame's pixels to the B copies and then the
 same tick token to every copy (the game state is replicated in every brain, which is what

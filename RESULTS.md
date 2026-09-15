@@ -801,6 +801,41 @@ How it is known to have worked, with nothing taken on trust from the machine:
 
 ---
 
+# A frame of a Doom-like view rendered in the substrate
+
+**Date:** 2026-09-15. `examples/frame.c`, `examples/game.c`, `lib/kernel.py`,
+`bench/render_frame.py`, `bench/render_game.py`; `docs/a3_kernels.md` §9.
+
+![the frame, computed by the neural machine](docs/img/frame160_neural.png)
+
+The picture above was computed by the neural machine: 160 × 100 pixels, one token per
+pixel, on 128 copies of a 16-cell pixel kernel (64,948 LIF neurons each, 8.3 million in
+all) on one H200 of Juno. Every one of the 16,000 pixels equals the reference renderer's
+(`docs/img/frame160_reference.png`); 411 s of neural time, 2 h 13 min of wall time. The
+host dealt the pixel tokens to the copies and put a palette on the decoded colour indices;
+the wall distances, the perspective heights, the ceiling / wall / floor decisions and the
+distance shading were all spikes.
+
+Three frames with the view turning between them (`examples/game.c`: a tick kernel turns the
+heading, replicated in every copy; 80 × 50 pixels, 128 copies): 12,000 pixels, all correct,
+344 s of neural time, 2 h 3 min of wall time (`docs/img/game80_0_neural.png`, `_1_`, `_2_`).
+The same program at 8 × 5 on four CPU copies: correct, 2 h 43 min of wall time for 139 s of
+neural time — the simulator, not the substrate, is the clock.
+
+What this is: the plan's Stage E1 shape (exact integer rendering, pixel records streamed,
+assets compiled into ROM relays) and Stage D shape (a world-update kernel driving it) on
+the batched simulator that stands in for a cluster of brains, under the hybrid control
+plane (the host paces streams and deals tokens; the benchmark label says so). What it is
+not yet: a level with a moving player (`examples/doom1.c` compiles to three kernels — a
+ray-walking column pass into RAM buffers, a pixel pass, a tick that moves the player — but
+its column kernel is 552k neurons per copy, three brains' worth; it needs a smaller ray
+walk before it runs); textures; sprites; Profile 2 wiring; neural pacing (Stage F2); TMR.
+
+The mix-B perturbation campaign on the control machine (the sequencer, 4-bit, fixed ALU)
+also finished on the H200: 100 random programs, 713 instructions, 98 ok, 1 short, 1 no
+halt — both fail-stop — and no silent wrong value (95 % upper limit 3.0 × 10⁻²);
+262 minutes of wall time (`docs/a2/machine_4bit_B_summary.json`).
+
 # Toward Stage D: multiplier, indexed addressing, arrays, exact channel
 
 **Date:** 2026-09-15.

@@ -55,6 +55,10 @@ latency 0.3–0.5 s" above was optimistic: a cell is ~0.9 s (operand gates 60 ms
 commit ~400 ms), so a frame of 16,000 columns on one kernel is ~5.2 hours, and the cluster
 estimate below scales accordingly (~3 minutes per frame at 10⁴ columns in flight).
 
+**Measured frame (2026-09-15, Juno H200, 128 copies of the pixel kernel):** 16,000 pixels in
+411 s of neural time, every pixel right, 7,992 s of wall time; the slideshow's three 80 × 50
+frames in 344 s of neural time. The cluster estimate below is measured at 128 brains.
+
 **Measured pixel kernel (2026-09-15):** `examples/frame.c`, one pixel per token, sixteen
 cells, 64,948 neurons at 16 bits, ~1.2 s per pixel per kernel: a 160 × 100 frame on 128
 kernels is ~150 s of neural time, on 1,000 ~20 s. The simulator, not the substrate, is the
