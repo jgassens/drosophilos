@@ -15,6 +15,14 @@ The number to beat was 10 % (the greedy neuron-by-neuron tool; re-measured here 
 
 ## Result
 
+*Audit correction (commit `35c8b84`, after this section was measured):* the netlist has 1,146
+synapse entries but 1,144 distinct (source, target) pairs — two reset edges onto one completion
+latch are entered twice — and the audit now counts distinct pairs with their quanta summed and
+checks the host's transmitter itself. On the same mapping that gives **701 of 1,144 (61.3 %)**:
+one of the duplicated pairs needs 85 synapses when summed and its host edge carries 47. The
+tables below keep the per-entry counts they were measured with (at most 3 edges high).
+
+
 | | greedy (first tool) | motif search, best of 8 restarts |
 |---|---|---|
 | designed edges carried | 102 / 1,146 (8.9 %) | **704 / 1,146 (61.4 %)** |

@@ -140,7 +140,7 @@ report). Motifs read from the netlist's structure, placed as units — latch pai
 mutual pairs, relays on real (E, I) pairs, chains as depth-first paths over ≥ 57-synapse
 cholinergic edges, hubs by coverage — with forward checking, bounded backtracking, a repair
 pass and restarts: **704 of 1,146 edges (61 %) and 612 of 614 neurons in 65 s** (eight
-restarts, 59–61 % each). Of the *hard* edges, those between motifs, 697 of 884 (79 %) are
+restarts, 59–61 % each; 701 of 1,144 distinct pairs after the audit correction of `35c8b84`). Of the *hard* edges, those between motifs, 697 of 884 (79 %) are
 carried; of the three broadcast neurons' 258 edges (the two reset interneurons and the
 watchdog's cancel), 7. No inhibitory neuron in MCNS reaches 115 targets at ≥ 43 synapses (the
 best carries 5), and a tree of 38 real neurons that would cover 85 of them has no member the

@@ -830,7 +830,8 @@ carries the label *Profile 3*.
 
 **Stage H, first measurement (2026-09-15, `docs/h1_placement.md`):** a motif-level placement
 search (`connectome/embed_netlist.py`) puts the 4-bit adder's netlist — 614 neurons, 1,146
-edges — onto real MCNS neurons under the H0 rules with 704 edges (61 %) carried by the fly's
+edges, 1,144 distinct — onto real MCNS neurons under the H0 rules with 704 edges (61 %; 701 of
+the distinct pairs after an audit correction) carried by the fly's
 own synapses and 612 neurons placed, in 65 s; the neuron-by-neuron greedy tool carried 9 %.
 Of the edges between motifs (latch pairs, relays with their inhibitors, delay chains, vetoes)
 79 % are carried. What the wiring lacks is specific: the three broadcast neurons (reset and
