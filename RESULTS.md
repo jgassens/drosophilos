@@ -805,6 +805,18 @@ How it is known to have worked, with nothing taken on trust from the machine:
 
 **Date:** 2026-09-15.
 
+**Where things stand at the end of the day.** Programs that run neurally, all matching the
+C reference and the IR interpreter: Hello World on the sequencer (31.8 s of neural time,
+57 s of wall time); the toy world update on the sequencer (154 s) and as a 13-cell state
+kernel (6 s per tick, eight ticks of fresh input); the toy renderer's column loop as a
+four-cell kernel (1.18 s per column) and the whole two-loop program as a tick kernel and a
+column kernel over two frames; a 16-bit perspective column with a reciprocal table and a
+multiply (6.6 s per column); a 32-bit three-cell kernel; the exact channel between two
+machines, clean and with a dropped rail event. Compiled and reference-checked, with the
+neural runs in progress on the Apple GPU and Juno's H200: a 160 × 100 Doom-like frame one
+pixel per token on 32 and 128 copies of the pixel kernel, and a three-frame slideshow whose
+tick kernel turns the view. The bullets below are the day's steps in order.
+
 - **Multiplier**: an n × n array of ordered ripple-adder rows on veto relays; each row's output
   re-timed through its completion so the next row's operand bits rise together (the first
   build refused every product: a low-stage generate overtook a late high bit). 4-bit ALU with
