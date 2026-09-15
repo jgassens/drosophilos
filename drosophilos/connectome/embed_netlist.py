@@ -47,7 +47,8 @@ def _count_matrix(m: MCNS):
     return C, C.tocsc()
 
 
-def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: bool = False, time_limit_s: float = 600.0) -> Placement:
+def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: bool = False, time_limit_s: float = 600.0,
+                  lookahead: int = 1) -> Placement:  # lookahead did not help on the adder (7 % at 64 vs 10 % greedy): the misses are structural
     t0 = time.time()
     n = net.n
     src, dst, q = np.asarray(net.src), np.asarray(net.dst), np.asarray(net.quanta)
@@ -146,8 +147,24 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
             r = free_start(d)
         elif cand.size == 0:
             r = None
-        else:  # prefer the candidate with the most strong partners left (keeps options open)
-            r = int(cand[np.argmax(np.asarray(C[cand].sum(axis=1)).ravel())]) if cand.size > 1 else int(cand[0])
+        else:  # one-step lookahead: the candidate that leaves the most unplaced neighbours a compatible partner
+            r = int(cand[0])
+            if cand.size > 1:
+                cand = cand[:lookahead] if cand.size > lookahead else cand
+                best, r = -1, int(cand[0])
+                nbrs_out = [(x, rr) for x, rr in out_edges[d] if x not in mapping]  # d -> x needs C[r, f(x)] >= rr
+                nbrs_in = [(x, rr) for x, rr in in_edges[d] if x not in mapping]  # x -> d needs C[f(x), r] >= rr
+                for c_ in cand.tolist():
+                    row = C.getrow(c_); col = CT.getcol(c_)
+                    score = 0
+                    for x, rr in nbrs_out:
+                        ok = row.indices[(row.data >= rr) & ~used[row.indices]]
+                        score += int(sign_ok(ok, x).size > 0)
+                    for x, rr in nbrs_in:
+                        ok = col.indices[(col.data >= rr) & ~used[col.indices]]
+                        score += int(sign_ok(ok, x).size > 0)
+                    if score > best:
+                        best, r = score, int(c_)
         if r is None:
             unplaced.append(d)
         else:
