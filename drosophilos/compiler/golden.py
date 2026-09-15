@@ -37,7 +37,11 @@ def run_golden(source: str, inputs: list[int], variables: list[str], width: int)
         c = Path(d) / "prog.c"
         c.write_text(src)
         exe = Path(d) / "prog"
-        cc = subprocess.run(["clang", "-std=c11", "-O1", "-fsanitize=undefined", "-fno-sanitize-recover=all", "-o", str(exe), str(c)],
+        import shutil
+        compiler = next((x for x in ("clang", "gcc", "cc") if shutil.which(x)), None)
+        if compiler is None:
+            raise RuntimeError("no C compiler (clang/gcc/cc) on PATH for the golden reference")
+        cc = subprocess.run([compiler, "-std=c11", "-O1", "-fsanitize=undefined", "-fno-sanitize-recover=all", "-o", str(exe), str(c)],
                             capture_output=True, text=True)
         if cc.returncode:
             raise RuntimeError("clang failed:\n" + cc.stderr + "\n" + src)

@@ -169,7 +169,7 @@ def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", ho
     double rail."""
     assert n & (n - 1) == 0, "the first n bits must form a complete subtree of the completion tree"
     roles = net.roles
-    prefix = roles[Q.completion.u].split(".")[0]
+    prefix = roles[Q.completion.u].split(".comp.")[0]  # the register's name (may contain dots)
     if n == 1:
         node = Q.valid[0]
     else:
