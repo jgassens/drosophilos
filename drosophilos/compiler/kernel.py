@@ -256,9 +256,10 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 base, length = arrs[name]
                 # several STORE cells into one array are allowed: each write port marks the word
                 # it is writing and the mark vetoes the other ports' copies (lib/kernel.py,
-                # `_share_write_ports`). Two stores to the SAME word within one write's landing
-                # (~150 ms) are the program's responsibility: disjoint words in a pass, and the
-                # passes paced by the host or the phase gates.
+                # `_share_write_ports`). Two stores to the SAME word within one write's window
+                # (select -> completion + ~50 ms: ~340 ms after the store's ACT^d at 4 bits, more
+                # at wider words) are the program's responsibility: disjoint words in a pass, and
+                # the passes paced by the host or the phase gates (which wait for every STORE).
                 spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
                 spec.rams.add(name)
                 stored_in_body.add(name)
@@ -525,12 +526,16 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
             if K is None:
                 raise NotAKernel(f"neural pacing needs the token count per frame of stream {kname}")
             out_cell = next(o for o in reversed(spec.outputs) if next(c for c in spec.cells if c["name"] == o)["stream"] == key)
+            # the phase ends only when every STORE of the pass has landed too: a STORE earlier in
+            # program order but deeper in the dataflow lands after the last output's done, and a
+            # later pass writing the same word would otherwise overlap or overtake it (review 10.2)
+            trig = [out_cell] + [c["name"] for c in spec.cells if c["stream"] == key and c["op"] == "STORE" and c["name"] != out_cell]
             pfx = f"ph{idx}_"
             spec.consts[f"k{K - 1}"] = K - 1
             spec.consts["k1"] = 1
             spec.consts["k0"] = 0
-            spec.cells.append({"name": f"{pfx}xor", "op": "XOR", "a": f"{pfx}cnt", "b": ("const", f"k{K - 1}"), "stream": key, "trigger": [out_cell]})
-            spec.cells.append({"name": f"{pfx}add", "op": "ADD", "a": f"{pfx}cnt", "b": ("const", "k1"), "stream": key, "trigger": [out_cell]})
+            spec.cells.append({"name": f"{pfx}xor", "op": "XOR", "a": f"{pfx}cnt", "b": ("const", f"k{K - 1}"), "stream": key, "trigger": trig})
+            spec.cells.append({"name": f"{pfx}add", "op": "ADD", "a": f"{pfx}cnt", "b": ("const", "k1"), "stream": key, "trigger": trig})
             spec.cells.append({"name": f"{pfx}cnt", "op": "SEL", "a": f"{pfx}add", "b": ("const", "k0"), "c": f"{pfx}xor", "stream": key, "init": 0})
             phases.append((kname, f"{pfx}cnt", "wrap"))
         # the tick phase ends when the tick kernel's last state carrier has landed (its done), or

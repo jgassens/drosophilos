@@ -19,9 +19,11 @@ written is not protected by the handshake — the host paces the passes (a colum
 writes the buffer, the pixel pass reads it), as it paces parameters. Several STORE cells
 may write one RAM: each write port marks the word it is writing until the write lands, and
 the mark vetoes the other ports' copies (`_share_write_ports`); the program must not issue
-two stores to the same word within one write's landing (~150 ms from the store's ACT^d to
-the word's completion) — inside one pass two cells of the same kernel store disjoint
-words, and the host-paced passes guarantee it between passes. Sources: "input" (the
+two stores to the same word within one write's window (the select to the word's completion
+plus ~50 ms of the completion's kill train: measured 254 + 50 ms after the select, ~340 ms
+after the store's ACT^d at 4 bits, more at wider words) — inside one pass two cells of the
+same kernel store disjoint words, and the paced passes guarantee it between passes.
+Sources: "input" (the
 input register the host loads, one token after each READY), ("const", name), or a cell
 name, "input:NAME" (another input stream: a second host-loaded register), or
 ("param", cell) — a level read without a request and without holding the producer's commit,
@@ -576,9 +578,12 @@ def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, store
     between the two — a store in another kernel's pass).
 
     Rule for the program: two stores to one word must not be in flight together — no second
-    store to a word within one write's landing (~150 ms from the store's ACT^d to the word's
-    completion). Both marks lit would veto both copies and leave the word empty (a later LOAD
-    double-rails and faults: fail-stop, not silent). Two STORE cells of one kernel store
+    store to a word within one write's window: the select to the word's completion (254 ms at
+    4 bits, deeper completion trees at wider words) plus ~50 ms while the completion's kill
+    train paralyses the other port's mark. Inside the window the second port's mark cannot
+    light, the new READY raises both COPY latches while the first port's data is still lit,
+    and every differing bit double-rails (a later LOAD faults: fail-stop, not silent; measured
+    at +30 and +45 ms after the completion, correct at +60 ms). Two STORE cells of one kernel store
     disjoint words in a pass; between passes the host's pacing (or the phase gates) keeps the
     order. A store whose word never completes (a faulted data token) leaves its mark lit and
     the word closed to the other ports: fail-stop again."""
