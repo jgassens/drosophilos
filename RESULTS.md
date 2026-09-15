@@ -846,8 +846,9 @@ broadcast (reset) edges are what the second needs. That is the exact size of the
 the fly's wiring and a working adder under the H0 weight rules.
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
-occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy),
-validated by the kernel oracle at 160 × 100 (`docs/img/doom3_0_reference.png`).
+occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
+then chases the player one step per tick with collision (`examples/doom4.c`), validated by
+the kernel oracle at 160 × 100 (`docs/img/doom3_0_reference.png`, `doom4_2_reference.png`).
 
 **Stage F2, first step (later the same day):** the frame's phase order — columns, then pixels,
 then the tick — is now enforced inside the substrate by phase gates on the input registers

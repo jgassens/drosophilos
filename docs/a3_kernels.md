@@ -308,6 +308,14 @@ neurons per copy at 16 bits (the tick's multiplies are most of it). Validated by
 oracle against the interpreter and the C golden build on two 160 × 100 frames
 (`tests/test_doom3.py`, `docs/img/doom3_0_reference.png`: the sprite half hidden behind the
 near wall; `_1_`: the view turned); not yet run neurally (an H200 job at 40 × 25 is next).
+`doom4.c` makes the thing *move*: its position is frame state of the tick kernel, and each
+tick it takes one 8-unit step toward the player along the larger axis, refused into a wall
+cell or the player's cell (Doom's `P_Move` shape); 96 tick cells. Three frames, the imp
+approaching and growing (`docs/img/doom4_0_reference.png` … `_2_`). The first draft of the
+program reused a temporary between the sprite's row clamp and the overlay gate, so the imp
+was never drawn although the interpreter, the C golden build and the kernel oracle agreed
+on every pixel — three oracles of one program agree on its bugs; the test now also asserts
+that the imp's colours appear inside the sprite band and grow.
 
 ## 11. Neural pacing: the phase order moves into the substrate (Stage F2, first step)
 
