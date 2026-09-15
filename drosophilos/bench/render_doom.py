@@ -1,10 +1,11 @@
-"""The Doom-shaped program (`examples/doom1.c`: a tick kernel moving the player, a column pass
-casting rays into RAM buffers, a pixel pass) rendered frame by frame. Columns are dealt to the
-copies, and each copy renders the pixels of its own columns (its buffers hold their heights);
-every copy gets the same tick token (replicated state). Frames go to PNGs beside the
-references.
+"""The Doom-shaped programs (`examples/doom1.c` .. `doom4.c`: a tick kernel moving the player,
+one or more column passes casting rays / projecting sprites into RAM buffers, a pixel pass)
+rendered frame by frame. Column-pass tokens are dealt to the copies, and each copy renders the
+pixels of its own columns (its buffers hold their heights); every copy gets the same tick token
+(replicated state). Frames go to PNGs beside the references.
 
     python -m drosophilos.bench.render_doom --width 40 --height 25 --frames 2 --nodes 8 --device cpu
+    python -m drosophilos.bench.render_doom --source examples/doom4.c --width 8 --height 5 --frames 3 --reference-only
 """
 
 import argparse
@@ -33,43 +34,59 @@ def main():
     ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--progress", type=float, default=300, help="seconds between progress lines (0 disables)")
+    ap.add_argument("--pixel-stream", default="p", help="the inner stream whose tokens are row<<8|col pixel addresses")
+    ap.add_argument("--tick-stream", default="f", help="the outer (frame) loop's induction variable")
+    ap.add_argument("--params", default=None, help="JSON dict overriding the prologue's derived initial state, e.g. per-variable")
+    ap.add_argument("--reference-only", action="store_true", help="write the reference frames and exit before build_pipeline")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
     W, H, B, F = a.width, a.height, a.nodes, a.frames
     per_node_cols = -(-W // B)  # neural pacing needs the same token counts on every copy: W must divide by B
     if a.pacing == "neural" and W % B:
         raise SystemExit(f"neural pacing: the width {W} must be a multiple of the copies {B}")
-    ks = compile_program(prog, params={"px": 128, "py": 128, "heading": 0}, pacing=a.pacing,
-                         counts={"input": per_node_cols, "p": per_node_cols * H} if a.pacing == "neural" else None)
-    col_s, tick_s, pix_s = ks.streams[:3]  # "input" (columns), the frame counter (tick), the pixel loop
+    params = json.loads(a.params) if a.params else None  # None: compile_program derives state from the prologue's CONSTs
+    pix_s, tick_s = a.pixel_stream, a.tick_stream
+    ks = compile_program(prog, params=params, pacing="host")  # discover the streams before pacing needs their counts
+    col_streams = [s for s in ks.streams if s not in (pix_s, tick_s)]  # program order: every inner stream but the pixel and tick ones
+    if a.pacing == "neural":
+        ks = compile_program(prog, params=params, pacing=a.pacing,
+                             counts={**{s: per_node_cols for s in col_streams}, pix_s: per_node_cols * H})
+    pix_key, tick_key = ks.stream_keys[pix_s], ks.stream_keys[tick_s]
     sx, sy = 160 // W, 100 // H
     cols = [x * sx for x in range(W)]
     rows = [y * sy for y in range(H)]
     ticks = [int(v) for v in a.inputs.split(",")][:F]
     at = lambda t: ((t & 255) // sx, (t >> 8) // sy)
-    pixel_cell = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == f"input:{pix_s}"][0]
-    store_cells = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == "input"]
-    n_tick = sum(1 for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == f"input:{tick_s}")
-    # reference frames (the whole picture, every column)
+    pixel_cell = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == pix_key][0]
+    store_cells = {s: [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == ks.stream_keys[s]] for s in col_streams}
+    n_tick = sum(1 for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == tick_key)
+    # reference frames (the whole picture, every column, every column stream in program order)
     ref_sched = []
     for f in range(F):
-        ref_sched += [("input", c) for c in cols] + [(pix_s, (r << 8) | c) for r in rows for c in cols] + [(tick_s, ticks[f])]
+        for s in col_streams:
+            ref_sched += [(s, c) for c in cols]
+        ref_sched += [(pix_s, (r << 8) | c) for r in rows for c in cols] + [(tick_s, ticks[f])]
     ref_out = kernel_outputs(ks, ref_sched)
     ref_frames, k = [], 0
     for f in range(F):
-        k += len(cols)
+        k += len(col_streams) * len(cols)
         ref_frames.append({at((r << 8) | c): ref_out[k + j][0] for j, (r, c) in enumerate((r, c) for r in rows for c in cols)})
         k += len(rows) * len(cols) + 1
         write_png(ref_frames[-1], W, H, f"{a.out}_{f}_reference.png")
-    # per-node schedules: the node's columns, then its pixels once its stores are out, then the tick once its pixels are out
+    if a.reference_only:
+        print(f"reference: {W}x{H} x {F} frames written to {a.out}_<k>_reference.png", flush=True)
+        return
+    # per-node schedules: the node's columns on every column stream, then its pixels once its
+    # stores are out, then the tick once its pixels are out
     deal = [cols[b::B] for b in range(B)]
     scheds, expect = [], []
     for b in range(B):
         sc, owed = [], 0
         for f in range(F):
             bar = (lambda x: x) if a.pacing == "host" else (lambda x: 0)  # neural pacing: no host barrier
-            sc += [("input", c, bar(owed)) for c in deal[b]]
-            owed += len(deal[b]) * len(store_cells)
+            for s in col_streams:
+                sc += [(s, c, bar(owed)) for c in deal[b]]
+                owed += len(deal[b]) * len(store_cells[s])
             sc += [(pix_s, (r << 8) | c, bar(owed)) for c in deal[b] for r in rows]
             owed += len(deal[b]) * len(rows)
             sc.append((tick_s, ticks[f], bar(owed)))
