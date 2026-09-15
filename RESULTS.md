@@ -835,8 +835,9 @@ the batched simulator that stands in for a cluster of brains, under the hybrid c
 plane (the host paces streams and deals tokens; the benchmark label says so). What it is
 not yet: a level with a moving player (`examples/doom1.c` compiles to three kernels — a
 ray-walking column pass into RAM buffers, a pixel pass, a tick that moves the player — but
-its column kernel is 552k neurons per copy, three brains' worth; it needs a smaller ray
-walk before it runs); textures; sprites; Profile 2 wiring; neural pacing (Stage F2); TMR.
+one copy of its three kernels is 443k neurons at 16 bits, about three brains' worth, so it
+runs on the simulator but not yet in a brain's budget; a one-node validation is running on
+Juno); textures; sprites; Profile 2 wiring; neural pacing (Stage F2); TMR.
 
 The mix-B perturbation campaign on the control machine (the sequencer, 4-bit, fixed ALU)
 also finished on the H200: 100 random programs, 713 instructions, 98 ok, 1 short, 1 no

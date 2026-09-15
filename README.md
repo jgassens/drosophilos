@@ -94,6 +94,11 @@ uv run pytest
   token per pixel, on 128 copies of a 16-cell pixel kernel (65k neurons each) on one H200 —
   all 16,000 pixels equal to the reference in 411 s of neural time; a three-frame slideshow
   with a tick kernel turning the view likewise (`RESULTS.md`, `docs/img/frame160_neural.png`).
+- **Profile 2 feasibility measured.** The kernels above are free synthesis (Profile 3). MCNS
+  holds 1,223 reciprocal cholinergic pairs strong enough for a latch at the H0 weight
+  policy (12,315 at four times the scale), 5 of them in the visual system; the render
+  kernel needs ~5,300. A first greedy placement of the 4-bit adder carries 10 % of its
+  edges (`docs/capacity_doom.md` §5, `connectome/embed_netlist.py`).
 - **Resident kernels.** A loop body compiles to a spatial dataflow pipeline of ALU and
   memory-read cells with a neural handshake between them; the toy renderer's column loop
   runs one column per 1.18 s, ~27× the sequencer, on 13.7k neurons; the toy world update
