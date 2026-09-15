@@ -16,6 +16,18 @@ Export: an output port word (a data-memory master) gets one edge relay per rail
 (`LINK.out.b{i}r{r}`), which fires once per rail rise, i.e. once per STORE to that word.
 Import: the input port word's completion feeds the machine's interrupt-pending rail
 through an edge relay: a message's arrival is an interrupt, and the handler LOADs the word.
+INTP has a one-entry shadow queue, INTQ. INTS ("INTP settled") records whether INTP is
+stably empty: its r1 rail is loaded at power-up and reasserted from `IT.d` after eight hops
+(~42 ms), while an INTP.r1 rise asserts INTS.r0. Arrival and timeout queue relays veto on
+INTS.r1, not INTP.r0. Consequently a request against a settled-empty INTP goes directly to
+INTP, one against a pending INTP enters INTQ, and one in INTP's post-clear paralysis window
+also enters INTQ instead of disappearing. Concrete request sources retry INTS.r0 after 12
+hops so a request racing a fresh INTS.r1 kill train still leaves the state marked pending;
+INTQ promotion asserts INTS.r0 directly as it re-ignites INTP.r1. Taking the active request
+clears INTP and, after 20 relay hops (~106 ms), promotes INTQ, beyond INTP's ~80 ms
+paralysis; three more hops clear INTQ. The isolated timing probe previously lost requests
+at 5--30 ms after `INTP.clear`; it now loses none at 0--45 ms. A depth of one is sufficient
+for this milestone's single message in flight: the only overlap is its arrival and timeout.
 
 ## Demo 1 shape, measured (clean model, two 4-bit machines, 6,082 + 4,524 neurons)
 
@@ -52,6 +64,16 @@ a fault, so `acked` stayed 0 although B had delivered once. The rule it settles:
 word a handler may read on any path must hold a value on every path**. The status word now
 starts at 0 in the image, the timer writes 1 through a write port of its own, and the handler
 stores 0 back instead of emptying it (`docs/a2_ram_control.md` §2.2).
+
+A late ACK exposed a second ordering rule. If the original send timer expires first, the
+timeout and arrival cannot be merged into the same INTP state: the timeout handler must run
+first (status = 1), re-send, and leave the held ACK for the queued arrival handler (status =
+0). Nor is arrival completion a receive credit. The timer is now cancelled only when the
+handler consumes the input word: its `CLR` finishes the word's reset and raises READY, which
+launches a four-pulse cancellation train across the timer chain. Thus a held late ACK cannot
+cancel the re-send's timer, while the eventual arrival handler's CLR does cancel it. The
+slow late-ACK regression delays B→A so that `TIMER.h1899 < LINK.in.arrive < INTP.clear`, and
+checks two handler entries, one retry, one delivery and `acked = 1`.
 
 Still not built: epochs, credits beyond one message in flight, corruption detection at the
 receiver (a corrupted rail event is a double rail, refused by the completion tree as a fault,
