@@ -298,3 +298,24 @@ def test_neural_perspective_kernel_with_the_pipelined_multiplier():
     outs, sim, st = run_pipeline(pl, PARAMS, list(range(8)), max_ms=120000)
     assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, list(range(8)))], (outs, st)
     print("perspective kernel, MULP", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
+
+
+@pytest.mark.slow
+def test_kernel_ram_written_by_one_pass_and_read_by_the_next():
+    """A column pass stores heights into a RAM buffer; a pixel pass reads them back by column
+    (the host paces the passes: the reads start once every write has landed)."""
+    spec = [{"name": "h", "op": "LOAD", "a": "input", "mem": "htab"},
+            {"name": "st", "op": "STORE", "a": "input", "b": "h", "mem": "hbuf"},
+            {"name": "col", "op": "AND", "a": "input:pix", "b": ("const", "k255")},
+            {"name": "hb", "op": "LOAD", "a": "col", "mem": "hbuf"},
+            {"name": "out", "op": "ADD", "a": "hb", "b": ("const", "k1")}]
+    htab = {0: 40, 1: 33, 2: 25, 3: 19}
+    pl = build_pipeline(PARAMS, 8, spec, consts={"k255": 255, "k1": 1}, mems={"htab": (4, htab), "hbuf": (4, {}, "ram")},
+                        outputs=["st", "out"], streams=["input", "pix"])
+    sched = [0, 1, 2, 3] + [("pix", (1 << 8) | c, 4) for c in (2, 0, 3, 1)]
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=60000, expect_outputs=8)
+    by = st["outputs_by_cell"]
+    assert [v for _, v in by["st"]] == [40, 33, 25, 19], (by, st)
+    assert [v for _, v in by["out"]] == [26, 41, 20, 34], (by, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
+    print("kernel RAM", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})

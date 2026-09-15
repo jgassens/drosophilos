@@ -9,8 +9,14 @@ level) and a datapath on the levels of its sources:
     request -> commit once every consumer has started on the previous value -> master
     rewritten -> done pulse -> the consumers' requests
 
-Cell kinds: ALU ops (ADD SUB AND OR XOR MOV MUL) on sources a, b; LOAD (RAM read at
-address a); SEL (c != 0 ? a : b, c a cell whose Z flag decides). Sources: "input" (the
+Cell kinds: ALU ops (ADD SUB AND OR XOR MOV MUL) on sources a, b; LOAD (a read at address a
+from a ROM, or from a RAM: word masters with the machine's read port); STORE (a write of b
+at address a into a RAM: the machine's write port, driven from the cell's sampled tokens;
+the cell's own master carries the data written, so the host sees the write land); SEL
+(c != 0 ? a : b, c a cell whose Z flag decides); SHL/SHR by a constant; MULP (a pipelined
+multiplier). A RAM is shared by every kernel of the pipeline; a read of a word being
+written is not protected by the handshake — the host paces the passes (a column pass
+writes the buffer, the pixel pass reads it), as it paces parameters. Sources: "input" (the
 input register the host loads, one token after each READY), ("const", name), or a cell
 name, "input:NAME" (another input stream: a second host-loaded register), or
 ("param", cell) — a level read without a request and without holding the producer's commit,
@@ -42,7 +48,7 @@ from .control import add_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
-from .ram import address_vetoes
+from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
 from ..protocol.celement import add_veto_neuron
 from .staged import StagedRegister, add_staged_commit
 
@@ -194,7 +200,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     # relay per set bit and per word, vetoed by "address is not w"), ~25 neurons per 8-bit
     # word against ~250 for a RAM master with its completion and reset. A kernel never
     # writes memory (STOREX is rejected), so nothing is lost.
-    mem_objs = {name: (nw, dict(contents)) for name, (nw, contents) in (mems or {}).items()}
+    mem_objs = {}
+    for name, spec_m in (mems or {}).items():
+        nw, contents = spec_m[0], dict(spec_m[1])
+        if len(spec_m) > 2 and spec_m[2] == "ram":  # word masters, written by STORE cells
+            mem_objs[name] = ("ram", add_memory(net, drive, f"MEM.{name}", nw, n), contents)
+        else:
+            mem_objs[name] = (nw, contents)
 
     # ---- pass 1: every cell's stage, master, handshake pairs (sources may be built later: feedback)
     cells: dict[str, Cell] = {}
@@ -342,7 +354,49 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
             built.add(c.name)
             continue
-        if c.op == "LOAD":  # address = A (a level): ROM read driven by ACT^d into token latches, PASSB through the ALU
+        if c.op == "STORE":  # RAM write of b at address a; the data also passes to the cell's master
+            A_rails, B_rails = rails_of(c.a), rails_of(c.b)
+            kind, mem, _ = c.mem
+            assert kind == "ram", f"{name}: STORE into a ROM"
+            At = [[G.latch(f"{name}.x{i}r0"), G.latch(f"{name}.x{i}r1")] for i in range(n)]
+            Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
+            for i in range(n):  # address and data tokens at ACT^d (levels for the port: valid before its trigger)
+                G.veto(f"{name}.x{i}r0.g", act_d, [A_rails[i][1].u], At[i][0])
+                G.veto(f"{name}.x{i}r1.g", act_d, [A_rails[i][0].u], At[i][1])
+                G.veto(f"{name}.b{i}r0.g", act_d, [B_rails[i][1].u], Bt[i][0])
+                G.veto(f"{name}.b{i}r1.g", act_d, [B_rails[i][0].u], Bt[i][1])
+            a_bits = max(1, (mem.n_words - 1).bit_length())
+            trig = add_delay_chain(net, drive, f"{name}.wtrig", act_d, 6)  # ~32 ms after the tokens: the port's vetoes are set up
+            wp = add_write_port(net, drive, f"{name}.wr", mem, trig, [[At[j][0].u, At[j][1].u] for j in range(a_bits)],
+                                [[Bt[i][0].u, Bt[i][1].u] for i in range(n)])
+            for l in wp.domain_latches:  # the port's COPY latches clear with the cell's stage
+                for x in l.members:
+                    net.synapse(Sc.reset_inh, x, -int(round(0.75 * drive.loop)))
+            # the data token to the master through the ALU's PASSB (a MOV), so the cell has the
+            # standard stage, commit, done; the write (~130 ms after ACT^d) lands long before the
+            # done pulse (~500 ms): readers requested by it find the word written
+            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
+            SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
+            G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
+            A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
+            for i in range(n):
+                G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
+            R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+        elif c.op == "LOAD" and c.mem[0] == "ram":  # RAM read: the machine's read port from the word masters
+            A_rails = rails_of(c.a)
+            _, mem, _ = c.mem
+            Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
+            a_bits = max(1, (mem.n_words - 1).bit_length())
+            add_read_port(net, drive, f"{name}.rd", mem, act_d, [[A_rails[j][0].u, A_rails[j][1].u] for j in range(a_bits)],
+                          [[l for l in pair] for pair in Bt])
+            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
+            SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
+            G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
+            A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
+            for i in range(n):
+                G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
+            R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+        elif c.op == "LOAD":  # address = A (a level): ROM read driven by ACT^d into token latches, PASSB through the ALU
             A_rails = rails_of(c.a)
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
             n_words, contents = c.mem
@@ -432,7 +486,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()})
     pl.const_values = dict(consts or {})
-    pl.mem_contents = {k: v for k, (_, v) in (mems or {}).items()}
+    pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
     return pl
 
 
@@ -525,12 +579,17 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
     for name, rails in pl.consts.items():
         for i, r in rails_for(pl.const_values[name], pl.n):
             sim.add_events(node, [step], [rails[i][r].u], [pl.drive.ignite])
+    for name, m in pl.mems.items():  # RAM initial contents
+        if isinstance(m, tuple) and m[0] == "ram":
+            for addr, v in m[2].items():
+                for i, r in rails_for(v, pl.n):
+                    sim.add_events(node, [step], [m[1].words[addr].rails[i][r].u], [pl.drive.ignite])
     for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
         if c.op in ("SEL", "SHL", "SHR", "MULP_ROW"):
             continue
-        unit, _ = ALU_OPS["MOV" if c.op == "LOAD" else c.op]
+        unit, _ = ALU_OPS["MOV" if c.op in ("LOAD", "STORE") else c.op]
         for k in range(N_UNITS):
             r = 1 if k == unit else 0
             sim.add_events(node, [step], [pl.net.roles.index(f"{c.name}.u{k}r{r}.u")], [pl.drive.ignite])
