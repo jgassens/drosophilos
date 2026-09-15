@@ -55,6 +55,12 @@ latency 0.3–0.5 s" above was optimistic: a cell is ~0.9 s (operand gates 60 ms
 commit ~400 ms), so a frame of 16,000 columns on one kernel is ~5.2 hours, and the cluster
 estimate below scales accordingly (~3 minutes per frame at 10⁴ columns in flight).
 
+**Measured pixel kernel (2026-09-15):** `examples/frame.c`, one pixel per token, sixteen
+cells, 64,948 neurons at 16 bits, ~1.2 s per pixel per kernel: a 160 × 100 frame on 128
+kernels is ~150 s of neural time, on 1,000 ~20 s. The simulator, not the substrate, is the
+wall-clock cost: 128 copies are 8.3 M neurons, ~30–50 ms per step on an H200, so a frame is a
+run of hours (`docs/a3_kernels.md` §9).
+
 So the target regime for "Doom running on fruit-fly brains" is a frame per minute or two of
 neural time on the 1,000-brain cluster, with the world update on a few control brains at a
 tick per ~20 s. In simulation each neural second of 166 M neurons costs GPU hours; a frame is

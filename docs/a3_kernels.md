@@ -197,6 +197,33 @@ interpreter's, with the heading advanced by the tick between the frames; 16,601 
 two kernels and two input registers), 14.6 s per frame (eight columns at ~1.2 s and a tick at
 ~2 s, plus the host's pacing gaps), no fault, no timeout (`tests/test_kernel.py`).
 
+## 9. A frame in the substrate: one pixel per token, one kernel per brain
+
+`examples/frame.c` is the first picture-producing program: a 160 × 100 Doom-like view. The
+token packs a pixel's column and row; the column's view angle (the heading plus the column,
+20 angle steps across the screen) indexes a 64-entry table of wall distances compiled from
+the level's walls by the asset compiler (a room with a doorway and a pillar, ray-cast at
+compile time); a reciprocal table gives the projected wall height; the pixel's colour is
+ceiling, wall shaded by distance, or floor, by comparing the row with the wall's top and
+bottom (the sign bit of a subtraction, then a select). Sixteen cells, 64,948 neurons at 16
+bits — most of it the four 16-bit ALU cells and the two selects.
+
+A frame is 16,000 tokens. On one kernel that is 16,000 × 1.2 s ≈ 5.3 hours of neural time;
+the cluster's shape is one kernel per brain and the host dealing tokens, which the batched
+simulator gives directly (one node per copy: `run_pipeline_batched`, two-node test). On 128
+copies a frame is ~150 s of neural time; on 1,000 brains ~20 s. `bench/render_frame.py`
+deals a frame (or a subsample of it) to B nodes and writes the neural picture beside the
+reference (`display/frame.py`, the host's only addition being the palette).
+
+The reference frames (`data/a2/frame_reference_h0.png`, `_h10.png`) show the room turning
+with the heading. `examples/game.c` puts the frame loop inside a tick loop whose token is the
+turn (`heading = (heading + turn) & 63`): `compile_program` makes it a tick kernel and a
+pixel kernel, `bench/render_game.py` deals each frame's pixels to the B copies and then the
+same tick token to every copy (the game state is replicated in every brain, which is what
+the plan's TMR will vote over), and writes one picture per frame: a slideshow computed in
+the substrate, the host dealing tokens and adding a palette. The neural 40 × 25 picture on 32 nodes (Apple GPU) and the full frame on
+128 nodes (Juno H200) are running; their results go here.
+
 ## 8. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel

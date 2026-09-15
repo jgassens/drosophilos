@@ -247,3 +247,16 @@ def test_batched_nodes_run_the_renderer_on_different_columns():
     ref = kernel_reference(ks, list(range(8)))
     assert [v for _, v in outs[0]["c3_load"]] == ref[:4] and [v for _, v in outs[1]["c3_load"]] == ref[4:], (outs, st)
     print("batched", st)
+
+
+def test_game_program_compiles_to_a_tick_kernel_and_a_pixel_kernel():
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(open("examples/game.c").read())
+    ks = compile_program(prog, params={"heading": 0})
+    assert ks.streams == ["input", "f"] and set(ks.state_cells) == {"heading"}
+    ticks = [c for c in ks.cells if c["stream"] != "input"]
+    assert [c["op"] for c in ticks] == ["ADD", "AND"]  # heading = (heading + turn) & 63
+    toks = [(50 << 8) | x for x in (0, 40, 80, 120)]
+    sched = [("input", t) for t in toks] + [("f", 10)] + [("input", t) for t in toks] + [("f", 10)]
+    pixels = [o[0] for (st, _), o in zip(sched, kernel_outputs(ks, sched)) if st == "input"]  # a tick's output is its state
+    assert pixels == interpret(prog, [0] + toks + [10] + toks + [10] + toks + [10])["outs"][:8]

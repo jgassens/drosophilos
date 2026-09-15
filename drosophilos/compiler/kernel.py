@@ -91,7 +91,7 @@ def loop_body(prog: Program, fn: str = "main", label: str | None = None) -> list
 
 def compile_kernel(prog: Program, body: list, stream: str, params: dict | None = None, mems: dict | None = None,
                    state: dict | None = None, *, prefix: str = "c", stream_key: str = "input", seeds: dict | None = None,
-                   into: KernelSpec | None = None) -> KernelSpec:
+                   into: KernelSpec | None = None, allow_no_output: bool = False) -> KernelSpec:
     """`state`: loop-carried variables and their values at power-up (the prologue's CONSTs by
     default for any variable the body reads before writing and writes). Structured `if` /
     `if-else` inside the body (a JZ/JNZ over a label, an optional JMP to an end label) become
@@ -350,9 +350,9 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         for c in spec.cells:
             if c["name"] == final:
                 c["init"] = state[v]
-    if not spec.outputs:
+    if not spec.outputs and not (allow_no_output and spec.state_cells):
         raise NotAKernel("the body emits nothing")
-    spec.out_cell = spec.outputs[-1]
+    spec.out_cell = spec.outputs[-1] if spec.outputs else None
     # a cell whose every cell source is a feedback edge (built at or after it) has nothing in
     # this token to request it: the input token paces it
     index = {c["name"]: k for k, c in enumerate(spec.cells)}
@@ -391,7 +391,7 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main")
     post = ob[i1:]
     outer_body = [x for x in pre + post if not isinstance(x, str)]
     okey = f"input:{ovar}"
-    spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey)
+    spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey, allow_no_output=True)
     # the outer kernel's state carriers are outputs (the host watches them to pace the frames)
     for v, cname in spec.state_cells.items():
         if cname not in spec.outputs:
