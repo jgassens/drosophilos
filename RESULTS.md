@@ -871,7 +871,13 @@ one copy of its three kernels is 443k neurons at 16 bits, about three brains' wo
 runs on the simulator but not yet in a brain's budget. **It runs**: a one-node validation on
 Juno rendered two frames of a 2 × 3 sample, every pixel equal to the reference, with the
 tick moving the player between them — 142 s of neural time, 1 h 56 min of wall time on a
-CPU core; the 40 × 25 run on 32 copies is queued on the H200); textures; sprites; Profile 2 wiring; neural pacing (Stage F2); TMR.
+CPU core. **And at 40 × 25 on the H200** (32 copies of the three kernels, 460,311 neurons
+each, 14.7 million in all): two frames, the player moved by the tick between them, all
+2,000 pixels equal to the reference, no fault, no timeout — 310 s of neural time, 2 h 31 min
+of wall time (`docs/img/doom40_0_neural.png`, `_1_`; `docs/a2/doom1_40_h200.json`). That is
+a Doom-shaped engine — level, ray casting, a z-buffer, a moving player — running in the
+substrate with the game update and the renderer both in spikes, at the label *Profile 3,
+hybrid pacing*); textures and sprites (`doom2.c`–`doom4.c`, oracle-validated, neural runs next); Profile 2 wiring; TMR.
 
 The mix-B perturbation campaign on the control machine (the sequencer, 4-bit, fixed ALU)
 also finished on the H200: 100 random programs, 713 instructions, 98 ok, 1 short, 1 no

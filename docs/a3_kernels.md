@@ -269,7 +269,10 @@ projected height and the distance stored into two RAM buffers), and a pixel pass
 the buffers read by column, ceiling / shaded wall / floor by row). 443,330 neurons per copy
 at 16 bits. Validated neurally on one copy (Juno, CPU): two frames of a 2 × 3 sample, all
 pixels equal to the reference, 142 s of neural time. Each copy renders the pixels of its own
-columns, so a copy's buffers only ever hold what it wrote (`bench/render_doom.py`).
+columns, so a copy's buffers only ever hold what it wrote (`bench/render_doom.py`). At 40 × 25
+on Juno's H200, 32 copies (14.7 M neurons), host pacing: two frames with the player moved
+between them, 2,000 / 2,000 pixels correct, no fault or timeout, 310 s of neural time in
+2 h 31 min of wall time (`docs/img/doom40_0_neural.png`, `docs/a2/doom1_40_h200.json`).
 
 ### 10.1 Third round (2026-09-15, on `a26495f`; Kimi stalled again, the `claude-fable` worker reviewed)
 
