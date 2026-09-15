@@ -18,11 +18,11 @@ drive_quanta:
   ignite: 4655
   relay_in: 4655
 resources:
-  neurons: 1150
-  synapses: 2241
-  excitatory_synapses: 1427
-  inhibitory_synapses: 814
-  total_abs_quanta: 8908118
+  neurons: 1218
+  synapses: 2424
+  excitatory_synapses: 1556
+  inhibitory_synapses: 868
+  total_abs_quanta: 9604906
 latency:
   accept_ms_mean: 346.3
   accept_ms_max: 523.7
@@ -30,11 +30,11 @@ initiation_interval:
   cycle_ms_mean: 524.3
   cycle_ms_max: 701.7
 activity:
-  spikes_per_transaction_total: 29269.5
+  spikes_per_transaction_total: 33117.9
   spikes_per_transaction_by_class:
-    latch: 5110.8
+    latch: 5260.4
     gate: 187.6
-    control: 23971.1
+    control: 27669.9
   output_port_spikes_per_transaction: 489.0
   latch_member_rate_hz_while_holding: 212.8
   sustained_duty_cycle: a held latch fires continuously at the rate above until reset
@@ -42,14 +42,14 @@ activity:
 reset_energy:
   producer:
     pulses: 4
-    quanta_per_pulse: 165676
-    quanta_per_reset: 662704
-    mv_equivalent_per_reset: 11390.2
+    quanta_per_pulse: 176540
+    quanta_per_reset: 706160
+    mv_equivalent_per_reset: 12137.1
   consumer:
     pulses: 4
-    quanta_per_pulse: 616532
-    quanta_per_reset: 2466128
-    mv_equivalent_per_reset: 42386.6
+    quanta_per_pulse: 681716
+    quanta_per_reset: 2726864
+    mv_equivalent_per_reset: 46868.0
 fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source nothing
   (no load); measured on the real connectome as isolation cost instead (H0)'
 delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
