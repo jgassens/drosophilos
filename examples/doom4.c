@@ -38,7 +38,7 @@ static u16 px, py, tx, ty, heading, in, turn, fwd, f, col, s, ang, dx, dy, x, y,
 static u16 tdx, tdy, xneg, yneg, bigger, tcell, pcell;
 static u16 t, prow, pcol, top, bot, a, b, c, d, p, u, v, dark, hx, hy;
 static u16 sdepth, side, scol, hw, sh, recip2w, sbh, su, near, covers, twohw, left;
-static u16 camang, relx, rely, cc, ss, depth, sraw, sign, off, stop, sbot, sv, spix;
+static u16 camang, relx, rely, cc, ss, depth, sraw, sign, off, stop, sbot, sv, spix, sclip;
 
 int main(void) {
     px = 120; py = 120; tx = 168; ty = 88; heading = 48;
@@ -114,8 +114,8 @@ int main(void) {
             sv = 0;
             if (sbh != 0) { if (a == 0) { if (b != 0) { sv = ((prow - stop) * recip2[sbh]) >> 6; } } }
             /* Rounded reciprocals can produce texture row 16 at the final scaled pixel. */
-            a = (sv - 16) & 32768;
-            if (a == 0) { sv = 15; }
+            sclip = (sv - 16) & 32768;                   /* a fresh temporary: `a` still gates the overlay below */
+            if (sclip == 0) { sv = 15; }
             spix = sprite[(sv << 3) | su];
             if (sbh != 0) { if (a == 0) { if (b != 0) { if (spix != 0) { c = spix; } } } }
             out_pixel(c);

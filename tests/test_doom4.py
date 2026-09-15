@@ -105,6 +105,12 @@ def test_doom4_moving_thing_matches_kernel_and_c_golden(monkeypatch):
         bands.append(band)
         frames.append(frame)
         write_png(frame, 160, 100, f"docs/img/doom4_{frame_number}_reference.png", scale=4)
+    # The imp is drawn (its colours 15, 10, 9 never occur on walls, floor or sky) inside the
+    # sprite band only, and covers more pixels as it approaches.
+    imp = [[xy for xy, v in frame.items() if v in (15, 10, 9)] for frame in frames]
+    assert all(imp), [len(x) for x in imp]
+    assert all(min(bands[n]) <= col <= max(bands[n]) for n in range(3) for col, _ in imp[n])
+    assert len(imp[0]) < len(imp[1]) < len(imp[2]), [len(x) for x in imp]
 
     # The wall clips the first billboard, while the closer later positions widen and shift it.
     assert [len(band) for band in bands] == [26, 40, 64]
