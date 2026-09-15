@@ -2,7 +2,7 @@
 
 `campaign.sbatch <block> [args]` runs one perturbation campaign of
 `drosophilos.bench.a2_campaigns` on one GPU (`h200` partition by default; `-p h100`/`a30`
-on the command line to override). The environment is the `drosophilos` conda env
+on the command line to override). The environment is the `drosophilos` conda env, called by absolute path (`DROSO_PY`; `source activate` does nothing in a batch shell)
 (python 3.12, torch cu124, numpy, scipy, pyyaml) built by `juno_setup.sh` in the session
 notes; the repo is cloned at `~/drosophilos` and updated with `git pull` before a run.
 
