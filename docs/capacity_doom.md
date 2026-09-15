@@ -127,13 +127,28 @@ First tool, first number (`connectome/embed_netlist.py`): a greedy placement of 
 ordered adder's netlist (614 neurons, 1,146 edges) onto MCNS under the H0 rules — most
 constrained neuron first, candidates restricted to real neurons adjacent with enough
 synapses and the right sign to every placed neighbour, no backtracking — places 226 neurons
-and carries 116 edges (10 %) in under a second. What it misses says what the real search
+and carries 102 edges (8.9 %; first reported as 116 before the audit was shared with the
+motif search) in under a second. What it misses says what the real search
 must do: delay-chain hops (96 of 100 unplaced: a chain is a path of strong cholinergic
 edges, which a greedy start rarely lands on), latch members and their relay's inhibitory
 interneuron (the relay → GABA → relay motif). H0 found its 50 embeddings by searching the
 motif as a whole; the netlist search must place motifs (latch pair + relay + inhibitor,
-chains as paths) rather than neurons, with backtracking. That is the Stage H search, not
-built; the number to beat is 10 %.
+chains as paths) rather than neurons, with backtracking.
+
+That search is built (`place_netlist`, commit `1d8a071`; `docs/h1_placement.md` is the
+report). Motifs read from the netlist's structure, placed as units — latch pairs on real
+mutual pairs, relays on real (E, I) pairs, chains as depth-first paths over ≥ 57-synapse
+cholinergic edges, hubs by coverage — with forward checking, bounded backtracking, a repair
+pass and restarts: **704 of 1,146 edges (61 %) and 612 of 614 neurons in 65 s** (eight
+restarts, 59–61 % each). Of the *hard* edges, those between motifs, 697 of 884 (79 %) are
+carried; of the three broadcast neurons' 258 edges (the two reset interneurons and the
+watchdog's cancel), 7. No inhibitory neuron in MCNS reaches 115 targets at ≥ 43 synapses (the
+best carries 5), and a tree of 38 real neurons that would cover 85 of them has no member the
+designed trigger can drive. So what a Profile 2 adder still needs from Profile 3 is specific:
+the broadcast fan-outs (or local resets), one relay fan-out node (`actd.d10`, 10 of 16 edges),
+and about 30 relay-inhibitor edges. The circuit landed in the antennal lobe, the gnathal
+ganglion and the nerve cord; one optic-lobe neuron. Not done: hub splitting applied to the
+mapping, a simulation of the placed circuit, and the ~1,300-latch cell target.
 
 **Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
 loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual

@@ -283,7 +283,7 @@ programs the compiler accepted and compiled to something other than their meanin
 | An inner loop writing a variable the outer loop carries compiled to two copies of the state | Rejected |
 | A body reading its loop counter beside `in_read()` read the token instead | Rejected (the counter's own update may read it) |
 | A load after a store of the same array in one body has no ordering edge | Rejected (read it in a later pass) |
-| Two STORE cells on one array: both ports' COPY latches light at the word's READY and copy over each other | Rejected (one STORE cell per array) |
+| Two STORE cells on one array: both ports' COPY latches light at the word's READY and copy over each other | Rejected at first; since `7ea4cd4` the ports carry marks (the timer recipe of `control.py`): a port's select lights a mark for the word that vetoes the other ports' copies until the word completes, and the completion clears every port's COPY. Two stores to one word in flight together leave it empty: a fail-stop at the next LOAD. Measured: two STORE cells writing disjoint words on every token, eight words read back, no fault (`test_kernel_ram_written_by_two_store_cells_in_one_pass`) |
 | An `if` on a second stream's token crashed the builder | The condition gets its MOV cell for any stream |
 | A parameter first read inside one arm was refused as "defined on one arm only" | The other arm sees the parameter's constant |
 | ROM and RAM addresses with bits above the table's width aliased silently while the oracle raises (`doom1` reached it after seven back-steps) | The high address bits veto every word: an address beyond the table selects nothing, a fail-stop; and the tick now checks the level before moving (Doom's `p_map`), so the player never leaves the grid |

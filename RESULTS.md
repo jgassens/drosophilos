@@ -825,9 +825,18 @@ neural time — the simulator, not the substrate, is the clock.
 How far this is from the fly's own wiring (Profile 2): the render kernel needs ~5,300 latch
 pairs; MCNS has 1,223 reciprocal cholinergic pairs strong enough at the H0 weight policy and
 12,315 at four times that scale (`docs/capacity_doom.md` §5). A 4-bit adder fits the H0
-policy in count; a kernel needs a larger weight scale or added edges, and a netlist-driven
-placement search that does not exist yet. That is Stage H, and every result here carries the
-label *Profile 3*.
+policy in count; a kernel needs a larger weight scale or added edges. Every result here
+carries the label *Profile 3*.
+
+**Stage H, first measurement (2026-09-15, `docs/h1_placement.md`):** a motif-level placement
+search (`connectome/embed_netlist.py`) puts the 4-bit adder's netlist — 614 neurons, 1,146
+edges — onto real MCNS neurons under the H0 rules with 704 edges (61 %) carried by the fly's
+own synapses and 612 neurons placed, in 65 s; the neuron-by-neuron greedy tool carried 9 %.
+Of the edges between motifs (latch pairs, relays with their inhibitors, delay chains, vetoes)
+79 % are carried. What the wiring lacks is specific: the three broadcast neurons (reset and
+watchdog-cancel, 258 edges, 7 carried — no inhibitory neuron in MCNS reaches 115 targets at
+the required strength), one relay fan-out node, and about 30 relay-inhibitor edges. The
+placed circuit has not been simulated yet.
 
 **Stage F2, first step (later the same day):** the frame's phase order — columns, then pixels,
 then the tick — is now enforced inside the substrate by phase gates on the input registers
