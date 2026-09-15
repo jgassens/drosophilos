@@ -260,6 +260,17 @@ the passed pair's kill-relay recovery (~50 ms) is a plausible spurious start und
 perturbation, not seen on the clean model — the mix-B campaign on a two-source cell must size
 it. The 32-bit kernel has a test now.
 
+### 9.1 The Doom-shaped program (`examples/doom1.c`)
+
+Three kernels from one program: a tick kernel (19 cells: the input's turn and forward/back
+bits move the player, the level checked first as Doom's `p_map` does), a column pass
+(48 cells: a four-step ray walk through a 16 × 16 grid in Q4.4 with trig tables, the
+projected height and the distance stored into two RAM buffers), and a pixel pass (13 cells:
+the buffers read by column, ceiling / shaded wall / floor by row). 443,330 neurons per copy
+at 16 bits. Validated neurally on one copy (Juno, CPU): two frames of a 2 × 3 sample, all
+pixels equal to the reference, 142 s of neural time. Each copy renders the pixels of its own
+columns, so a copy's buffers only ever hold what it wrote (`bench/render_doom.py`).
+
 ### 10.1 Third round (2026-09-15, on `a26495f`; Kimi stalled again, the `claude-fable` worker reviewed)
 
 Audited clean: the pipelined multiplier's timing, the STORE and LOAD ports' timing, the ROM

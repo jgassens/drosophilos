@@ -703,7 +703,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 
 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
-                         expect_outputs: list | None = None, dtype=None) -> tuple[list, object, dict]:
+                         expect_outputs: list | None = None, dtype=None, sim=None) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
@@ -714,7 +714,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     net, drive = pl.net, pl.drive
     B = len(schedules)
     kw = {"dtype": dtype} if dtype is not None else {}
-    sim = TorchSim(net.topology(), params, n_nodes=B, device=device, **kw)
+    sim = sim or TorchSim(net.topology(), params, n_nodes=B, device=device, **kw)  # a perturbed simulator may be passed (campaigns)
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
     sim.run(3000)
