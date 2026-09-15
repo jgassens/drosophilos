@@ -15,7 +15,7 @@ LOADX`) become LOAD cells on a memory of their own, addressed by the index (the 
 away); their contents come from the initialisers in the program's prologue. One OUT per
 token: its source is the output cell (a MOV cell is appended if the source is not a cell).
 
-Rejected (v0): branches inside the body, calls, STOREX, a body that writes a parameter, more
+Rejected (v0): loops inside the body, a body that writes a parameter, more
 than one OUT, IN inside the body.
 """
 
@@ -42,6 +42,7 @@ class KernelSpec:
     folded: dict = field(default_factory=dict)  # variable -> constant value at compile time
     outputs: list = field(default_factory=list)  # output cells, one value each per token
     state_cells: dict = field(default_factory=dict)  # state variable -> its carrier cell
+    rams: set = field(default_factory=set)  # arrays written by the program: RAM, not ROM
 
 
 def arrays_of(prog: Program) -> dict:
@@ -64,6 +65,23 @@ def array_contents(prog: Program, fn: str = "main") -> dict:
         m = re.fullmatch(r"(\w+)\[(\d+)\]", ins.dst or "")
         if m:
             out.setdefault(m.group(1), {})[int(m.group(2))] = ins.imm & ((1 << prog.width) - 1)
+    return out
+
+
+def written_arrays(prog: Program) -> set:
+    """Names of the arrays some STOREX in the program writes (the index word's base before it)."""
+    arrs = arrays_of(prog)
+    out, base = set(), None
+    for fn in prog.functions.values():
+        for ins in fn:
+            if not isinstance(ins, Instr):
+                continue
+            if ins.dst == "__x":
+                base = ins.imm if ins.op in ("CONST", "ADD") and ins.imm is not None else None
+            elif ins.op == "STOREX" and base is not None:
+                for nm, (b0, ln) in arrs.items():
+                    if b0 <= base < b0 + ln:
+                        out.add(nm)
     return out
 
 
@@ -213,8 +231,28 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             op = ins.op
             if op == "JMP" and ins.target in labels and labels[ins.target] < i:
                 raise NotAKernel("a loop inside the body (a backward branch)")
-            if op in ("JMP", "RET", "STOREX", "HALT"):
+            if op in ("JMP", "RET", "HALT"):
                 raise NotAKernel(f"{op} inside a kernel body")
+            if op == "STOREX":  # a[i] = e: a STORE cell into the array's RAM
+                if xaddr[0] is None:
+                    raise NotAKernel("STOREX before the index word is set")
+                if xaddr[0][0] == "const":
+                    addr = xaddr[0][1]
+                    name = next((nm for nm, (base, ln) in arrs.items() if base <= addr < base + ln), None)
+                    if name is None:
+                        raise NotAKernel(f"STOREX to a scalar address {addr}")
+                    a = const(addr - arrs[name][0])
+                else:
+                    base, a = xaddr[0]
+                    name = next((nm for nm, (b0, ln) in arrs.items() if b0 == base), None)
+                    if name is None:
+                        raise NotAKernel(f"STOREX to base {base}, not an array")
+                base, length = arrs[name]
+                spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
+                spec.rams.add(name)
+                data = src(ins.srcs[0])
+                spec.outputs.append(cell("STORE", a, data, mem=name))  # the host sees every write land (pacing)
+                continue
             if op == "IN":  # fresh input each token: the variable is the token itself
                 if input_var[0] is not None:
                     raise NotAKernel("one in_read() per token")
@@ -325,7 +363,11 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     if name is None:
                         raise NotAKernel(f"LOADX from base {base}, not an array")
                 base, length = arrs[name]
-                spec.mems[name] = (length, dict(contents.get(name, {})))
+                if name in written_arrays(prog):
+                    spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
+                    spec.rams.add(name)
+                elif name not in spec.mems:
+                    spec.mems[name] = (length, dict(contents.get(name, {})))
                 env[ins.dst] = cell("LOAD", a, mem=name)
                 written.add(ins.dst)
             elif op == "OUT":
@@ -409,23 +451,39 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main")
     inner = next((x for x in ob if isinstance(x, str) and x.startswith("loop")), None)
     if inner is None:
         return compile_kernel(prog, ob, _induction_var(prog, fn, outer), params=params)
-    ib = loop_body(prog, fn, inner)
-    i0 = ob.index(inner)
-    i1 = i0 + 1 + ob.index(next(x for x in ob[i0:] if isinstance(x, str) and x.startswith("endloop"))) - i0  # past "endloop"
-    ivar, ovar = _induction_var(prog, fn, inner), _induction_var(prog, fn, outer)
-    pre = [x for x in ob[:i0] if not (isinstance(x, Instr) and x.dst == ivar)]  # drop the inner counter's init
-    post = ob[i1:]
-    outer_body = [x for x in pre + post if not isinstance(x, str)]
+    # every inner loop of the outer body is a kernel with a stream named by its induction
+    # variable (the first keeps the default stream "input"); the outer body without them is the
+    # tick kernel; what the inner bodies read and the outer body writes is a parameter edge
+    inners = []  # (label, body, induction var, start, end) in order
+    k = 0
+    while k < len(ob):
+        x = ob[k]
+        if isinstance(x, str) and x.startswith("loop"):
+            end = next(j for j in range(k, len(ob)) if isinstance(ob[j], str) and ob[j].startswith("endloop"))
+            inners.append((x, loop_body(prog, fn, x), _induction_var(prog, fn, x), k, end + 1))
+            k = end + 1
+        else:
+            k += 1
+    ovar = _induction_var(prog, fn, outer)
+    ivars = {iv for _, _, iv, _, _ in inners}
+    keep = [True] * len(ob)
+    for _, _, _, a_, b_ in inners:
+        for j in range(a_, b_):
+            keep[j] = False
+    outer_body = [x for x, kp in zip(ob, keep) if kp and not (isinstance(x, Instr) and x.dst in ivars)]  # the inner counters' inits go; labels stay
     okey = f"input:{ovar}"
     spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey, allow_no_output=True)
-    # the outer kernel's state carriers are outputs (the host watches them to pace the frames)
-    for v, cname in spec.state_cells.items():
+    for v, cname in spec.state_cells.items():  # the outer kernel's state carriers are outputs (the host paces on them)
         if cname not in spec.outputs:
             spec.outputs.append(cname)
     seeds = {v: ("param", cname) for v, cname in spec.state_cells.items()}
-    spec = compile_kernel(prog, ib, ivar, params=params, prefix="c", stream_key="input", seeds=seeds, into=spec)
-    spec.streams = ["input", ovar]
-    spec.stream_keys = {"input": "input", ovar: okey}
+    spec.streams, spec.stream_keys = ["input", ovar], {"input": "input", ovar: okey}
+    for idx, (_, ib, ivar, _, _) in enumerate(inners):
+        key = "input" if idx == 0 else f"input:{ivar}"
+        spec = compile_kernel(prog, ib, ivar, params=params, prefix=(f"c{idx}_" if idx else "c"), stream_key=key, seeds=seeds, into=spec)
+        if idx:
+            spec.streams.append(ivar)
+            spec.stream_keys[ivar] = key
     return spec
 
 
@@ -453,6 +511,7 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
     w, mask = spec.width, (1 << spec.width) - 1
     state = {c["name"]: c["init"] & mask for c in spec.cells if c.get("init") is not None}
     last = dict(state)  # every cell's last committed value (params read it)
+    ram = {nm: dict(m[1]) for nm, m in spec.mems.items() if len(m) > 2 and m[2] == "ram"}
     keys = getattr(spec, "stream_keys", None) or {"input": "input"}
     outs = []
     for t in tokens:
@@ -474,11 +533,17 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
             if c.get("stream", "input") != key:
                 continue
             if c["op"] == "LOAD":
-                n_words, contents = spec.mems[c["mem"]]
+                m = spec.mems[c["mem"]]
+                n_words, contents = m[0], (ram[c["mem"]] if c["mem"] in ram else m[1])
                 addr = get(c["a"])
-                if addr >= n_words or addr not in contents:  # the ROM read relays match nothing: the cell would stall
-                    raise KeyError(f"{c['name']}: {c['mem']}[{addr}] is outside the table (the read would stall)")
+                if addr >= n_words or addr not in contents:  # the read relays match nothing: the cell would stall
+                    raise KeyError(f"{c['name']}: {c['mem']}[{addr}] is outside the table or unwritten (the read would stall)")
                 v = contents[addr] & mask
+            elif c["op"] == "STORE":
+                addr, v = get(c["a"]), get(c["b"])
+                if addr >= spec.mems[c["mem"]][0]:
+                    raise KeyError(f"{c['name']}: {c['mem']}[{addr}] is outside the buffer")
+                ram[c["mem"]][addr] = v & mask
             elif c["op"] == "MOV":
                 v = get(c["b"])
             elif c["op"] == "SEL":

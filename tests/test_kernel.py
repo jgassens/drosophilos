@@ -319,3 +319,65 @@ def test_kernel_ram_written_by_one_pass_and_read_by_the_next():
     assert [v for _, v in by["out"]] == [26, 41, 20, 34], (by, st)
     assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
     print("kernel RAM", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
+
+
+TWO_PASS = """static u8 htab[4] = {40, 33, 25, 19};
+static u8 hbuf[4];
+static u8 col, h, t, c, r, f, p, heading;
+int main(void) {
+    heading = 1;
+    f = 2;
+    while (f != 0) {
+        col = 0;
+        while (col != 4) { h = htab[(col + heading) & 3]; hbuf[col] = h; col = col + 1; }
+        p = 8;
+        while (p != 0) { t = in_read(); c = t & 3; r = t >> 2; h = hbuf[c]; out_pixel(h + r); p = p - 1; }
+        heading = heading + 1;
+        f = f - 1;
+    }
+    return 0;
+}"""
+
+
+def two_pass_schedule(ks, frames, cols, pix):
+    """Per frame: the column pass (stores), the pixel pass once the stores are out, the tick once the pixels are out."""
+    n_tick = sum(1 for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == "input:f")
+    sched, owed = [], 0
+    for f in range(frames):
+        sched += [("input", c, owed) for c in cols]
+        owed += len(cols)
+        sched += [("p", t, owed) for t in pix]
+        owed += len(pix)
+        sched.append(("f", f, owed))
+        owed += n_tick
+    return sched, owed
+
+
+def test_two_pass_renderer_compiles_to_three_kernels():
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(TWO_PASS)
+    ks = compile_program(prog, params={"heading": 1})
+    assert ks.streams == ["input", "f", "p"] and ks.rams == {"hbuf"}
+    assert [c["op"] for c in ks.cells if c["stream"] == "input"][-1] == "STORE"
+    pix = [(r << 2) | c for r in range(2) for c in range(4)]
+    sched, _ = two_pass_schedule(ks, 2, range(4), pix)
+    pixels = [o[0] for (st, _, _), o in zip(sched, kernel_outputs(ks, [(s, v) for s, v, _ in sched])) if st == "p"]
+    assert pixels == interpret(prog, pix + pix)["outs"]
+
+
+@pytest.mark.slow
+def test_neural_two_pass_renderer_with_a_ram_buffer():
+    """Three kernels: the tick, a column pass writing heights into a RAM buffer, a pixel pass
+    reading them; the host paces the three phases of each frame."""
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(TWO_PASS)
+    ks = compile_program(prog, params={"heading": 1})
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams)
+    pix = [(r << 2) | c for r in range(2) for c in range(4)]
+    sched, owed = two_pass_schedule(ks, 2, range(4), pix)
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=150000, expect_outputs=owed)
+    pixel_cell = [o for o in ks.outputs if next(c for c in ks.cells if c["name"] == o)["stream"] == "input:p"][0]
+    got = [v for _, v in st["outputs_by_cell"][pixel_cell]]
+    assert got == interpret(prog, pix + pix)["outs"], (st["outputs_by_cell"], st)
+    assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
+    print("two-pass renderer", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
