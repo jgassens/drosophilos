@@ -186,7 +186,8 @@ scarce fan-out neurons live. What a Profile 2 image of the adder therefore needs
 is small and specific: the hub fan-outs (reset and cancel, or a redesign with local resets), the
 `actd.d10`-style fan-out, and about 30 relay inhibitor edges; the latches, delay chains, vetoes and
 most relays are already in the fly's wiring. Not done here: hub splitting applied to the mapping
-(reported only), neural simulation of the placed circuit, and the whole-cell (~1,300-latch) target.
+(reported only) and the whole-cell (~1,300-latch) target; the neural simulation of the placed circuit
+follows in the next section.
 
 Reproduce, from the repo root with the MCNS data present:
 
@@ -207,3 +208,75 @@ Tests: `tests/test_embed_netlist.py` — a single latch with its edge relay and 
 completely (6 / 6 edges, the planted neurons in their roles) on a synthetic connectome with decoys,
 with a variant where the inhibitor edge is absent and the audit must say so; and on the real
 connectome when the data is present.
+
+## The placed adder, simulated
+
+Tool: `drosophilos/connectome/embed_image.py` (`build_image`, `simulate_channel`, `run_h1_conditions`);
+mapping used: `docs/h1_placement_mapping.json` (the best-of-8 placement above, re-run with
+`place_netlist(net, m, restarts=8, time_limit_s=600, seed=0)`: 704 / 1,146 again, restart 5, 72 s).
+
+**What the image is.** The circuit's 614 neurons keep the netlist's own indices, each hosted on
+its real MCNS neuron (612 of them; the two unplaced relay inhibitors get synthetic neurons), so
+the adder's own harness — the same injection, the same four-phase decode — runs on the image
+unchanged. Of the 1,146 designed edges, 704 are *carried*: the anatomical edge between the two
+hosts, of the right sign, rescaled to exactly the designed quanta by a factor k = |q| / (count × 16)
+with k ≤ 4 (a parameter edit, recorded per edge; the histogram of k is 14 edges ≤ 0.5, 55 in
+(0.5, 1], 202 in (1, 2], 206 in (2, 3], 227 in (3, 4]; the largest is 3.99, i.e. most carried edges
+lean on the ×4 allowance). The other 442 are added as labelled *Profile 3* edges (434 with no
+anatomical edge strong enough between the hosts, 4 with an unplaced endpoint, 4 of the wrong sign):
+by class, `cancel_inh → hop` 100, `reset_inh → u/v/or/and` 151, `edge → u` 36, `edge_inh → edge` 29,
+`u → start` 16, the rest 110 spread over 30 classes of the arithmetic's own wiring. The 17,845
+anatomical edges among the hosts that are not carried designed edges (7.76 M quanta, 23 of them
+under a designed edge that is too weak; one more than the audit's 17,844 because the netlist
+gives the completion latch its reset edge twice) are parasitic: zeroed as documented zero-weight
+edits, or kept at their anatomical quanta in condition E. The image's manifest lists the four
+graphs, 704 rescalings, 17,845 zeroings, 442 added edges and 2 added neurons — a Profile 2 image
+with 442 Profile 3 edges (39 % of the edges, 61 % of them the three broadcast neurons').
+
+**What the simulation says.** Fifty random 4-bit additions (seed 0), each in a fresh simulator
+(RefSim, dt 0.1 ms, up to 1.2 s of neural time per addition; a failing condition would otherwise
+stop the harness at its first incomplete transaction); the conditions that compute were also run
+chained, fifty words through one simulator, which tests the reset between words.
+
+| condition | Profile 3 edges | parasitic | sums correct | how it fails | completions missing |
+|---|---|---|---|---|---|
+| A: every designed edge (missing ones added), parasitic zeroed | 442 | 17,845 zeroed | **50 / 50** (chained 50 / 50; ACCEPT 330–384 ms, cycle 508–562 ms — the netlist's own numbers) | — | 0 |
+| B: carried edges only | 0 | zeroed | 0 / 50 | no ACCEPT: the producer loads, 132–145 arithmetic neurons run (~36 k spikes per addition, latches never reset), nothing reaches the output register | 50 |
+| C: B + the three broadcast neurons' missing edges (`Q.reset_inh`, `P.reset_inh`, `P.wd.cancel_inh`) | 251 | zeroed | 0 / 50 | identical to B: the resets never trigger, so the hub edges are never used | 50 |
+| D: C + the missing relay-inhibitor (`edge_inh → edge`, 29) and `actd.d10` fan-out (6) edges | 286 | zeroed | 0 / 50 | no ACCEPT; quieter (107–124 arithmetic neurons, ~26 k spikes: the relays are now held down) but the output register is still untouched | 50 |
+| E: A with the parasitic edges kept at anatomical weights | 442 | 17,845 kept | 0 / 50 | ACCEPT after 15–32 ms (the parasitic edges drive the completion tree directly); 17 faults (both rails of an output bit lit: 2–8 of the 5 bits' 10 rails active), 27 watchdog timeouts, 6 incomplete decodes; 358 fault spikes | 0 (the fault path completes the four phases) |
+| F (extra): A minus the three broadcast neurons' missing edges | 191 | zeroed | **50 / 50** fresh; chained 1 / 50 | the logic computes every first sum with the netlist's timing; without the reset and cancel fan-outs the registers are never cleared, so the second word never completes (and the watchdog fires 5 times after ACCEPT, uncancelled) | 0 fresh |
+
+Condition A validates the mapping and the scaling: an image that carries 704 edges on real
+neurons at rescaled anatomical weights and adds the rest computes every sum with exactly the
+netlist's latencies. Conditions B–D say that the carried 61 % is not a working fraction of the
+adder: the lost edges are not concentrated in one stage but scattered through the data path
+(2 of the 10 output-relay ignition edges, 34 of the Q register's 155 internal edges — its
+completion tree, valid latches and fault gates — 26 of the producer's 186, 115 of the
+arithmetic's 499), and a four-phase channel with any of its relay or latch edges missing
+stalls before ACCEPT rather than computing a wrong sum. Adding the hubs' 251 edges (C) or the
+fan-out classes named in §What the wiring lacks (D) changes nothing because the failure is
+upstream of them. Condition F is the informative split: the 191 missing edges of the logic are
+what a fresh addition needs, and the 251 hub edges are what the *second* addition needs — the
+hubs are the whole reset problem and nothing else. Condition E says the image is only a circuit
+when the parasitic edges are silenced: kept at anatomical weight, the 17,845 anatomical edges
+among the hosts (mean 27 synapses; 5,305 of ≥ 24) ignite output rails and the completion tree
+within 15 ms of loading, and no addition survives. So the Profile 2 image of the adder is
+Profile 2 in its neurons and in 61 % of its edges, needs 442 Profile 3 edges (191 for the logic,
+251 for the resets) and 17,845 documented zeroings, and computes only with those zeroings applied.
+
+Reproduce (about 8 minutes: five to six conditions × 50 fresh additions):
+
+```python
+from drosophilos.connectome.embed_image import build_image, load_mapping, run_h1_conditions
+pl = load_mapping("docs/h1_placement_mapping.json", net, m)   # net, m as above
+img = build_image(net, m, pl); img.counts; img.manifest
+run_h1_conditions(ch, m, pl, width=4, n_cases=50, seed=0)      # ch = build_adder_channel(...)
+```
+
+Tests: `tests/test_embed_image.py` — the planted latch + relay + inhibitor of
+`test_embed_netlist.py`, placed on its synthetic connectome and turned into an image (6 / 6 edges
+carried at the designed quanta with their scales, parasitic edges zeroed, a knocked-out edge
+reported as a labelled Profile 3 edge, an unplaced neuron as a synthetic one), simulated: one
+source spike fires the relay once and ignites the latch, which holds for 400 ms; and, when the
+MCNS data is present, the adder image in condition A on 5 chained additions, all correct.
