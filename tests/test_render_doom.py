@@ -22,6 +22,7 @@ def _run(monkeypatch, tmp_path, argv, name="doom"):
 def test_doom1_reference_frames_are_byte_identical_to_docs_img(monkeypatch, tmp_path):
     out = _run(monkeypatch, tmp_path, [
         "--source", "examples/doom1.c", "--width", "40", "--height", "25", "--frames", "2",
+        "--inputs", "2,258",  # the H200 run's inputs (Juno job 404188): docs/img/doom40_*_reference.png are its references
     ])
     for f in range(2):
         got = (Path(f"{out}_{f}_reference.png")).read_bytes()
