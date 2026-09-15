@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from drosophilos.connectome.embed_h0 import Policy
-from drosophilos.connectome.embed_netlist import Placement, _Design, place_netlist, place_netlist_greedy
+from drosophilos.connectome.embed_netlist import Placement, _Anatomy, _Design, audit, place_netlist, place_netlist_greedy
 from drosophilos.connectome.mcns import MCNS
 from drosophilos.connectome.mcns_download import DEFAULT_DIR, path_of
 from drosophilos.lib.netlist import Drive, Netlist
@@ -115,6 +115,56 @@ def test_missing_inhibitor_is_reported_not_faked():
     for s, d, q in zip(net.src, net.dst, net.quanta):
         carried_really = counts.get((pl.mapping[s], pl.mapping[d]), 0) >= policy.req_count(q)
         assert carried_really == ((s, d) not in [(a, b) for a, b, _, _ in pl.missing]), (s, d)
+
+
+def _one_edge_mcns(nt_pre: str, nt_post: str, count: int) -> MCNS:
+    neurons = pd.DataFrame({"bodyId": [1000, 1001], "type": ["Ta", "Tb"], "superclass": "cb",
+                            "class": None, "somaSide": "R", "nt": [nt_pre, nt_post], "nt_conf": 0.9})
+    neurons["sign"] = np.where(neurons["nt"].isin(["gaba", "glutamate", "histamine"]), -1, 1).astype(np.int8)
+    return MCNS(neurons, np.array([0], np.int32), np.array([1], np.int32), np.array([count], np.int32), min_syn=1)
+
+
+def test_duplicate_designed_edges_are_merged_by_audit():
+    """The netlist does not merge synapses: the same (src, dst) pair can appear twice (as it
+    does in the adder). One anatomical edge carries both at once, so the audit must count them
+    as one distinct edge with quanta summed, not as two carried designed edges."""
+    params = Params()
+    net = Netlist(params)
+    a, b = net.neuron("a"), net.neuron("b")
+    net.synapse(a, b, 50)
+    net.synapse(a, b, 50)  # duplicate designed edge, same pair
+    policy = Policy()
+    m = _one_edge_mcns("acetylcholine", "acetylcholine", policy.req_count(100))  # just enough for the summed 100
+    D = _Design(net, policy, hub_deg=20)
+    A = _Anatomy(m, policy)
+    real = np.array([0, 1], dtype=np.int64)
+    pl = audit(net, D, A, real, 0.0, {}, "test", policy)
+    s = pl.summary(net)
+    assert s["synapses"] == net.nnz == 2
+    assert s["edges"] == pl.edges == 1
+    assert pl.carried == 1
+    assert pl.missing == []
+    assert pl.parasitic == 0
+
+
+def test_audit_catches_a_wrong_sign_host():
+    """The search only ever draws from sign-masked domains, but the audit itself must still
+    catch a host whose own transmitter does not match the designed neuron's sign -- planted
+    here through a hand-made mapping the search would never produce."""
+    params = Params()
+    net = Netlist(params)
+    a, b = net.neuron("a"), net.neuron("b")
+    net.synapse(a, b, 100)  # a is excitatory-designed (positive quanta)
+    policy = Policy()
+    req = policy.req_count(100)
+    m = _one_edge_mcns("gaba", "acetylcholine", req + 10)  # host of a is gaba: wrong sign, plenty strong
+    D = _Design(net, policy, hub_deg=20)
+    A = _Anatomy(m, policy)
+    real = np.array([0, 1], dtype=np.int64)
+    pl = audit(net, D, A, real, 0.0, {}, "test", policy)
+    assert pl.carried == 0
+    assert len(pl.missing) == 1
+    assert pl.missing[0][3] == "sign"
 
 
 def test_greedy_baseline_runs_on_synthetic():

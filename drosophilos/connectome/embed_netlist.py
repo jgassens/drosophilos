@@ -10,8 +10,8 @@ dropped.
 1. Motifs are read off the netlist's structure: latches (mutual excitatory pairs), relays
    (an excitatory relay plus the inhibitory interneuron(s) that share its source and hold it
    down), delay chains (maximal paths of in-degree-one excitatory neurons), hubs (neurons
-   with more than `hub_deg` designed partners; their many edges are soft: scored, not
-   enforced, since no single real neuron carries them) and singles.
+   whose out-degree or in-degree exceeds `hub_deg` in that direction; their many edges are
+   soft: scored, not enforced, since no single real neuron carries them) and singles.
 2. Every designed neuron gets two candidate sets of real neurons. The loose layer: the right
    transmitter, enough strong partners, and membership in a real instance of its own motif
    (a mutual pair, a relay with an inhibitor, a walk long enough for its chain). The strict
@@ -57,10 +57,11 @@ from .mcns import MCNS
 class Placement:
     mapping: dict  # designed neuron -> real neuron
     unplaced: list
-    carried: int  # designed edges carried by an anatomical edge
-    missing: list  # (src, dst, quanta, reason)
+    carried: int  # distinct designed (src, dst) pairs carried by an anatomical edge
+    missing: list  # (src, dst, quanta, reason) per distinct missing pair
     parasitic: int  # anatomical edges among the placed neurons that are not designed (to zero)
     seconds: float
+    edges: int = 0  # distinct designed (src, dst) pairs (duplicate netlist synapses on the same pair merged)
     order_note: str = ""
     by_role: dict = field(default_factory=dict)
     motifs: dict = field(default_factory=dict)  # kind -> {"complete": n, "partial": n, "unplaced": n} by what is carried
@@ -69,8 +70,9 @@ class Placement:
     strategy: str = ""
 
     def summary(self, net: Netlist) -> dict:
-        return {"neurons": net.n, "placed": len(self.mapping), "unplaced": len(self.unplaced), "edges": net.nnz,
-                "carried": self.carried, "missing": len(self.missing), "carried_fraction": round(self.carried / max(1, net.nnz), 4),
+        return {"neurons": net.n, "placed": len(self.mapping), "unplaced": len(self.unplaced),
+                "edges": self.edges, "synapses": net.nnz,
+                "carried": self.carried, "missing": len(self.missing), "carried_fraction": round(self.carried / max(1, self.edges), 4),
                 "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy}
 
 
@@ -336,11 +338,11 @@ class _Search:
     KILL = 2.0  # penalty for a candidate that empties an unplaced neighbour's domain
 
     def __init__(self, D: _Design, A: _Anatomy, rng: np.random.Generator, hub_first: bool, cand_cap: int,
-                 chain_budget: int, max_backtracks: int, backtrack_depth: int, deadline: float, verbose: bool,
+                 chain_budget: int, max_backtracks: int, backtrack_depth: int, deadline: float,
                  mac_max: int = 0, order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0):
         self.D, self.A, self.rng = D, A, rng
         self.hub_first, self.cand_cap, self.chain_budget = hub_first, cand_cap, chain_budget
-        self.max_bt, self.bt_depth, self.deadline, self.verbose = max_backtracks, backtrack_depth, deadline, verbose
+        self.max_bt, self.bt_depth, self.deadline = max_backtracks, backtrack_depth, deadline
         self.mac_max = mac_max
         self.reserve_max = 48  # chain paths keep out of neighbour domains this small
         self.order, self.reject_kills, self.soft_w = order, reject_kills, soft_w
@@ -735,12 +737,18 @@ class _Search:
         per_start = max(1, self.cand_cap // max(1, len(starts)))
         best_partial: list[int] = []
         total = 0
+        total_steps = 0
+        total_step_budget = 8 * self.chain_budget  # a hard cap across all starts, on top of each start's own budget
+        steps_since_check = 0
+        expired = False
         for s0 in starts:
+            if expired or total_steps >= total_step_budget:
+                break
             budget = self.chain_budget
             path: list[int] = []
             stack = [iter([s0])]
             found = 0
-            while stack and budget > 0:
+            while stack and budget > 0 and total_steps < total_step_budget:
                 nxt = next(stack[-1], None)
                 if nxt is None:
                     stack.pop()
@@ -748,6 +756,13 @@ class _Search:
                         self.onpath[path.pop()] = False
                     continue
                 budget -= 1
+                total_steps += 1
+                steps_since_check += 1
+                if steps_since_check >= 500:
+                    steps_since_check = 0
+                    if time.time() > self.deadline:
+                        expired = True
+                        break
                 path.append(nxt)
                 self.onpath[nxt] = True
                 if len(path) > len(best_partial):
@@ -764,7 +779,7 @@ class _Search:
                 stack.append(iter(options(len(path), nxt).tolist()))
             for x in path:
                 self.onpath[x] = False
-            if total >= self.cand_cap:
+            if total >= self.cand_cap or expired:
                 break
         if want_partial and 2 <= len(best_partial) < L:
             yield {nodes[i]: best_partial[i] for i in range(len(best_partial))}
@@ -1061,30 +1076,42 @@ class _Search:
 # ----------------------------------------------------------------------------------------
 # audit
 # ----------------------------------------------------------------------------------------
-def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: float, outcome: dict, strategy: str) -> Placement:
+def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: float, outcome: dict, strategy: str,
+          policy: Policy) -> Placement:
+    """A designed neuron can hold the same (src, dst) synapse twice (the netlist does not merge
+    duplicates); a real anatomical edge carries both at once, so the audit works on distinct
+    pairs with their quanta summed (the neuron's actual input to that anatomical edge), not on
+    raw netlist rows -- else one anatomical edge is counted as two carried designed edges and
+    the parasitic count is under-counted by the same amount."""
     mapping = {int(d): int(r) for d, r in enumerate(real) if r >= 0}
     unplaced = [int(d) for d in range(D.n) if real[d] < 0]
-    carried, missing = 0, []
     roles = net.roles
-    missing_by_class: dict = {}
+    pairs: dict[tuple[int, int], int] = {}
     for e in range(len(D.src)):
-        s, d = int(D.src[e]), int(D.dst[e])
+        key = (int(D.src[e]), int(D.dst[e]))
+        pairs[key] = pairs.get(key, 0) + int(D.q[e])
+    carried, missing = 0, []
+    missing_by_class: dict = {}
+    for (s, d), q in pairs.items():
         cls = (role_key(roles[s]), role_key(roles[d]))
         missing_by_class.setdefault(cls, [0, 0])[1] += 1
+        esign = 1 if q > 0 else -1
         if real[s] < 0 or real[d] < 0:
             reason = "endpoint unplaced"
-        elif D.impossible[e]:
+        elif esign != D.sign[s]:
             reason = "wrong sign (mixed-sign designed neuron)"
-        elif A.count(int(real[s]), int(real[d])) >= D.req[e]:
+        elif not (A.exc[real[s]] if D.sign[s] == 1 else A.inh[real[s]]):
+            reason = "sign"  # the chosen host neuron's own transmitter does not match the designed sign
+        elif A.count(int(real[s]), int(real[d])) >= policy.req_count(q):
             carried += 1
             continue
         else:
             reason = "no anatomical edge strong enough"
-        missing.append((s, d, int(D.q[e]), reason))
+        missing.append((s, d, q, reason))
         missing_by_class[cls][0] += 1
     placed = np.array(sorted(mapping.values()), dtype=np.int64)
     parasitic = int(A.C[placed][:, placed].nnz - carried) if placed.size else 0
-    pl = Placement(mapping, unplaced, carried, missing, parasitic, seconds, strategy=strategy)
+    pl = Placement(mapping, unplaced, carried, missing, parasitic, seconds, edges=len(pairs), strategy=strategy)
     by_role: dict = {}
     for d in range(D.n):
         key = role_key(roles[d])
@@ -1122,12 +1149,18 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
 def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: bool = False, time_limit_s: float = 600.0,
                   hub_deg: int = 20, restarts: int = 8, cand_cap: int = 48, chain_budget: int = 20_000,
                   max_backtracks: int = 8, backtrack_depth: int = 3, repair_rounds: int = 6, seed: int = 0,
-                  strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=()) -> Placement:
+                  strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=(),
+                  order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0) -> Placement:
     """Motif-level placement with backtracking and forward checking (module docstring), then
     a large-neighbourhood repair. Runs up to `restarts` descents, cycling `strategies`, within
     `time_limit_s`; returns the placement that carries the most designed edges.
     `hard_hubs`: roles (or ids) of hubs whose many edges are enforced rather than scored (a
-    hub-anchored search: its targets are pulled into the hub's neighbourhood)."""
+    hub-anchored search: its targets are pulled into the hub's neighbourhood).
+    `order`: variable ordering ("mrv" most-constrained-first, or "connected": most placed hard
+    neighbours first). `reject_kills`: reject a candidate that empties an unplaced neighbour's
+    domain when another exists. `soft_w`: weight of a satisfied soft (hub) edge in scoring.
+    `mac_max`: propagate arc consistency from any domain that shrinks to at most this many
+    candidates (0: forward checking only, no propagation)."""
     t0 = time.time()
     A = _Anatomy(m, policy)
     D = _Design(net, policy, hub_deg, hard_hubs)
@@ -1147,13 +1180,14 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
         rng = np.random.default_rng(seed + k)
         run_deadline = min(deadline, time.time() + per_run) if k < restarts - 1 else deadline
         S = _Search(D, A, rng, hub_first=(strategy == "hub_first"), cand_cap=cand_cap, chain_budget=chain_budget,
-                    max_backtracks=max_backtracks, backtrack_depth=backtrack_depth, deadline=run_deadline, verbose=verbose)
+                    max_backtracks=max_backtracks, backtrack_depth=backtrack_depth, deadline=run_deadline,
+                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w)
         t1 = time.time()
         S.run()
         S.relaxed()
-        before = audit(net, D, A, S.real, 0.0, S.outcome, "").carried
+        before = audit(net, D, A, S.real, 0.0, S.outcome, "", policy).carried
         gained = S.improve(rounds=repair_rounds)
-        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}")
+        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy)
         pl.order_note = f"backtracks {S.backtracks}; {before} carried before repair, +{gained} repaired; descent {time.time() - t1:.1f} s"
         if verbose:
             print(f"[place] restart {k} ({strategy}): carried {before} -> {pl.carried}/{net.nnz} placed {len(pl.mapping)}/{net.n} "
@@ -1317,4 +1351,4 @@ def place_netlist_greedy(net: Netlist, m: MCNS, policy: Policy = Policy(), verbo
     real = np.full(n, -1, np.int64)
     for d, r in mapping.items():
         real[d] = r
-    return audit(net, _Design(net, policy, hub_deg=10**9), _Anatomy(m, policy), real, time.time() - t0, {}, "greedy")
+    return audit(net, _Design(net, policy, hub_deg=10**9), _Anatomy(m, policy), real, time.time() - t0, {}, "greedy", policy)
