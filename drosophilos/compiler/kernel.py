@@ -139,6 +139,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     env.update(seeds or {})
     xaddr = [None]  # what __x holds: ("const", k) or (base_value, index source)
     input_var = [None]  # the variable an in_read() inside the body assigns (the token)
+    stored_in_body: set = set()  # arrays this body stores into (a later load of them has no ordering edge)
+    allow_counter = [False]  # the counter's own update (i = i - 1) may read it; it is dead in the kernel
     n_cells = [0]
     written = set()
     # variables read before they are written, and written somewhere in the body: state
@@ -188,6 +190,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     def src_in(env_, v):
         """The source for variable v in the environment of the arm being compiled (an if-arm's
         temporaries live in its own copy of the environment: review-found closure bug)."""
+        if v == stream and input_var[0] is not None and env_.get(v) == stream_key and not allow_counter[0]:
+            raise NotAKernel(f"the loop counter {v} is not available in a body that reads its token with in_read()")
         if v in env_:
             return env_[v]
         if v not in prog.variables:
@@ -250,8 +254,11 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     if name is None:
                         raise NotAKernel(f"STOREX to base {base}, not an array")
                 base, length = arrs[name]
+                if any(c["op"] == "STORE" and c.get("mem") == name for c in spec.cells):
+                    raise NotAKernel(f"two stores into {name}: their write ports would share the words' COPY latches (v0: one STORE cell per array)")
                 spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
                 spec.rams.add(name)
+                stored_in_body.add(name)
                 data = src_in(env, ins.srcs[0])
                 spec.outputs.append(cell("STORE", a, data, mem=name))  # the host sees every write land (pacing)
                 continue
@@ -302,11 +309,15 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     if t_ is None or e_ is None:
                         if v.startswith("__t"):
                             continue  # an arm's temporary: dead after the arm
-                        raise NotAKernel(f"{v} is defined on one arm only")
+                        if v in params:  # first read inside one arm: the other arm has the parameter's value
+                            t_ = t_ if t_ is not None else const(params[v])
+                            e_ = e_ if e_ is not None else const(params[v])
+                        else:
+                            raise NotAKernel(f"{v} is defined on one arm only")
                     if is_const(cond):  # decided at compile time
                         env[v] = t_ if (cval(cond) != 0) == taken_nonzero else e_
                         continue
-                    if not isinstance(cond, str) or cond == "input":
+                    if not isinstance(cond, str) or cond.startswith("input"):
                         cond_cell = cell("MOV", cond, cond)  # the condition needs a cell with a Z flag
                         cond = cond_cell
                     a_, b_ = (t_, e_) if taken_nonzero else (e_, t_)
@@ -331,8 +342,10 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 env[ins.dst] = cell(op, a, imm=ins.imm)
                 written.add(ins.dst)
             elif op in IR_OPS:
+                allow_counter[0] = ins.dst == stream
                 a = src_in(env, ins.srcs[0])
                 b = const(ins.imm) if ins.imm is not None else src_in(env, ins.srcs[1])
+                allow_counter[0] = False
                 if ins.dst == "__x":  # an address: base + index
                     if op != "ADD":
                         raise NotAKernel("only base + index addressing")
@@ -367,6 +380,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     if name is None:
                         raise NotAKernel(f"LOADX from base {base}, not an array")
                 base, length = arrs[name]
+                if name in stored_in_body:
+                    raise NotAKernel(f"{name} is read after a store to it in the same body: no ordering edge between a STORE cell and a LOAD cell (v0: read it in a later pass)")
                 if name in written_arrays(prog):
                     spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
                     spec.rams.add(name)
@@ -408,7 +423,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         for c in spec.cells:
             if c["name"] == final:
                 c["init"] = state[v]
-    if not spec.outputs and not (allow_no_output and spec.state_cells):
+    if not spec.outputs and not allow_no_output:  # an outer body may be a bare counter: its stream only paces
         raise NotAKernel("the body emits nothing")
     spec.out_cell = spec.outputs[-1] if spec.outputs else None
     # a cell whose every cell source is a feedback edge (built at or after it) has nothing in
@@ -482,6 +497,11 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main")
             spec.outputs.append(cname)
     seeds = {v: ("param", cname) for v, cname in spec.state_cells.items()}
     spec.streams, spec.stream_keys = ["input", ovar], {"input": "input", ovar: okey}
+    outer_state = set(spec.state_cells) | set(params or {})
+    for _, ib, ivar, _, _ in inners:
+        for ins in ib:
+            if isinstance(ins, Instr) and ins.dst in outer_state and ins.dst != ivar:
+                raise NotAKernel(f"the inner loop writes {ins.dst}, a variable the outer loop carries: the two kernels would each hold a copy (v0)")
     for idx, (_, ib, ivar, _, _) in enumerate(inners):
         key = "input" if idx == 0 else f"input:{ivar}"
         spec = compile_kernel(prog, ib, ivar, params=params, prefix=(f"c{idx}_" if idx else "c"), stream_key=key, seeds=seeds, into=spec)

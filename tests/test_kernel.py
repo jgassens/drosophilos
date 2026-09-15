@@ -381,3 +381,26 @@ def test_neural_two_pass_renderer_with_a_ram_buffer():
     assert got == interpret(prog, pix + pix)["outs"], (st["outputs_by_cell"], st)
     assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
     print("two-pass renderer", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
+
+
+def test_compiler_rejects_what_the_kernels_cannot_carry():
+    """Review round three: programs that would compile to something other than the interpreter's
+    meaning are refused with a reason, and two that were wrongly refused compile."""
+    from drosophilos.compiler.kernel import compile_program
+    rejected = {
+        "counter read beside in_read": "static u8 i, x; int main(void) { i = 3; while (i != 0) { x = in_read(); out_pixel(x + i); i = i - 1; } return 0; }",
+        "store then load of one array": "static u8 a[4]; static u8 i, x; int main(void) { i = 3; while (i != 0) { a[i] = i; x = a[i]; out_pixel(x); i = i - 1; } return 0; }",
+        "two stores into one array": "static u8 a[4]; static u8 i; int main(void) { i = 3; while (i != 0) { a[i] = i; a[0] = i; i = i - 1; } return 0; }",
+    }
+    for name, src in rejected.items():
+        prog = compile_c(src)
+        with pytest.raises(NotAKernel):
+            compile_kernel(prog, loop_body(prog), "i")
+    with pytest.raises(NotAKernel):  # an inner loop writing a variable the outer loop carries
+        compile_program(compile_c("static u8 f, i, h; int main(void) { h = 1; f = 2; while (f != 0) { i = 2; while (i != 0) { h = h + 1; out_pixel(h); i = i - 1; } h = h + 1; f = f - 1; } return 0; }"), params={"h": 1})
+    prog = compile_c("static u8 i, x, k; int main(void) { i = 2; while (i != 0) { x = in_read(); if (x != 0) { x = x + k; } out_pixel(x); i = i - 1; } return 0; }")
+    ks = compile_kernel(prog, loop_body(prog), "i", params={"k": 5})  # a parameter first read inside one arm
+    assert [c["op"] for c in ks.cells] == ["ADD", "MOV", "SEL"]  # the token as a condition gets a MOV cell for its Z flag
+    prog = compile_c("static u8 c, x, f, p; int main(void) { f = 1; while (f != 0) { p = 2; while (p != 0) { x = in_read(); if (x != 0) { c = 1; } else { c = 2; } out_pixel(c); p = p - 1; } f = f - 1; } return 0; }")
+    ks = compile_program(prog)  # an if on a second stream's token
+    assert "SEL" in [c["op"] for c in ks.cells]

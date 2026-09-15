@@ -13,7 +13,7 @@ static u16 shade[5] = {7, 3, 4, 4, 5};
 static u16 colmap[160] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19, 19};
 static u16 hbuf[160];
 static u16 dbuf[160];
-static u16 px, py, heading, in, turn, fwd, f, col, ang, dx, dy, x, y, cell, found, dist, h;
+static u16 px, py, heading, in, turn, fwd, f, col, ang, dx, dy, x, y, cell, found, dist, h, nx, ny;
 static u16 t, prow, pcol, top, bot, a, b, c, d, p;
 
 int main(void) {
@@ -62,8 +62,11 @@ int main(void) {
         turn = in & 63;
         heading = (heading + turn) & 63;
         fwd = (in >> 8) & 3;
-        if (fwd == 1) { px = px + cost[heading]; py = py + sint[heading]; }
-        if (fwd == 2) { px = px - cost[heading]; py = py - sint[heading]; }
+        nx = px; ny = py;
+        if (fwd == 1) { nx = px + cost[heading]; ny = py + sint[heading]; }
+        if (fwd == 2) { nx = px - cost[heading]; ny = py - sint[heading]; }
+        cell = grid[((ny >> 4) << 4) | (nx >> 4)];   /* collision: a wall cell stops the move (Doom's p_map) */
+        if (cell == 0) { px = nx; py = ny; }
         f = f - 1;
     }
     return 0;

@@ -367,8 +367,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 G.veto(f"{name}.b{i}r1.g", act_d, [B_rails[i][0].u], Bt[i][1])
             a_bits = max(1, (mem.n_words - 1).bit_length())
             trig = add_delay_chain(net, drive, f"{name}.wtrig", act_d, 6)  # ~32 ms after the tokens: the port's vetoes are set up
+            high = [At[j][1].u for j in range(a_bits, n)]  # an address beyond the buffer selects no word (fail-stop, as the oracle raises)
             wp = add_write_port(net, drive, f"{name}.wr", mem, trig, [[At[j][0].u, At[j][1].u] for j in range(a_bits)],
-                                [[Bt[i][0].u, Bt[i][1].u] for i in range(n)])
+                                [[Bt[i][0].u, Bt[i][1].u] for i in range(n)], extra_vetoes=high)
             for l in wp.domain_latches:  # the port's COPY latches clear with the cell's stage
                 for x in l.members:
                     net.synapse(Sc.reset_inh, x, -int(round(0.75 * drive.loop)))
@@ -388,7 +389,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
             a_bits = max(1, (mem.n_words - 1).bit_length())
             add_read_port(net, drive, f"{name}.rd", mem, act_d, [[A_rails[j][0].u, A_rails[j][1].u] for j in range(a_bits)],
-                          [[l for l in pair] for pair in Bt])
+                          [[l for l in pair] for pair in Bt], extra_vetoes=[A_rails[j][1].u for j in range(a_bits, n)])
             U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
@@ -407,8 +408,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     if contents and all(((v >> i) & 1) == ((next(iter(contents.values())) >> i) & 1) for v in contents.values())}
             for i, r in same.items():
                 add_veto_relay(net, drive, f"{name}.rom.b{i}", act_d, [], Bt[i][r])
+            high = [A_rails[j][1].u for j in range(len(addr_taps), n)]  # an address beyond the table matches no word
             for w, value in contents.items():  # an unwritten address reads nothing: the cell stalls (fail-stop)
-                vn = add_veto_neuron(net, drive, f"{name}.rom.w{w}.notw", address_vetoes(addr_taps, w))
+                vn = add_veto_neuron(net, drive, f"{name}.rom.w{w}.notw", address_vetoes(addr_taps, w) + high)
                 for i in range(n):
                     if i in same:
                         continue
@@ -739,6 +741,10 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     loads = [[] for _ in range(B)]
     k = [0] * B
     pending = []  # (step, node, cell)
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
+    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
+    fault_ids = np.array(sorted(fault_n | timeout_n), dtype=np.int64)
+    seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
     want = expect_outputs or [len(sc) for sc in scheds]
     done_nodes = [False] * B
     while sim.step_index < int(max_ms / params.dt):
@@ -762,6 +768,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             stp, b, cell = pending.pop(0)
             v, status = decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window, node=b)
             outs[b][cell.name].append((stp, v if status == "valid" else None))
+            bad += status != "valid"
         for b in range(B):
             if not done_nodes[b] and k[b] >= len(scheds[b]) and sum(len(v) for v in outs[b].values()) >= want[b]:
                 done_nodes[b] = True
@@ -770,6 +777,9 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
             continue
         nr, nd = sim._spk_neuron[-1], sim._spk_node[-1]
+        mf = np.isin(nr, fault_ids)
+        for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
+            (seen_t if u in timeout_n else seen_f).add((b, u))
         m = np.isin(nr, watch_ids)
         for u, b in zip(nr[m].tolist(), nd[m].tolist()):
             kind, what = watch[u]
@@ -782,5 +792,6 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     pending.append((s_, b, what))
                 last_wm[b][what.name] = s_
     stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
-             "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt}
+             "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
+             "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad}
     return outs, sim, stats
