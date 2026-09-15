@@ -461,11 +461,14 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
             prev = h
         cancel = net.neuron("TIMER.cancel_inh")
         if port_in_word is not None:
-            # Arrival completion must not cancel: a late ACK may be queued behind a timeout,
-            # and its held word is not a receive credit yet. Cancellation starts only after
-            # the handler's CLR has reset the input word and its READY pulse proves that the
-            # word was consumed. Turn READY into four pulses so the active timer hop cannot
-            # slip between one cancellation pulse and the next.
+            # Any evidence of an ACK cancels the timer, twice over. (1) The arrival's completion
+            # train: the ACK is here, the send was not lost (without this the clean link
+            # retried once — the handler consumes the word seconds after the timer expires).
+            # (2) The word's READY after the handler's CLR: a second ACK (to a retransmission)
+            # that lands while the first is still held never completes, so consuming the first
+            # must cancel the retransmission's timer too. READY becomes four pulses so the
+            # active timer hop cannot slip between one cancellation pulse and the next.
+            net.synapse(dmem.words[port_in_word].completion.u, cancel, drive.pulse)
             cancel_src = dmem.words[port_in_word].ready
             net.synapse(cancel_src, cancel, drive.pulse)
             for k in range(1, 4):
