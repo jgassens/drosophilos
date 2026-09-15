@@ -98,3 +98,27 @@ inside the substrate, and every pixel of it is a spike-decoded word.
    CPU reference simulator is for correctness.
 5. The exact channel (Stage C) and TMR/commit log (Stage D/F) stay on the path unchanged;
    they cost latency, not the frame budget.
+
+## 5. Profile 2: can a kernel live in the fly's own wiring? (measured 2026-09-15)
+
+Everything above runs under Profile 3 (free synthesis, connectome-inspired). Stage H0 showed
+a 15-neuron circuit running in real MCNS neuron IDs under Profile 2 (anatomical edges only,
+weights scaled at most k_max = 4 above the synapse count, parasitic edges zeroed, a silent
+surround). What a kernel would need, against what the connectome offers:
+
+| the four-cell render kernel needs | MCNS v1.0 offers, by the weight scale allowed |
+|---|---|
+| 10,736 neurons; 19,404 edges (13,259 excitatory, 6,145 inhibitory); Dale's law holds but for 5 neurons; out-degree mean 1.8, max 455 (the reset and ACT^d hubs) | 166,700 neurons; 25.6 M edges with ≥ 1 synapse |
+| ~5,300 latches = reciprocal cholinergic pairs with ≥ 57 synapses each way (k_max 4) | 1,223 such pairs (k_max 4); 4,040 at ≥ 30 synapses (×1.9); **12,315 at ≥ 15 (×3.8)**; 36,330 at ≥ 8 |
+| 13,300 excitatory edges of a median 57 synapses (k_max 4) | 99,501 at ≥ 57; 987,070 at ≥ 15 |
+| 6,100 inhibitory edges | 75,486 at ≥ 57; 576,457 at ≥ 15 |
+
+So: a 4-bit ordered adder (~300 latches) fits the H0 weight policy in count; a whole cell
+(~1,300 latches) needs about ×2 the scale; a four-cell kernel needs weights scaled ~4× above
+the anatomical count (k_max ≈ 15), or a Profile 3 supplement of added latch edges. Counts
+are necessary, not sufficient: each latch's two members must also be adjacent, with the
+right signs and strengths, to their relay, veto and reset neurons, and the hubs (a reset
+interneuron driving 455 latch members) have no anatomical counterpart — the placement search
+must split them into trees of inhibitory neurons, the relay overhead H0 measured as zero for
+its 15 neurons. That search, netlist-driven rather than hand-designed as H0's was, is the
+first task of Stage H; its target is the 4-bit adder, then one cell.

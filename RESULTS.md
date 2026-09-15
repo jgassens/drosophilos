@@ -822,6 +822,13 @@ heading, replicated in every copy; 80 × 50 pixels, 128 copies): 12,000 pixels, 
 The same program at 8 × 5 on four CPU copies: correct, 2 h 43 min of wall time for 139 s of
 neural time — the simulator, not the substrate, is the clock.
 
+How far this is from the fly's own wiring (Profile 2): the render kernel needs ~5,300 latch
+pairs; MCNS has 1,223 reciprocal cholinergic pairs strong enough at the H0 weight policy and
+12,315 at four times that scale (`docs/capacity_doom.md` §5). A 4-bit adder fits the H0
+policy in count; a kernel needs a larger weight scale or added edges, and a netlist-driven
+placement search that does not exist yet. That is Stage H, and every result here carries the
+label *Profile 3*.
+
 What this is: the plan's Stage E1 shape (exact integer rendering, pixel records streamed,
 assets compiled into ROM relays) and Stage D shape (a world-update kernel driving it) on
 the batched simulator that stands in for a cluster of brains, under the hybrid control
