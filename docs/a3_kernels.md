@@ -290,6 +290,25 @@ programs the compiler accepted and compiled to something other than their meanin
 | The batched runner reported no faults, timeouts or bad outputs | It counts them per node |
 | An outer loop that is only a counter was refused | Allowed: its stream only paces |
 
+### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
+
+`doom2.c` textures the walls: the column pass also stores the hit position's texture column
+(`ubuf[col] = ((hx >> 1) + (hy >> 1)) & 7`), and the pixel pass reads the texture row by a
+reciprocal table and a multiply (`v = ((prow - top) * recip2[h]) >> 8`) from an 8 × 8 brick
+texture with a bright and a dark bank (beyond two cells). `doom3.c` adds one *thing* in Doom's
+sense, a billboard sprite at a fixed level position: the tick kernel projects it into camera
+space once per frame with the trig tables (depth and side offset, then the screen column,
+half-width and height by the reciprocal table), a fourth kernel — a sprite pass over the 160
+columns — compares the sprite's depth with the column's wall distance (`dbuf`, stored by the
+column pass, read here in a later pass as the compiler requires) and stores the sprite height
+and texture column per column (`sbuf`, `stex`), and the pixel pass overlays a non-transparent
+sprite texel over the wall or floor. The thing's projection for the first frame is set in the
+prologue as state. Four kernels: tick 60 cells, column 67, sprite 18, pixel 52; 1,308,973
+neurons per copy at 16 bits (the tick's multiplies are most of it). Validated by the kernel
+oracle against the interpreter and the C golden build on two 160 × 100 frames
+(`tests/test_doom3.py`, `docs/img/doom3_0_reference.png`: the sprite half hidden behind the
+near wall; `_1_`: the view turned); not yet run neurally (an H200 job at 40 × 25 is next).
+
 ## 11. Neural pacing: the phase order moves into the substrate (Stage F2, first step)
 
 Until now the host kept the frame's phase order — a frame's columns, then its pixels, then

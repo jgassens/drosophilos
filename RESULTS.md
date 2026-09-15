@@ -836,7 +836,18 @@ Of the edges between motifs (latch pairs, relays with their inhibitors, delay ch
 79 % are carried. What the wiring lacks is specific: the three broadcast neurons (reset and
 watchdog-cancel, 258 edges, 7 carried — no inhibitory neuron in MCNS reaches 115 targets at
 the required strength), one relay fan-out node, and about 30 relay-inhibitor edges. The
-placed circuit has not been simulated yet.
+placed circuit was then simulated (`connectome/embed_image.py`): with the 442 missing edges
+added as labelled Profile 3 edges and the 17,845 parasitic anatomical edges among the hosts
+zeroed, the adder on real fly neurons computes all 50 additions with the netlist's own
+timing; with only the carried 61 % it computes none (the channel stalls before its ACCEPT);
+with the parasitic edges kept at anatomical weight it computes none either (they light the
+output rails within 15 ms). The 191 missing logic edges are what a first sum needs; the 251
+broadcast (reset) edges are what the second needs. That is the exact size of the gap between
+the fly's wiring and a working adder under the H0 weight rules.
+
+Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
+occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy),
+validated by the kernel oracle at 160 × 100 (`docs/img/doom3_0_reference.png`).
 
 **Stage F2, first step (later the same day):** the frame's phase order — columns, then pixels,
 then the tick — is now enforced inside the substrate by phase gates on the input registers
