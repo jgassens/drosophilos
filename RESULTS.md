@@ -851,6 +851,13 @@ How it is known to have worked, with nothing taken on trust from the machine:
   `examples/render2.c` (distance from the map, reciprocal table, multiply, shift) renders
   eight column heights correctly as a six-cell kernel of 47,775 neurons at 6.6 s per column;
   the array multiplier is the bottleneck (`docs/a3_kernels.md` §5.1).
+- **Game loop and render loop together**: `compile_program` splits a two-level loop nest into
+  a tick kernel and a column kernel with their own token streams; the columns read the tick's
+  state (the heading) as a parameter edge, and the host paces the frames (columns, then the
+  tick once the pixels are out, then the next frame once the state has landed: the plan's
+  hybrid control plane, labelled). `examples/render.c` runs neurally as two frames of eight
+  columns with the heading advancing between them, every pixel and frame record equal to
+  the interpreter's, on 16,601 neurons at 14.6 s per frame (`docs/a3_kernels.md` §7).
 - **Second review** (Kimi stalled; the `claude-fable` fallback reviewed `26fa035`): the empty
   status word found independently; the refusal window after completion corrected to ~25 ms;
   a commit watchdog added (a hung COMMIT is now a counted timeout); the written/cleared pulses

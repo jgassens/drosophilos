@@ -185,3 +185,50 @@ def test_two_streams_with_a_parameter_edge_host_paced():
     assert [v for _, v in outs] == expect, (outs, st)
     assert st["faults"] == 0 and st["timeouts"] == 0
     print("two streams", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+def frame_schedule(spec, frames: int, columns: int) -> list:
+    """The host schedule for a two-loop renderer: a frame's columns, then the tick; each token
+    waits for every output the earlier tokens owe (columns behind the tick's committed state,
+    the tick behind the frame's pixels)."""
+    n_tick_outs = sum(1 for c in spec.cells if c["name"] in spec.outputs and c.get("stream") != "input")
+    sched, owed = [], 0
+    for f in range(frames):
+        for c in range(columns):  # the frame's columns wait only for the previous tick's outputs, not for each other
+            sched.append(("input", c, owed))
+        owed += columns
+        sched.append((spec.streams[1], f, owed))
+        owed += n_tick_outs
+    return sched
+
+
+def test_two_loop_renderer_compiles_to_two_kernels_and_matches_the_interpreter():
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(RENDER)
+    ks = compile_program(prog, params={"heading": 3})
+    assert ks.streams == ["input", "frame"] and ks.state_cells == {"heading": "f1_add"}
+    assert [c["op"] for c in ks.cells if c["stream"] == "input"] == ["ADD", "AND", "LOAD", "LOAD"]
+    assert ks.cells[2]["b"] == ("param", "f1_add")  # the columns read the heading as a parameter
+    ko = kernel_outputs(ks, [(s, v) for s, v, _ in frame_schedule(ks, 2, 8)])
+    pixels_and_records = [v for outs in ko for v in outs[:1]]  # a column's pixel, a tick's frame record
+    assert pixels_and_records == interpret(prog, [3])["outs"]
+
+
+@pytest.mark.slow
+def test_neural_two_loop_renderer_two_frames():
+    """Two kernels, two token streams, the host pacing frames: sixteen pixels and two frame
+    records equal the interpreter's, with the heading advanced by the tick between frames."""
+    from drosophilos.compiler.kernel import compile_program
+    prog = compile_c(RENDER)
+    ks = compile_program(prog, params={"heading": 3})
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams)
+    sched = frame_schedule(ks, 2, 8)
+    n_tick_outs = sum(1 for c in ks.cells if c["name"] in ks.outputs and c["stream"] != "input")
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=120000, expect_outputs=16 + 2 * n_tick_outs)
+    by = st["outputs_by_cell"]
+    pixels = [v for _, v in by["c3_load"]]
+    records = [v for _, v in by["f0_mov"]]
+    ir = interpret(prog, [3])["outs"]
+    assert pixels == [x for k, x in enumerate(ir) if k % 9 != 8] and records == [0, 1], (by, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0
+    print("two-loop renderer", {k: v for k, v in st.items() if k != "outputs_by_cell"})

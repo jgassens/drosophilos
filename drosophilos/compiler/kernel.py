@@ -90,7 +90,8 @@ def loop_body(prog: Program, fn: str = "main", label: str | None = None) -> list
 
 
 def compile_kernel(prog: Program, body: list, stream: str, params: dict | None = None, mems: dict | None = None,
-                   state: dict | None = None) -> KernelSpec:
+                   state: dict | None = None, *, prefix: str = "c", stream_key: str = "input", seeds: dict | None = None,
+                   into: KernelSpec | None = None) -> KernelSpec:
     """`state`: loop-carried variables and their values at power-up (the prologue's CONSTs by
     default for any variable the body reads before writing and writes). Structured `if` /
     `if-else` inside the body (a JZ/JNZ over a label, an optional JMP to an end label) become
@@ -107,10 +108,13 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         contents.update(mems)
     inits = {ins.dst: ins.imm & mask for ins in prog.functions["main"] if isinstance(ins, Instr) and ins.op == "CONST" and ins.dst}
     state = dict(state or {})
-    spec = KernelSpec([], {}, {}, stream, width)
-    spec.outputs = []
-    spec.state_cells = {}  # variable -> the cell that holds it across tokens
-    env: dict = {stream: "input"}  # variable -> "input" | cell name | ("const", name)
+    spec = into or KernelSpec([], {}, {}, stream, width)
+    if into is None:
+        spec.outputs = []
+        spec.state_cells = {}  # variable -> the cell that holds it across tokens
+    n_before = len(spec.cells)
+    env: dict = {stream: stream_key}  # variable -> "input" | cell name | ("const", name) | ("param", cell)
+    env.update(seeds or {})
     xaddr = [None]  # what __x holds: ("const", k) or (base_value, index source)
     input_var = [None]  # the variable an in_read() inside the body assigns (the token)
     n_cells = [0]
@@ -140,8 +144,9 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 scan_in(prog.functions[ins.target])
     scan_in(body)
     for v in (reads_first & writes) - in_vars:
-        if v in params:
-            raise NotAKernel(f"{v} is a parameter but the body writes it")
+        if v in params and v not in state:  # a value read before the loop and updated by it: state
+            state[v] = params[v] & mask
+            continue
         if v not in state:
             if v not in inits:
                 raise NotAKernel(f"state variable {v} has no initial value: give it in `state`")
@@ -175,9 +180,9 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         return spec.consts[s_[1]]
 
     def cell(op, a, b=None, mem=None, c=None, imm=None):
-        name = f"c{n_cells[0]}_{op.lower()}"
+        name = f"{prefix}{n_cells[0]}_{op.lower()}"
         n_cells[0] += 1
-        d = {"name": name, "op": op, "a": a}
+        d = {"name": name, "op": op, "a": a, "stream": stream_key}
         if b is not None:
             d["b"] = b
         if c is not None:
@@ -210,7 +215,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 if input_var[0] is not None:
                     raise NotAKernel("one in_read() per token")
                 input_var[0] = ins.dst
-                env[ins.dst] = "input"
+                env[ins.dst] = stream_key
                 continue
             if op == "CALL":
                 fbody = prog.functions[ins.target]
@@ -259,7 +264,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     written.add(v)
                 i = j_end
                 continue
-            if ins.dst in params:
+            if ins.dst in params and ins.dst not in state:
                 raise NotAKernel(f"the body writes the parameter {ins.dst}")
             if op == "CONST":
                 if ins.dst == "__x":
@@ -321,7 +326,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 written.add(ins.dst)
             elif op == "OUT":
                 s_ = const(ins.imm) if ins.imm is not None else src(ins.srcs[0])
-                if not (isinstance(s_, str) and s_ != "input" and not s_.startswith("state_")):
+                if not (isinstance(s_, str) and not s_.startswith("input") and not s_.startswith("state_")):
                     s_ = cell("MOV", s_, s_)  # the output must be a cell's master
                 spec.outputs.append(s_)
             else:
@@ -335,7 +340,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         if final == slot or not isinstance(final, str) or final == "input":
             raise NotAKernel(f"state variable {v} is not recomputed by the body")
         spec.state_cells[v] = final
-        for c in spec.cells:
+        for c in spec.cells[n_before:]:
             for k in ("a", "b", "c"):
                 if c.get(k) == slot:
                     c[k] = final
@@ -351,13 +356,64 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     # a cell whose every cell source is a feedback edge (built at or after it) has nothing in
     # this token to request it: the input token paces it
     index = {c["name"]: k for k, c in enumerate(spec.cells)}
-    for k, c in enumerate(spec.cells):
+    for k, c in enumerate(spec.cells[n_before:], start=n_before):
         srcs = [c.get(x) for x in ("a", "b", "c") if isinstance(c.get(x), str)]
-        if srcs and "input" not in srcs and all(index[s_] >= k for s_ in srcs):
-            c["trigger"] = ["input"]
+        if srcs and not any(x.startswith("input") for x in srcs) and all(index[s_] >= k for s_ in srcs):
+            c["trigger"] = [stream_key]
+        elif not srcs and all(isinstance(c.get(x), tuple) for x in ("a", "b", "c") if c.get(x) is not None):
+            c["trigger"] = [stream_key]  # constants and params only: paced by the token
     used = {c[k][1] for c in spec.cells for k in ("a", "b", "c") if is_const(c.get(k))}
     spec.consts = {k: v for k, v in spec.consts.items() if k in used}  # folded bases and the induction step are gone
     return spec
+
+
+def compile_program(prog: Program, params: dict | None = None, fn: str = "main") -> KernelSpec:
+    """A function with a loop nest of depth two (a frame loop around a column loop) as one
+    pipeline with two token streams: the outer loop's body without the inner loop is the
+    outer kernel (stream "input:<outer var>": the tick), the inner loop is the inner kernel
+    (stream "input"). What the inner body reads and the outer body writes is a parameter edge
+    from the outer kernel's state cell; the outer kernel's state carriers are outputs too, so
+    the host can pace the next frame's columns behind the tick (`lib/kernel.run_pipeline`).
+    Values read before the loops (an `in_read()` in the prologue) come from `params`."""
+    body = prog.functions[fn]
+    outer = next((x for x in body if isinstance(x, str) and x.startswith("loop")), None)
+    if outer is None:
+        raise NotAKernel("no loop")
+    ob = loop_body(prog, fn, outer)
+    inner = next((x for x in ob if isinstance(x, str) and x.startswith("loop")), None)
+    if inner is None:
+        return compile_kernel(prog, ob, _induction_var(prog, fn, outer), params=params)
+    ib = loop_body(prog, fn, inner)
+    i0 = ob.index(inner)
+    i1 = i0 + 1 + ob.index(next(x for x in ob[i0:] if isinstance(x, str) and x.startswith("endloop"))) - i0  # past "endloop"
+    ivar, ovar = _induction_var(prog, fn, inner), _induction_var(prog, fn, outer)
+    pre = [x for x in ob[:i0] if not (isinstance(x, Instr) and x.dst == ivar)]  # drop the inner counter's init
+    post = ob[i1:]
+    outer_body = [x for x in pre + post if not isinstance(x, str)]
+    okey = f"input:{ovar}"
+    spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey)
+    # the outer kernel's state carriers are outputs (the host watches them to pace the frames)
+    for v, cname in spec.state_cells.items():
+        if cname not in spec.outputs:
+            spec.outputs.append(cname)
+    seeds = {v: ("param", cname) for v, cname in spec.state_cells.items()}
+    spec = compile_kernel(prog, ib, ivar, params=params, prefix="c", stream_key="input", seeds=seeds, into=spec)
+    spec.streams = ["input", ovar]
+    spec.stream_keys = {"input": "input", ovar: okey}
+    return spec
+
+
+def _induction_var(prog: Program, fn: str, label: str) -> str:
+    """The variable the loop's exit test reads (col in `while (col != 8)`)."""
+    body = prog.functions[fn]
+    k = body.index(label) + 1
+    while k < len(body) and isinstance(body[k], Instr) and body[k].op not in ("JZ", "JNZ"):
+        k += 1
+    test = body[k].srcs[0]
+    for x in body[body.index(label) + 1: k]:  # the test may be a temporary: XOR t col #8
+        if isinstance(x, Instr) and x.dst == test and x.srcs:
+            return x.srcs[0]
+    return test
 
 
 def kernel_reference(spec: KernelSpec, tokens: list[int]) -> list[int]:
@@ -370,19 +426,27 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
     their value across tokens."""
     w, mask = spec.width, (1 << spec.width) - 1
     state = {c["name"]: c["init"] & mask for c in spec.cells if c.get("init") is not None}
+    last = dict(state)  # every cell's last committed value (params read it)
+    keys = getattr(spec, "stream_keys", None) or {"input": "input"}
     outs = []
     for t in tokens:
-        val = {"input": t & mask}
+        stream, t = (t[0], t[1]) if isinstance(t, tuple) else ("input", t)
+        key = keys[stream]
+        val = {key: t & mask}
         prev = dict(state)
 
         def get(s_):
-            if isinstance(s_, tuple):
+            if isinstance(s_, tuple) and s_[0] == "const":
                 return spec.consts[s_[1]]
+            if isinstance(s_, tuple) and s_[0] == "param":
+                return last[s_[1]]
             if s_ in val:
                 return val[s_]
             return prev[s_]  # a feedback read: the previous token's value
 
         for c in spec.cells:
+            if c.get("stream", "input") != key:
+                continue
             if c["op"] == "LOAD":
                 n_words, contents = spec.mems[c["mem"]]
                 addr = get(c["a"]) & (n_words - 1)
@@ -402,7 +466,8 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
                 else:
                     v = IR_OPS[c["op"]](a, b, w).value & mask
             val[c["name"]] = v
+            last[c["name"]] = v
             if c["name"] in state:
                 state[c["name"]] = v
-        outs.append([val[o] for o in (getattr(spec, "outputs", None) or [spec.out_cell])])
+        outs.append([val[o] for o in (getattr(spec, "outputs", None) or [spec.out_cell]) if o in val])
     return outs

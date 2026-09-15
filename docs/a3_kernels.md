@@ -174,7 +174,30 @@ renderer needs a carry-save multiplier (rows that do not ripple; one final rippl
 ordered-gate discipline supports and which is the next arithmetic block to build and
 campaign, and interleaved multiplier cells (k copies taking alternate tokens) for throughput.
 
-## 6. What it is not yet
+## 7. Two loops, two streams: the game loop and the render loop together
+
+`compile_program` takes a loop nest of depth two — a frame loop around a column loop, the
+shape of `examples/render.c` — and emits one pipeline with two token streams: the outer
+body without the inner loop is the tick kernel (stream `input:frame`), the inner loop the
+column kernel (stream `input`). What the columns read and the tick updates (the heading) is a
+**parameter edge**: the column cells read the tick's state master as a level, with no request
+and without holding the tick's commit. That is the one place the dataflow handshake is not
+closed inside the substrate: a parameter's producer must not commit while a reader is in
+flight, and the host keeps that order. The tick kernel's state carriers are outputs, so the
+host can see the state land.
+
+The host schedule is a list of tokens, each with its stream and the number of outputs that
+must be out before it goes in: a frame's eight columns, then the tick once the eight pixels
+are out, then the next frame's columns once the tick's outputs are out. This is the plan's
+hybrid control plane (Python pacing, neural computation), and the benchmark label says so;
+Stage F2 replaces it with a neural readiness signal from the columns' request pairs.
+
+Measured (8 bits, two frames of eight columns): every pixel and both frame records equal the
+interpreter's, with the heading advanced by the tick between the frames; 16,601 neurons (the
+two kernels and two input registers), 14.6 s per frame (eight columns at ~1.2 s and a tick at
+~2 s, plus the host's pacing gaps), no fault, no timeout (`tests/test_kernel.py`).
+
+## 8. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel
   of its own with a stream, and joining two kernels is the next compiler step.

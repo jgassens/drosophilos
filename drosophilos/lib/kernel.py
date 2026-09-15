@@ -464,7 +464,7 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
 
 
 def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 60000, gap_ms: float = 0.0,
-                 sim=None, per_token: int | None = None) -> tuple[list, RefSim, dict]:
+                 sim=None, per_token: int | None = None, expect_outputs: int | None = None) -> tuple[list, RefSim, dict]:
     """Streams `tokens` into the input producers and decodes every completion of each output
     cell's master in order. A token is a value (the first stream), a pair (stream, value), or
     a triple (stream, value, min_outputs): the host schedule; a triple is loaded only once the
@@ -474,8 +474,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     the previous load. Steps the simulator one step at a time and reads the per-step spike
     lists (a trace rebuild per poll is quadratic). Returns the first output's list of (step,
     value); `stats["outputs_by_cell"]` holds every output's list. The run ends when the outputs
-    number `per_token` per token (default: one per token over all output cells... see `want`)
-    or at `max_ms`."""
+    number `expect_outputs` in total (default: `per_token` per token, default one) or at `max_ms`."""
     net, drive = pl.net, pl.drive
     sim = sim or RefSim(net.topology(), params)
     load_pipeline_image(sim, pl)
@@ -498,7 +497,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     last_wm = {u: None for u in comp}
     loads, k = [], 0
     pending = []  # (completion step, output cell)
-    want = per_token * len(sched) if per_token else len(sched)  # total outputs over all cells
+    want = expect_outputs or (per_token * len(sched) if per_token else len(sched))  # total outputs over all cells
     while sim.step_index < int(max_ms / params.dt):
         if k < len(sched):
             st, value, min_outs = sched[k]
@@ -542,7 +541,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 seen_f.add(x); n_fault += 1
             elif x in timeout_n and x not in seen_t:
                 seen_t.add(x); n_timeout += 1
-    stats = {"neurons": net.n, "tokens": len(sched), "outputs": len(first), "outputs_by_cell": outs,
+    stats = {"neurons": net.n, "tokens": len(sched), "outputs": len(first), "outputs_by_cell": outs, "loaded": dict(loaded),
+             "ready": dict(n_ready), "load_steps": loads,
              "faults": n_fault, "timeouts": n_timeout,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
