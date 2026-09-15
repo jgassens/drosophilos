@@ -174,7 +174,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     def cval(s_):
         return spec.consts[s_[1]]
 
-    def cell(op, a, b=None, mem=None, c=None):
+    def cell(op, a, b=None, mem=None, c=None, imm=None):
         name = f"c{n_cells[0]}_{op.lower()}"
         n_cells[0] += 1
         d = {"name": name, "op": op, "a": a}
@@ -184,6 +184,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             d["c"] = c
         if mem is not None:
             d["mem"] = mem
+        if imm is not None:
+            d["imm"] = imm
         spec.cells.append(d)
         return name
 
@@ -266,6 +268,15 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     env[ins.dst] = const(ins.imm)
             elif op == "MOV":
                 env[ins.dst] = src(ins.srcs[0])
+            elif op in ("SHL", "SHR"):
+                a = src(ins.srcs[0])
+                if ins.dst == stream:
+                    continue
+                if is_const(a):
+                    env[ins.dst] = const(IR_OPS[op](cval(a), ins.imm, width).value)
+                    continue
+                env[ins.dst] = cell(op, a, imm=ins.imm)
+                written.add(ins.dst)
             elif op in IR_OPS:
                 a = src(ins.srcs[0])
                 b = const(ins.imm) if ins.imm is not None else src(ins.srcs[1])
@@ -382,6 +393,8 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
                 v = get(c["b"])
             elif c["op"] == "SEL":
                 v = get(c["a"]) if get(c["c"]) != 0 else get(c["b"])
+            elif c["op"] in ("SHL", "SHR"):
+                v = IR_OPS[c["op"]](get(c["a"]), c["imm"], w).value & mask
             else:
                 a, b = get(c["a"]), get(c["b"])
                 if c["op"] in ("ADD", "SUB", "MUL"):

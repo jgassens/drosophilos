@@ -9,6 +9,7 @@ Ops (v0, the subset the neural machine v1 executes; the interpreter executes all
     CONST  dst <- imm
     MOV    dst <- src
     ADD SUB AND OR XOR   dst <- a op b   (WRAP at the variable's width; flags Z/C/V recorded)
+    SHL SHR imm          dst <- a << k / a >> k, logical, by a constant (kernels: wiring)
     JMP target
     JZ  src, target       jump if src == 0
     JNZ src, target
@@ -25,7 +26,8 @@ from dataclasses import dataclass, field
 
 from . import semantics as sem
 
-ALU_OPS = {"ADD": sem.add_wrap, "SUB": sem.sub_wrap, "AND": sem.and_, "OR": sem.or_, "XOR": sem.xor, "MUL": sem.mul_wrap}
+ALU_OPS = {"ADD": sem.add_wrap, "SUB": sem.sub_wrap, "AND": sem.and_, "OR": sem.or_, "XOR": sem.xor, "MUL": sem.mul_wrap,
+           "SHL": sem.shl, "SHR": sem.shr}  # SHL/SHR: by a constant (imm), logical, on the unsigned pattern
 
 
 @dataclass

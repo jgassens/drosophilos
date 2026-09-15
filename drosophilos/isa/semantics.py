@@ -228,6 +228,21 @@ def shru(a: int, n: int, w: int = 32) -> Result:
 
 
 # ---- bitwise ---------------------------------------------------------------------------
+def shl(a: int, k: int, w: int = 32) -> Result:
+    """Logical shift left by a constant 0 <= k < w on the unsigned pattern; bits shifted out are
+    dropped (WRAP). A count >= w is the SHIFT fault."""
+    if not 0 <= k < w:
+        return Result(0, Flags(shift=1))
+    return Result(wrap((a & umax(w)) << k, w), NONE)
+
+
+def shr(a: int, k: int, w: int = 32) -> Result:
+    """Logical shift right by a constant 0 <= k < w on the unsigned pattern (zero fill)."""
+    if not 0 <= k < w:
+        return Result(0, Flags(shift=1))
+    return Result((a & umax(w)) >> k, NONE)
+
+
 def and_(a: int, b: int, w: int = 32) -> Result:
     return Result(wrap((a & umax(w)) & (b & umax(w)), w), NONE)
 

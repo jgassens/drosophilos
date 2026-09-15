@@ -44,6 +44,12 @@ def lower(prog: Program) -> list[tuple]:
                 emit("MOV", ins.imm & ((1 << prog.width) - 1)); emit("STORE", addr(ins.dst))
             elif op == "MOV":
                 emit("LOAD", addr(ins.srcs[0])); emit("STORE", addr(ins.dst))
+            elif op == "SHL":  # the sequencer has no shifter: k doublings through a temporary
+                emit("LOAD", addr(ins.srcs[0])); emit("STORE", addr(ins.dst))
+                for _ in range(ins.imm):
+                    emit("LOAD", addr(ins.dst)); emit("ADDM", addr(ins.dst)); emit("STORE", addr(ins.dst))
+            elif op == "SHR":
+                raise ValueError("SHR is a kernel operation (wiring); the sequencer has no shifter")
             elif op in ("ADD", "SUB", "AND", "OR", "XOR", "MUL"):
                 emit("LOAD", addr(ins.srcs[0]))
                 if ins.imm is not None:

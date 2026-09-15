@@ -46,12 +46,13 @@ from .staged import StagedRegister, add_staged_commit
 @dataclass
 class Cell:
     name: str
-    op: str  # ADD SUB AND OR XOR MOV MUL | LOAD | SEL
+    op: str  # ADD SUB AND OR XOR MOV MUL | LOAD | SEL | SHL SHR (imm)
     a: object  # source: a Cell name, "input", or ("const", name)
     b: object = None  # ALU second operand / SEL's "c == 0" arm; None for LOAD
     c: object = None  # SEL's condition cell (its Z flag)
     mem: tuple | None = None  # for LOAD cells: (n_words, contents) of the ROM
     init: int | None = None  # state cells: the master's value at power-up
+    imm: int | None = None  # SHL/SHR: the shift count
     trigger: tuple = ()  # extra request sources ("input")
     reg: StagedRegister | None = None
     master: Register | None = None
@@ -178,8 +179,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     cells: dict[str, Cell] = {}
     order: list[Cell] = []
     for cs in spec:
-        c = Cell(cs["name"], cs["op"], cs["a"], cs.get("b"), cs.get("c"), mem_objs.get(cs.get("mem")), cs.get("init"),
-                 tuple(cs.get("trigger", ())))
+        c = Cell(cs["name"], cs["op"], cs["a"], b=cs.get("b"), c=cs.get("c"), mem=mem_objs.get(cs.get("mem")), init=cs.get("init"),
+                 trigger=tuple(cs.get("trigger", ())), imm=cs.get("imm"))
         c.stage = add_register(net, drive, f"{c.name}.Q", n + 3, with_completion=True)
         c.act = add_latch(net, drive, f"{c.name}.act")
         c.idle = add_kill_pair(net, drive, f"{c.name}.idle")
@@ -257,6 +258,23 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             for i in range(n):
                 G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
             R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+        elif c.op in ("SHL", "SHR"):  # a shift by a constant is wiring: bit i <- bit i -/+ k, zeros shifted in
+            A_rails = rails_of(c.a)
+            k = c.imm
+            R = []
+            for i in range(n):
+                r0, r1 = G.latch(f"{name}.s{i}r0"), G.latch(f"{name}.s{i}r1")
+                j = i - k if c.op == "SHL" else i + k
+                if 0 <= j < n:
+                    G.veto(f"{name}.s{i}r1.g", act_d, [A_rails[j][0].u], r1)
+                    G.veto(f"{name}.s{i}r0.g", act_d, [A_rails[j][1].u], r0)
+                else:
+                    G.veto(f"{name}.s{i}r0.z", act_d, [], r0)
+                R.append(Rail2(r0, r1))
+            C = Rail2(G.latch(f"{name}.c0"), G.latch(f"{name}.c1"))
+            V = Rail2(G.latch(f"{name}.v0"), G.latch(f"{name}.v1"))
+            G.veto(f"{name}.c0.g", act_d, [], C.r0)
+            G.veto(f"{name}.v0.g", act_d, [], V.r0)
         elif c.op == "SEL":  # c != 0 ? a : b, per bit from the condition's Z rails and the arms' levels
             A_rails, B_rails = rails_of(c.a), rails_of(c.b)
             zr = cells[c.c].master.rails[n + 1]  # [Z0 = c != 0, Z1 = c == 0]
@@ -406,7 +424,7 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
     for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
-        if c.op == "SEL":
+        if c.op in ("SEL", "SHL", "SHR"):
             continue
         unit, _ = ALU_OPS["MOV" if c.op == "LOAD" else c.op]
         for k in range(N_UNITS):

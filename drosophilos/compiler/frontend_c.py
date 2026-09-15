@@ -24,7 +24,7 @@ WIDTHS = {"u8": 8, "u16": 16, "u32": 32, "i8": 8, "i16": 16, "i32": 32}
 PRELUDE = "typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32;\n" \
           "typedef signed char i8; typedef short i16; typedef int i32;\n" \
           "u8 in_read(void); void out_pixel(u8 v);\n"
-BINOPS = {"+": "ADD", "-": "SUB", "&": "AND", "|": "OR", "^": "XOR", "*": "MUL"}
+BINOPS = {"+": "ADD", "-": "SUB", "&": "AND", "|": "OR", "^": "XOR", "*": "MUL", "<<": "SHL", ">>": "SHR"}
 
 
 class Unsupported(Exception):
@@ -261,6 +261,8 @@ class Compiler:
     def _binop(self, op: str, dst: str, a: str, right):
         if isinstance(right, c_ast.Constant):
             self.body.append(Instr(op, dst, srcs=(a,), imm=self._const(right)))
+        elif op in ("SHL", "SHR"):
+            raise Unsupported("shifts are by a constant in v0")
         else:
             b = self._expr(right)
             self.body.append(Instr(op, dst, srcs=(a, b)))

@@ -112,3 +112,30 @@ def test_neural_state_kernel_with_fresh_input_every_tick():
     assert got == [list(col) for col in zip(*kernel_outputs(ks, VELS))], (got, st)
     assert st["faults"] == 0 and st["timeouts"] == 0
     print("state kernel, fresh input", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+SHIFTS = """static u8 x, y, i;
+int main(void) { i = 4; while (i != 0) { x = in_read(); y = (x >> 3) + (x << 2); out_pixel(y); i = i - 1; } return 0; }"""
+
+
+def test_constant_shifts_agree_across_the_references():
+    from drosophilos.compiler.golden import run_golden
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(SHIFTS)
+    ins = [7, 200, 255, 1]
+    ks = compile_kernel(prog, loop_body(prog), "i")
+    assert [c["op"] for c in ks.cells] == ["SHR", "SHL", "ADD"]
+    assert interpret(prog, ins)["outs"] == run_golden(SHIFTS, ins, ["x", "y", "i"], 8)["outs"] == [v for p in kernel_outputs(ks, ins) for v in p]
+
+
+@pytest.mark.slow
+def test_neural_shift_cells_are_wiring():
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(SHIFTS)
+    ins = [7, 200, 255, 1]
+    ks = compile_kernel(prog, loop_body(prog), "i")
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs)
+    outs, sim, st = run_pipeline(pl, PARAMS, ins, max_ms=30000)
+    assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, ins)], (outs, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0
+    print("shift kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
