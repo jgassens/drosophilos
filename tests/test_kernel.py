@@ -321,6 +321,52 @@ def test_kernel_ram_written_by_one_pass_and_read_by_the_next():
     print("kernel RAM", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
 
 
+@pytest.mark.slow
+def test_kernel_ram_written_by_two_store_cells_in_one_pass():
+    """Two STORE cells write disjoint words of one 8-word RAM on every token (word t and word
+    t + 4), each through its own write port; the ports' marks keep either port's COPY off the
+    other's write (lib/kernel.py, `_share_write_ports`). A LOAD pass then reads all eight words
+    back in a shuffled order (the host paces the passes: the reads start once every write is out)."""
+    spec = [{"name": "h", "op": "LOAD", "a": "input", "mem": "htab"},
+            {"name": "d", "op": "XOR", "a": "h", "b": ("const", "k255")},
+            {"name": "hi", "op": "OR", "a": "input", "b": ("const", "k4")},
+            {"name": "st_lo", "op": "STORE", "a": "input", "b": "h", "mem": "hbuf"},
+            {"name": "st_hi", "op": "STORE", "a": "hi", "b": "d", "mem": "hbuf"},
+            {"name": "col", "op": "AND", "a": "input:pix", "b": ("const", "k7")},
+            {"name": "hb", "op": "LOAD", "a": "col", "mem": "hbuf"},
+            {"name": "out", "op": "ADD", "a": "hb", "b": ("const", "k1")}]
+    htab = {0: 40, 1: 33, 2: 25, 3: 19}
+    pl = build_pipeline(PARAMS, 8, spec, consts={"k255": 255, "k4": 4, "k7": 7, "k1": 1},
+                        mems={"htab": (4, htab), "hbuf": (8, {}, "ram")}, outputs=["st_lo", "st_hi", "out"], streams=["input", "pix"])
+    assert pl.net.n < 30000, pl.net.n
+    reads = [5, 2, 7, 0, 3, 6, 1, 4]
+    sched = [0, 1, 2, 3] + [("pix", (1 << 8) | c, 8) for c in reads]
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=80000, expect_outputs=16)
+    by = st["outputs_by_cell"]
+    hbuf = {t: htab[t] for t in range(4)} | {t + 4: htab[t] ^ 255 for t in range(4)}
+    assert [v for _, v in by["st_lo"]] == [40, 33, 25, 19], (by, st)
+    assert [v for _, v in by["st_hi"]] == [215, 222, 230, 236], (by, st)
+    assert [v for _, v in by["out"]] == [(hbuf[c] + 1) & 255 for c in reads], (by, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0
+    print("kernel RAM, two store cells", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
+
+
+def test_compiler_accepts_two_stores_into_one_array():
+    """Two STORE cells on one array compile (their write ports carry marks in the substrate);
+    the reference writes both words per token; a store followed by a load of the same array in
+    one body stays rejected (no ordering edge)."""
+    from drosophilos.compiler.kernel import kernel_outputs
+    src = "static u8 a[8]; static u8 i, x; int main(void) { i = 4; while (i != 0) { x = in_read(); a[x] = x + 1; a[x + 4] = x + 2; out_pixel(x); i = i - 1; } return 0; }"
+    prog = compile_c(src)
+    ks = compile_kernel(prog, loop_body(prog), "i")
+    stores = [c for c in ks.cells if c["op"] == "STORE"]
+    assert len(stores) == 2 and {c["mem"] for c in stores} == {"a"} and ks.mems["a"][2] == "ram"
+    assert kernel_outputs(ks, [0, 1, 2, 3]) == [[1, 2, 0], [2, 3, 1], [3, 4, 2], [4, 5, 3]]
+    prog = compile_c("static u8 a[4]; static u8 i, x; int main(void) { i = 3; while (i != 0) { a[i] = i; x = a[i]; out_pixel(x); i = i - 1; } return 0; }")
+    with pytest.raises(NotAKernel):
+        compile_kernel(prog, loop_body(prog), "i")
+
+
 TWO_PASS = """static u8 htab[4] = {40, 33, 25, 19};
 static u8 hbuf[4];
 static u8 col, h, t, c, r, f, p, heading;
@@ -390,7 +436,6 @@ def test_compiler_rejects_what_the_kernels_cannot_carry():
     rejected = {
         "counter read beside in_read": "static u8 i, x; int main(void) { i = 3; while (i != 0) { x = in_read(); out_pixel(x + i); i = i - 1; } return 0; }",
         "store then load of one array": "static u8 a[4]; static u8 i, x; int main(void) { i = 3; while (i != 0) { a[i] = i; x = a[i]; out_pixel(x); i = i - 1; } return 0; }",
-        "two stores into one array": "static u8 a[4]; static u8 i; int main(void) { i = 3; while (i != 0) { a[i] = i; a[0] = i; i = i - 1; } return 0; }",
     }
     for name, src in rejected.items():
         prog = compile_c(src)

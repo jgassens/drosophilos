@@ -16,7 +16,12 @@ the cell's own master carries the data written, so the host sees the write land)
 (c != 0 ? a : b, c a cell whose Z flag decides); SHL/SHR by a constant; MULP (a pipelined
 multiplier). A RAM is shared by every kernel of the pipeline; a read of a word being
 written is not protected by the handshake — the host paces the passes (a column pass
-writes the buffer, the pixel pass reads it), as it paces parameters. Sources: "input" (the
+writes the buffer, the pixel pass reads it), as it paces parameters. Several STORE cells
+may write one RAM: each write port marks the word it is writing until the write lands, and
+the mark vetoes the other ports' copies (`_share_write_ports`); the program must not issue
+two stores to the same word within one write's landing (~150 ms from the store's ACT^d to
+the word's completion) — inside one pass two cells of the same kernel store disjoint
+words, and the host-paced passes guarantee it between passes. Sources: "input" (the
 input register the host loads, one token after each READY), ("const", name), or a cell
 name, "input:NAME" (another input stream: a second host-loaded register), or
 ("param", cell) — a level read without a request and without holding the producer's commit,
@@ -76,6 +81,7 @@ class Cell:
     start: int = -1
     commit_pulse: int = -1
     feedback: set = field(default_factory=set)  # sources that are feedback edges
+    wport: object = None  # STORE cells: the write port (its selects, copies and copy relays: shared-RAM marks)
 
     @property
     def sources(self) -> list:
@@ -205,8 +211,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     const_rails = {name: _const_rails(net, drive, f"K.{name}", n) for name in (consts or {})}
     # Memories a kernel reads are ROMs: the contents are wired into the read relays (a rail
     # relay per set bit and per word, vetoed by "address is not w"), ~25 neurons per 8-bit
-    # word against ~250 for a RAM master with its completion and reset. A kernel never
-    # writes memory (STOREX is rejected), so nothing is lost.
+    # word against ~250 for a RAM master with its completion and reset. A memory some STORE
+    # writes is a RAM: word masters with the machine's write and read ports.
     mem_objs = {}
     for name, spec_m in (mems or {}).items():
         nw, contents = spec_m[0], dict(spec_m[1])
@@ -377,6 +383,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             high = [At[j][1].u for j in range(a_bits, n)]  # an address beyond the buffer selects no word (fail-stop, as the oracle raises)
             wp = add_write_port(net, drive, f"{name}.wr", mem, trig, [[At[j][0].u, At[j][1].u] for j in range(a_bits)],
                                 [[Bt[i][0].u, Bt[i][1].u] for i in range(n)], extra_vetoes=high)
+            c.wport = wp
             for l in wp.domain_latches:  # the port's COPY latches clear with the cell's stage
                 for x in l.members:
                     net.synapse(Sc.reset_inh, x, -int(round(0.75 * drive.loop)))
@@ -482,6 +489,16 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
         built.add(c.name)
 
+    # ---- several STORE cells into one RAM: the ports' marks keep them off each other's writes
+    ram_names = {id(v[1]): k for k, v in mem_objs.items() if isinstance(v[0], str) and v[0] == "ram"}
+    by_ram: dict[int, list] = {}
+    for c in order:
+        if c.op == "STORE":
+            by_ram.setdefault(id(c.mem[1]), []).append(c)
+    for key, group in by_ram.items():
+        if len(group) > 1:
+            _share_write_ports(net, drive, f"MEM.{ram_names[key]}", group[0].mem[1], group)
+
     # ---- commit gating: a producer rewrites its master only once every reader of it has started
     # on the previous value (its request for this source cleared), so a reader's operand gates
     # never sample a value mid-rewrite and never miss one. The host reads the outputs: free.
@@ -540,6 +557,42 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
     return pl
+
+
+def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, stores: list) -> None:
+    """Several STORE cells write one RAM through their own write ports (`ram.add_write_port`),
+    and every port's COPY latch for a word lights at that word's READY: with two ports and no
+    guard, a write by either resets the word, READY lights both COPY latches, and both ports
+    copy their own data into the word, double-railing it (the control machine's timer met the
+    same on its status word, `control.py` "Two ports share the status word"; measured there).
+    The same fix: per (port, word) a mark latch, lit by the port's select relay (its write is
+    in flight) and killed by the word's completion (the write landed), vetoes the OTHER
+    ports' copy relays for that word (0.5 x loop, the veto relay's standard, established >=
+    40 ms before READY: READY comes after the word's reset and hold recovery). The completion
+    also kills every port's COPY latch for the word: a bystander port's COPY, lit by READY
+    and vetoed, would otherwise stay lit until that cell's own stage reset, and a lit COPY has
+    no rise to fire its relays at that port's next write to the word (its cell may not run
+    between the two — a store in another kernel's pass).
+
+    Rule for the program: two stores to one word must not be in flight together — no second
+    store to a word within one write's landing (~150 ms from the store's ACT^d to the word's
+    completion). Both marks lit would veto both copies and leave the word empty (a later LOAD
+    double-rails and faults: fail-stop, not silent). Two STORE cells of one kernel store
+    disjoint words in a pass; between passes the host's pacing (or the phase gates) keeps the
+    order. A store whose word never completes (a faulted data token) leaves its mark lit and
+    the word closed to the other ports: fail-stop again."""
+    q = -int(round(0.5 * drive.loop))
+    for w in range(mem.n_words):
+        marks = [add_latch(net, drive, f"{c.name}.wr.w{w}.sel") for c in stores]
+        for c, m in zip(stores, marks):
+            net.synapse(c.wport.selects[w], m.u, drive.ignite)
+            for other in stores:
+                if other is c:
+                    continue
+                for pair in other.wport.copy_relays[w]:
+                    for relay in pair:
+                        net.synapse(m.u, relay, q)
+        add_kill_train(net, drive, f"{name}.w{w}.sel.kill", stores[0].wport.done[w], marks + [c.wport.copies[w] for c in stores])
 
 
 class _NoProducer:

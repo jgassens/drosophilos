@@ -254,8 +254,11 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     if name is None:
                         raise NotAKernel(f"STOREX to base {base}, not an array")
                 base, length = arrs[name]
-                if any(c["op"] == "STORE" and c.get("mem") == name for c in spec.cells):
-                    raise NotAKernel(f"two stores into {name}: their write ports would share the words' COPY latches (v0: one STORE cell per array)")
+                # several STORE cells into one array are allowed: each write port marks the word
+                # it is writing and the mark vetoes the other ports' copies (lib/kernel.py,
+                # `_share_write_ports`). Two stores to the SAME word within one write's landing
+                # (~150 ms) are the program's responsibility: disjoint words in a pass, and the
+                # passes paced by the host or the phase gates.
                 spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
                 spec.rams.add(name)
                 stored_in_body.add(name)
