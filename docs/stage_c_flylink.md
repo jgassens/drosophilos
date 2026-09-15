@@ -68,12 +68,17 @@ stores 0 back instead of emptying it (`docs/a2_ram_control.md` §2.2).
 A late ACK exposed a second ordering rule. If the original send timer expires first, the
 timeout and arrival cannot be merged into the same INTP state: the timeout handler must run
 first (status = 1), re-send, and leave the held ACK for the queued arrival handler (status =
-0). Nor is arrival completion a receive credit. The timer is now cancelled only when the
-handler consumes the input word: its `CLR` finishes the word's reset and raises READY, which
-launches a four-pulse cancellation train across the timer chain. Thus a held late ACK cannot
-cancel the re-send's timer, while the eventual arrival handler's CLR does cancel it. The
-slow late-ACK regression delays B→A so that `TIMER.h1899 < LINK.in.arrive < INTP.clear`, and
-checks two handler entries, one retry, one delivery and `acked = 1`.
+0). Nor is arrival completion a receive credit. The timer is cancelled by any evidence of an
+ACK, twice over: by the arrival's completion train (the ACK is here, so the send was not
+lost — cancelling only on consumption made the clean link retry once, since the handler
+consumes the word seconds after a 1,900-hop timer expires), and again when the handler
+consumes the input word: its `CLR` finishes the word's reset and raises READY, which
+launches a four-pulse cancellation train across the timer chain. The second cancel is the
+one that matters for a retransmission: a second ACK that lands while the first is still held
+never completes, so consuming the first must cancel the re-send's timer. The slow late-ACK
+regression delays B→A so that `TIMER.h1899 < LINK.in.arrive < INTP.clear`, and checks two
+handler entries, one retry, one delivery and `acked = 1`; the clean link checks no retry
+(Juno job 405152: clean, dropped-event and late-ACK scenarios all pass).
 
 Still not built: epochs, credits beyond one message in flight, corruption detection at the
 receiver (a corrupted rail event is a double rail, refused by the completion tree as a fault,

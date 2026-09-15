@@ -922,6 +922,15 @@ tick kernel turns the view. The bullets below are the day's steps in order.
   handler. Both scenarios now pass on the reference simulator: clean link — received 5,
   delivered once, pixel 5, acked, no retries, 4 rail events each way; one dropped rail event —
   the timeout fires, the handler re-sends once (retries 1), delivered once and acked.
+  A third scenario (2026-09-15, sol worker, fable review, `docs/stage_c_flylink.md`): the ACK
+  arrives *after* the send timer has expired but *before* the timeout interrupt is taken. The
+  two requests must not merge into one pending flag, so the machine gained a one-deep
+  interrupt queue (INTQ) with a "settled" gate (INTS) — the review measured that without the
+  gate a request landing 5–30 ms after the interrupt's clear was lost outright — and the
+  timer is cancelled both by the ACK's arrival and by its consumption (cancelling only on
+  consumption made the clean link retry once on Juno). Clean, dropped-event and late-ACK
+  scenarios all pass (Juno 405152): late ACK — two handler entries, one retry, delivered
+  once, acked.
 - **Kernel compiler** (`compiler/kernel.py`, `lib/kernel.py`, `bench/run_kernel.py`): a loop
   body of the IR becomes a resident pipeline, one cell per operation, the induction variable
   streamed by the host, loop-invariant variables as image-time parameters, arrays as memories
