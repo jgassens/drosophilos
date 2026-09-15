@@ -131,6 +131,19 @@ def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[R
         units.append(G.multiplier_ordered(f"{name}.mul", Ad, bx, zero, carry_hops))
     else:
         units.append(None)  # a MUL op selects nothing: the transaction cannot complete (watchdog refuses it)
+    # The unit select twice: the producer's levels (there from the load; PASSB's bx rises ~30 ms
+    # after the load, before ACT^d) and tokens of this transaction in the ALU's reset domain.
+    # The producer resets at ACCEPT (~0.4 s for an ADD) while the multiplier is still running
+    # (~1 s), and its late outputs then reached the mux unvetoed and hit the stage's fault
+    # gates after the commit (measured on a random accumulator program: two fault-gate spikes,
+    # master correct by luck of timing; 300 ms earlier they would have corrupted the copy). The
+    # tokens hold until the stage is cleared, so the veto never lapses.
+    Ut = []
+    for k in range(N_UNITS):
+        u0, u1 = G.latch(f"{name}.ut{k}r0"), G.latch(f"{name}.ut{k}r1")
+        G.veto(f"{name}.ut{k}r1.g", act_d, [U[k].r0.u], u1)
+        G.veto(f"{name}.ut{k}r0.g", act_d, [U[k].r1.u], u0)
+        Ut.append(Rail2(u0, u1))
     R = []
     for i in range(n):
         rails = []
@@ -138,15 +151,15 @@ def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[R
             t = G.latch(f"{name}.mux{i}r{r}")
             for k, unit in enumerate(units):  # one-hot select: unit k's rail ignites R unless k is deselected
                 if unit is not None:
-                    G.veto(f"{name}.mux{i}r{r}u{k}", unit[i].latches[r].u, [U[k].r0.u], t)
+                    G.veto(f"{name}.mux{i}r{r}u{k}", unit[i].latches[r].u, [U[k].r0.u, Ut[k].r0.u], t)
             rails.append(t)
         R.append(Rail2(rails[0], rails[1]))
     others = [U[k].r1.u for k in range(1, N_UNITS)]
 
     def gated_flag(fname: str, f: Rail2) -> Rail2:  # the adder's flag, or 0 for any other unit
         y1, y0 = G.latch(f"{fname}1"), G.latch(f"{fname}0")
-        G.veto(f"{fname}1.g", f.r1.u, [U[0].r0.u], y1)
-        G.veto(f"{fname}0.g", f.r0.u, [U[0].r0.u], y0)
+        G.veto(f"{fname}1.g", f.r1.u, [U[0].r0.u, Ut[0].r0.u], y1)
+        G.veto(f"{fname}0.g", f.r0.u, [U[0].r0.u, Ut[0].r0.u], y0)
         for k, t in enumerate(others):
             G.veto(f"{fname}0.u{k + 1}", t, [], y0)
         return Rail2(y0, y1)

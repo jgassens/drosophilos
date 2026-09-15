@@ -849,6 +849,12 @@ How it is known to have worked, with nothing taken on trust from the machine:
   into NEXT are address-qualified (a hardware-completed word no longer advances a pending
   STORE); an early `return` no longer falls through; the golden shim's ports follow the
   width. `docs/a2_ram_control.md` §3.2.
+- **A latent hole in the sequencer's ALU, closed**: a deselected unit's late outputs (the
+  adder's long carry ripple under a MOV, the multiplier under anything) reached the result
+  mux after the producer had reset, because the deselect veto was the producer's level. The
+  toy world update faulted at its sixth instruction on the machine; the unit select is now
+  also a token held in the ALU's reset domain and the mux is vetoed by both
+  (`docs/a2_alu_register.md` §2.6).
 - **Runner speed**: polling a live simulator through its sorted trace was quadratic; every
   runner now reads the per-step spike lists (`protocol.token.decode_recent`,
   `recent_spikes`). A 13 s kernel run: 25 s wall instead of 50+ minutes; Hello World (31.8 s

@@ -170,6 +170,25 @@ only under perturbation. Hence the separate light hold interneuron and the 0.5×
 Recovery is now a stated timing budget: hold ~40 ms, veto ~55 ms, source inhibition
 ~86 ms, against gaps of ≥ 85, ≥ 155 and ≥ 170 ms respectively.
 
+### 2.6 A deselected unit's late outputs outlive the producer (found 2026-09-15)
+
+Every unit computes on every transaction; the one-hot select only decides which unit's
+rails may ignite the result mux, through veto relays vetoed by the *producer's* deselect
+rail. The producer resets at ACCEPT — when the stage completes — and a fast op completes
+early: a MOV's stage is done ~100 ms after ACT^d, while the adder's carry chain on the same
+operands can take 250 ms at 8 bits and the multiplier ~1 s. Once the producer is dark the
+deselect veto is gone, and the adder's late sums ignite the mux and reach the stage on top
+of the committed result: double rails, fault gates, a refused instruction. Measured twice:
+on the toy world update (`examples/tick.c`) the sequencer faulted at its sixth instruction,
+`MOV 100` after `MOV 90`, the first MOV whose shadow addition rippled longer than the MOV
+took to complete (Hello World's MOVs never did); and in an accumulator program with the
+multiplier, two fault-gate spikes after an ADD's commit from the multiplier of the previous
+operands, the master correct by ~300 ms of luck. The fix is a second veto: the unit select
+is also tokenised at ACT^d into latches of the ALU's reset domain (`alu.ut{k}`), which
+hold until the stage is cleared, and every mux and flag relay is vetoed by both the level
+(there from the load, in time for PASSB's early rails) and the token (there until the
+stage resets). The kernels' cells never had the hole: their unit select is an image level.
+
 ## 3. Campaigns with the fixed build (mix B; `docs/a2/`)
 
 Mix B = weights log-normal 4 %, threshold and bias ±0.2 mV, stray 5 Hz × 150 quanta,
