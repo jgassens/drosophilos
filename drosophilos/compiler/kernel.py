@@ -91,7 +91,7 @@ def loop_body(prog: Program, fn: str = "main", label: str | None = None) -> list
 
 def compile_kernel(prog: Program, body: list, stream: str, params: dict | None = None, mems: dict | None = None,
                    state: dict | None = None, *, prefix: str = "c", stream_key: str = "input", seeds: dict | None = None,
-                   into: KernelSpec | None = None, allow_no_output: bool = False) -> KernelSpec:
+                   into: KernelSpec | None = None, allow_no_output: bool = False, mul: str = "array") -> KernelSpec:
     """`state`: loop-carried variables and their values at power-up (the prologue's CONSTs by
     default for any variable the body reads before writing and writes). Structured `if` /
     `if-else` inside the body (a JZ/JNZ over a label, an optional JMP to an end label) become
@@ -106,7 +106,11 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     contents = array_contents(prog)
     if mems:
         contents.update(mems)
-    inits = {ins.dst: ins.imm & mask for ins in prog.functions["main"] if isinstance(ins, Instr) and ins.op == "CONST" and ins.dst}
+    # initial values come from the prologue only (before main's first loop): a CONST inside a
+    # loop body is an assignment, not an initial state (review finding: [5, 10, 15] vs [25, 30, 35])
+    main = prog.functions["main"]
+    first_loop = next((k for k, x in enumerate(main) if isinstance(x, str) and x.startswith("loop")), len(main))
+    inits = {ins.dst: ins.imm & mask for ins in main[:first_loop] if isinstance(ins, Instr) and ins.op == "CONST" and ins.dst}
     state = dict(state or {})
     spec = into or KernelSpec([], {}, {}, stream, width)
     if into is None:
@@ -207,6 +211,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             if isinstance(ins, str):
                 continue
             op = ins.op
+            if op == "JMP" and ins.target in labels and labels[ins.target] < i:
+                raise NotAKernel("a loop inside the body (a backward branch)")
             if op in ("JMP", "RET", "STOREX", "HALT"):
                 raise NotAKernel(f"{op} inside a kernel body")
             if op == "IN":  # fresh input each token: the variable is the token itself
@@ -232,11 +238,15 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 then_arm = instrs[i:j_else]
                 else_arm = []
                 j_end = j_else
+                if j_else < i:
+                    raise NotAKernel("a loop inside the body (a backward branch)")
                 if then_arm and isinstance(then_arm[-1], Instr) and then_arm[-1].op == "JMP":
                     l_end = then_arm[-1].target
                     if l_end not in labels:
                         raise NotAKernel("a branch out of the body")
                     j_end = labels[l_end]
+                    if j_end < j_else:
+                        raise NotAKernel("a loop inside the body (a backward branch)")
                     else_arm = instrs[j_else + 1:j_end]
                     then_arm = then_arm[:-1]
                 env_then, env_else = dict(env), dict(env)
@@ -273,8 +283,6 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 env[ins.dst] = src(ins.srcs[0])
             elif op in ("SHL", "SHR"):
                 a = src(ins.srcs[0])
-                if ins.dst == stream:
-                    continue
                 if is_const(a):
                     env[ins.dst] = const(ir_apply(op, cval(a), ins.imm, width))
                     continue
@@ -295,14 +303,12 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                     else:
                         raise NotAKernel("an address with two variable parts")
                     continue
-                if ins.dst == stream:
-                    continue  # the induction update: the host streams the values
                 if is_const(a) and is_const(b):
                     r = fold(op, cval(a), cval(b))
                     env[ins.dst] = const(r)
                     spec.folded[ins.dst] = r
                     continue
-                env[ins.dst] = cell(op, a, b)
+                env[ins.dst] = cell("MULP" if (op == "MUL" and mul == "pipelined") else op, a, b)
                 written.add(ins.dst)
             elif op == "LOADX":
                 if xaddr[0] is None:
@@ -325,7 +331,10 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             elif op == "OUT":
                 s_ = const(ins.imm) if ins.imm is not None else src(ins.srcs[0])
                 if not (isinstance(s_, str) and not s_.startswith("input") and not s_.startswith("state_")):
+                    paced = isinstance(s_, tuple)  # a constant or a parameter has no done pulse: the token paces it
                     s_ = cell("MOV", s_, s_)  # the output must be a cell's master
+                    if paced:
+                        spec.cells[-1]["trigger"] = [stream_key]
                 spec.outputs.append(s_)
             else:
                 raise NotAKernel(op)
@@ -335,8 +344,13 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     # left it unchanged the state has no cell (a constant), which v0 rejects
     for v, slot in state_slot.items():
         final = env.get(v)
-        if final == slot or not isinstance(final, str) or final == "input":
+        if final == slot:
             raise NotAKernel(f"state variable {v} is not recomputed by the body")
+        if not isinstance(final, str) or final.startswith("input"):  # a constant or the token: a paced MOV carries it
+            final = cell("MOV", final, final)
+            if not isinstance(env[v], str):
+                spec.cells[-1]["trigger"] = [stream_key]
+            env[v] = final
         spec.state_cells[v] = final
         for c in spec.cells[n_before:]:
             for k in ("a", "b", "c"):
@@ -360,6 +374,20 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             c["trigger"] = [stream_key]
         elif not srcs and all(isinstance(c.get(x), tuple) for x in ("a", "b", "c") if c.get(x) is not None):
             c["trigger"] = [stream_key]  # constants and params only: paced by the token
+    # dead cells (the induction update nobody reads, temporaries): removed, repeatedly
+    while True:
+        read = set()
+        for c in spec.cells:
+            for k in ("a", "b", "c"):
+                v = c.get(k)
+                if isinstance(v, str):
+                    read.add(v)
+                elif isinstance(v, tuple) and v[0] == "param":
+                    read.add(v[1])
+        keep = [c for c in spec.cells if c["name"] in read or c["name"] in spec.outputs or c["name"] in spec.state_cells.values()]
+        if len(keep) == len(spec.cells):
+            break
+        spec.cells[:] = keep
     used = {c[k][1] for c in spec.cells for k in ("a", "b", "c") if is_const(c.get(k))}
     spec.consts = {k: v for k, v in spec.consts.items() if k in used}  # folded bases and the induction step are gone
     return spec
@@ -447,9 +475,9 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
                 continue
             if c["op"] == "LOAD":
                 n_words, contents = spec.mems[c["mem"]]
-                addr = get(c["a"]) & (n_words - 1)
-                if addr not in contents:
-                    raise KeyError(f"{c['name']}: {c['mem']}[{addr}] is unwritten (a read would double-rail)")
+                addr = get(c["a"])
+                if addr >= n_words or addr not in contents:  # the ROM read relays match nothing: the cell would stall
+                    raise KeyError(f"{c['name']}: {c['mem']}[{addr}] is outside the table (the read would stall)")
                 v = contents[addr] & mask
             elif c["op"] == "MOV":
                 v = get(c["b"])
@@ -458,7 +486,7 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
             elif c["op"] in ("SHL", "SHR"):
                 v = ir_apply(c["op"], get(c["a"]), c["imm"], w)
             else:
-                v = ir_apply(c["op"], get(c["a"]), get(c["b"]), w)
+                v = ir_apply("MUL" if c["op"] == "MULP" else c["op"], get(c["a"]), get(c["b"]), w)
             val[c["name"]] = v
             last[c["name"]] = v
             if c["name"] in state:

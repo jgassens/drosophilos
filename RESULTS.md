@@ -900,6 +900,8 @@ tick kernel turns the view. The bullets below are the day's steps in order.
   the `r_segs` column loop (for each of 8 columns the wall distance from a map array indexed by
   the heading, the height from a lookup table, one pixel record per column, a frame record,
   two frames): 82 machine words, 28 data words, 517 instructions for two frames; the three
-  references agree on every pixel for two headings. On this sequencer a frame is ~250
-  instructions, about four minutes of neural time; that number is the case for resident
+  references agree on every pixel for two headings. **Neural (sequencer, Juno): all 18
+  outputs match** in 586 s of neural time (3,269 s wall on one CPU core; a first attempt was
+  OOM-killed at 16 GB before the runners trimmed old spikes). On this sequencer a frame is
+  ~250 instructions, about five minutes of neural time; that number is the case for resident
   kernels (spatial dataflow) and the cluster rather than a faster sequencer.

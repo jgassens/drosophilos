@@ -260,3 +260,41 @@ def test_game_program_compiles_to_a_tick_kernel_and_a_pixel_kernel():
     sched = [("input", t) for t in toks] + [("f", 10)] + [("input", t) for t in toks] + [("f", 10)]
     pixels = [o[0] for (st, _), o in zip(sched, kernel_outputs(ks, sched)) if st == "input"]  # a tick's output is its state
     assert pixels == interpret(prog, [0] + toks + [10] + toks + [10] + toks + [10])["outs"][:8]
+
+
+@pytest.mark.slow
+def test_neural_32bit_kernel_three_cells():
+    """32-bit cells: ADD, XOR, SUB on four tokens (the input register's watchdog scales with the width)."""
+    spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "k1")},
+            {"name": "c2", "op": "XOR", "a": "c1", "b": ("const", "k2")},
+            {"name": "c3", "op": "SUB", "a": "c2", "b": "c1"}]
+    consts = {"k1": 0x12345678, "k2": 0x0F0F0F0F}
+    pl = build_pipeline(PARAMS, 32, spec, consts=consts)
+    tokens = [0, 1, 0xFFFFFFFF, 0x7FFFFFFF]
+    mask = 0xFFFFFFFF
+    exp = [((((t + consts["k1"]) & mask) ^ consts["k2"]) - ((t + consts["k1"]) & mask)) & mask for t in tokens]
+    outs, sim, st = run_pipeline(pl, PARAMS, tokens, max_ms=30000)
+    assert [v for _, v in outs] == exp and st["faults"] == 0 and st["timeouts"] == 0, (outs, st)
+    print("32-bit kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+@pytest.mark.slow
+def test_neural_pipelined_multiplier_eight_bits():
+    """MULP: n row cells; one product per cell latency instead of the array's n^2 ripple."""
+    pl = build_pipeline(PARAMS, 8, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}], consts={"k": 3})
+    toks = [3, 7, 0, 255, 16, 100]
+    outs, sim, st = run_pipeline(pl, PARAMS, toks, max_ms=40000)
+    assert [v for _, v in outs] == [(x * 3) & 255 for x in toks] and st["faults"] == 0 and st["bad_outputs"] == 0, (outs, st)
+    print("MULP 8-bit", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})
+
+
+@pytest.mark.slow
+def test_neural_perspective_kernel_with_the_pipelined_multiplier():
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(RENDER2)
+    ks = compile_kernel(prog, loop_body(prog), "col", params={"heading": 3}, mul="pipelined")
+    assert "MULP" in [c["op"] for c in ks.cells]
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs)
+    outs, sim, st = run_pipeline(pl, PARAMS, list(range(8)), max_ms=120000)
+    assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, list(range(8)))], (outs, st)
+    print("perspective kernel, MULP", {k: v for k, v in st.items() if k not in ("outputs_by_cell", "load_steps")})

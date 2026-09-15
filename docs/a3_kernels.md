@@ -168,11 +168,19 @@ height as `(recip * scale) >> 8` — a perspective divide done as a table and a 
 | latency to the first pixel | 12.1 s |
 | simulation | 383 s wall for 60 s of neural time |
 
-The multiplier is now the bottleneck of the E1 path by a factor of ~6 over every other cell,
-and it grows as n²: a 32-bit array multiplier would take ~30 s per token. The plan's Q16.16
-renderer needs a carry-save multiplier (rows that do not ripple; one final ripple), which the
-ordered-gate discipline supports and which is the next arithmetic block to build and
-campaign, and interleaved multiplier cells (k copies taking alternate tokens) for throughput.
+The array multiplier is the bottleneck of the E1 path by a factor of ~6 over every other
+cell, and its latency grows as n². The dataflow answer is the **pipelined multiplier** (`MULP`):
+the n rows of the array become n cells, each carrying the running sum and both operands in
+its word (acc | flags | A | B) so the next row reads them from its master, each with the
+standard handshake. Latency is n cell latencies; throughput is one product per cell latency,
+whatever n. Measured at 8 bits: six products correct, 9.9 s latency (8 rows), 1.58 s per
+token, 24,428 neurons (the array: ~2.3 s per token at 8 bits); at 16 bits the cell is
+90,364 neurons against the array's 27,877 — 3.2× the area for 4× the throughput. The
+perspective column with it: eight columns correct at **1.74 s per column** (6.6 s with the
+array), 26.7 s to the first pixel, 110,262 neurons. The compiler picks it with
+`compile_kernel(..., mul="pipelined")`; the throughput-bound kernels (frames) want it, the
+latency-bound world update keeps the array. A carry-save multiplier
+would cut the latency too; it is not built.
 
 ## 7. Two loops, two streams: the game loop and the render loop together
 
@@ -223,6 +231,31 @@ same tick token to every copy (the game state is replicated in every brain, whic
 the plan's TMR will vote over), and writes one picture per frame: a slideshow computed in
 the substrate, the host dealing tokens and adding a palette. The neural 40 × 25 picture on 32 nodes (Apple GPU) and the full frame on
 128 nodes (Juno H200) are running; their results go here.
+
+## 10. Independent review of the kernel path (2026-09-15, `claude-fable` worker; Kimi timed out twice)
+
+Audited clean: the cell handshake (guarded pulses, kill trains, commit gating, reset domains,
+the runner) and the control-machine changes (the timer's write-port marks, the
+address-qualified NEXT relays, the commit watchdog, the ALU's dual veto), on the timing rules
+and by re-running the neural tests. Defects found and fixed:
+
+| finding | fix |
+|---|---|
+| `semantics.py` redefined `shl`/`shr` (logical) over the spec's arithmetic ones: `test_semantics` failed, `fromfix(-65536)` returned 65535 | Duplicates removed; the IR's SHR is the spec's `shru`, SHL its `shl`; one `ir.apply` for the interpreter and the kernel compiler |
+| A state's initial value was the *last* CONST anywhere in `main`, a loop-body assignment included (silent wrong state: [5, 10, 15] for [25, 30, 35]) | Initial values come from the prologue before the first loop only |
+| A loop inside a kernel body made the compiler spin forever | A backward branch is rejected with `NotAKernel` |
+| The reference masked a ROM address with `n_words − 1`: a wrong oracle for tables whose length is not a power of two | Out-of-range addresses raise (the relays would match nothing and the cell would stall) |
+| `out_pixel` of a constant or a parameter made a MOV cell with no request, which free-ran | Such a cell is paced by the token |
+| A state variable used directly as an `if` condition faulted on the first token: the image lit the value's rails but not its Z rails, and both SEL arms fired | The image lights a state master's C, Z and V rails too |
+| The lowering's return label used a stale inline id when the callee itself called a function | The call's own id is kept for its label |
+| Induction-variable updates were dropped, so a read after the update disagreed with the interpreter | The update is a cell like any other; dead cells are pruned |
+| `decode_recent`'s status was ignored: a faulted or partial output word read as a value | A non-valid word is `None` in the outputs and counted in `bad_outputs` |
+| The commit watchdog's TIMEOUT latch had no reset (a false timeout was permanent) and the campaign classifier did not count it | It clears with the stage; the classifier counts it |
+
+Recorded, not changed: a doublet on a multi-pair guard (gap up to ~43 ms, measured 39) against
+the passed pair's kill-relay recovery (~50 ms) is a plausible spurious start under
+perturbation, not seen on the clean model — the mix-B campaign on a two-source cell must size
+it. The 32-bit kernel has a test now.
 
 ## 8. What it is not yet
 

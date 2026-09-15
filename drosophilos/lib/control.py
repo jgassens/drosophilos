@@ -372,6 +372,8 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     cto = add_latch(net, drive, "FSM.cwd.timeout")
     add_veto_relay(net, drive, "FSM.cwd.fire", cwd, [FETCH.u, NEXT.u], cto)
     connect_trigger(net, drive, cto.u, S.reset_trigger, S.reset_edge)
+    for x in cto.members:  # the timeout clears with the stage it reset (review: it was permanent)
+        net.synapse(S.reset_inh, x, -int(round(0.75 * drive.loop)))
     # NEXT: jump taken? (JZ and Z) or (JNZ and not Z); Z is the master's bit n+1
     z0, z1 = M.rails[n + 1][0].u, M.rails[n + 1][1].u
     add_veto_relay(net, drive, "JT.z", NEXT.u, [ir_jz[0].u, z0], jt)
@@ -610,6 +612,8 @@ def classify_machine_run(m: Machine, ev_steps, ev_neurons, program, dmem, params
     taps[m.acc.reg.stage.fault_latch.u] = ("fault", 0)
     if m.acc.producer.watchdog is not None:
         taps[m.acc.producer.watchdog.timeout.u] = ("timeout", 0)
+    if getattr(m, "commit_timeout", None) is not None:  # a hung COMMIT is a counted timeout too
+        taps[m.commit_timeout.u] = ("timeout", 0)
     rises = _rises(ev_steps, ev_neurons, taps, period)
 
     def decode(rails, step):

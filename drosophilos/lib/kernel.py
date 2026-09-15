@@ -39,7 +39,7 @@ from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .adder import extend_reset
 from .control import add_kill_pair, add_kill_train
-from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu
+from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
 from .ram import address_vetoes
@@ -57,6 +57,8 @@ class Cell:
     mem: tuple | None = None  # for LOAD cells: (n_words, contents) of the ROM
     init: int | None = None  # state cells: the master's value at power-up
     imm: int | None = None  # SHL/SHR: the shift count
+    row: int | None = None  # MULP rows: this row's index (0 .. n-1); the last row is the cell itself
+    prev: str | None = None  # MULP rows: the previous row's name (its master carries acc | flags | A | B)
     trigger: tuple = ()  # extra request sources ("input")
     reg: StagedRegister | None = None
     master: Register | None = None
@@ -197,10 +199,22 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     # ---- pass 1: every cell's stage, master, handshake pairs (sources may be built later: feedback)
     cells: dict[str, Cell] = {}
     order: list[Cell] = []
+    expanded = []
     for cs in spec:
+        if cs["op"] == "MULP":  # a pipelined multiplier: n row cells, the last one named as the cell
+            assert cs.get("init") is None, "a MULP cell cannot carry state"
+            for j in range(n):
+                nm = cs["name"] if j == n - 1 else f"{cs['name']}.r{j}"
+                prev = None if j == 0 else (f"{cs['name']}.r{j - 1}")
+                expanded.append({"name": nm, "op": "MULP_ROW", "a": cs["a"] if j == 0 else prev, "b": cs.get("b") if j == 0 else None,
+                                 "trigger": cs.get("trigger", ()) if j == 0 else (), "row": j, "prev": prev})
+        else:
+            expanded.append(cs)
+    for cs in expanded:
         c = Cell(cs["name"], cs["op"], cs["a"], b=cs.get("b"), c=cs.get("c"), mem=mem_objs.get(cs.get("mem")), init=cs.get("init"),
-                 trigger=tuple(cs.get("trigger", ())), imm=cs.get("imm"))
-        c.stage = add_register(net, drive, f"{c.name}.Q", n + 3, with_completion=True)
+                 trigger=tuple(cs.get("trigger", ())), imm=cs.get("imm"), row=cs.get("row"), prev=cs.get("prev"))
+        width = 3 * n + 3 if c.op == "MULP_ROW" else n + 3  # a row's word: acc | C Z V | A | B
+        c.stage = add_register(net, drive, f"{c.name}.Q", width, with_completion=True)
         c.act = add_latch(net, drive, f"{c.name}.act")
         c.idle = add_kill_pair(net, drive, f"{c.name}.idle")
         image.append(c.idle[1])
@@ -217,9 +231,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         cells[c.name] = c
         order.append(c)
     for c in order:
-        if c.init is not None:
-            for i, r in rails_for(c.init, n):
-                image.append(c.master.rails[i][r])
+        if c.init is not None:  # the value and its Z flag (a SEL on a state condition reads the Z
+            for i, r in rails_for(c.init, n):  # rails; dark rails fired both arms: review finding). C and V
+                image.append(c.master.rails[i][r])  # stay dark on purpose: a complete master would fire its done
+            image.append(c.master.rails[n + 1][1 if c.init == 0 else 0])  # pulse at power-up and request every reader
 
     def stream_of(src):
         if src == "input":
@@ -269,6 +284,64 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name
+        if c.op == "MULP_ROW":
+            # Row j of a pipelined multiplier: acc' = acc + ((A if b_j else 0) << j), with A and B
+            # carried along in the row's word so the next row reads them from this row's master
+            # (the sources' masters may be rewritten by then). Operands are sampled at ACT^d like
+            # any cell; B is delayed 6 hops (EARLY), A 17 (LATE) as in the ALU, and acc 23 so the
+            # running sum is the LATE operand of the ordered ripple adder against the partial
+            # product (EARLY, valid at A^d + 4). Throughput one token per cell latency; latency n
+            # cells: the array multiplier's n^2 x 29 ms latency at the same throughput as an ADD.
+            j = c.row
+            if j == 0:
+                A_rails, B_rails = rails_of(c.a), rails_of(c.b)
+                acc_rails = None
+            else:
+                pm = cells[c.prev].master
+                acc_rails = [[pm.rails[i][0], pm.rails[i][1]] for i in range(n)]
+                A_rails = [[pm.rails[n + 3 + i][0], pm.rails[n + 3 + i][1]] for i in range(n)]
+                B_rails = [[pm.rails[2 * n + 3 + i][0], pm.rails[2 * n + 3 + i][1]] for i in range(n)]
+            A_tok, B_tok, acc_tok = [], [], []
+            for i in range(n):
+                a0, a1 = G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")
+                G.veto(f"{name}.a{i}r0.g", act_d, [A_rails[i][1].u], a0)
+                G.veto(f"{name}.a{i}r1.g", act_d, [A_rails[i][0].u], a1)
+                b0, b1 = G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")
+                G.veto(f"{name}.b{i}r0.g", act_d, [B_rails[i][1].u], b0)
+                G.veto(f"{name}.b{i}r1.g", act_d, [B_rails[i][0].u], b1)
+                A_tok.append(Rail2(a0, a1)); B_tok.append(Rail2(b0, b1))
+                s0, s1 = G.latch(f"{name}.s{i}r0"), G.latch(f"{name}.s{i}r1")
+                if acc_rails is None:
+                    G.veto(f"{name}.s{i}r0.z", act_d, [], s0)  # acc = 0 into the first row
+                else:
+                    G.veto(f"{name}.s{i}r0.g", act_d, [acc_rails[i][1].u], s0)
+                    G.veto(f"{name}.s{i}r1.g", act_d, [acc_rails[i][0].u], s1)
+                acc_tok.append(Rail2(s0, s1))
+            Bd = [G.delayed(f"{name}.b{i}d", B_tok[i], 6) for i in range(n)]
+            Ad = [G.delayed(f"{name}.a{i}d", A_tok[i], 17) for i in range(n)]
+            accd = [G.delayed(f"{name}.s{i}d", acc_tok[i], 23) for i in range(n)]
+            bj = Bd[j]
+            zero = Rail2(G.latch(f"{name}.zero0"), G.latch(f"{name}.zero1"))
+            G.veto(f"{name}.zero0.g", act_d, [], zero.r0)
+            pp = []  # partial product bit i: A_i AND b_j (A LATE, b_j EARLY), valid at Ad + 4
+            for i in range(n):
+                l1, l0 = G.latch(f"{name}.pp{i}r1"), G.latch(f"{name}.pp{i}r0")
+                G.veto(f"{name}.pp{i}.g", Ad[i].r1.u, [bj.r0.u], l1)
+                G.veto(f"{name}.pp{i}.a", Ad[i].r0.u, [], l0)
+                G.veto(f"{name}.pp{i}.b", Ad[i].r1.u, [bj.r1.u], l0)
+                pp.append(Rail2(l0, l1))
+            addend = [zero] * j + [pp[m - j] for m in range(j, n)]  # A * b_j << j, low n bits
+            sums, carries, x, cds = G.ripple_adder_ordered(f"{name}", accd, addend, zero, 5)
+            R = sums
+            C = Rail2(G.latch(f"{name}.c0"), G.latch(f"{name}.c1"))
+            V = Rail2(G.latch(f"{name}.v0"), G.latch(f"{name}.v1"))
+            G.veto(f"{name}.c0.g", act_d, [], C.r0)
+            G.veto(f"{name}.v0.g", act_d, [], V.r0)
+            wire_alu(net, drive, R, C, V, Sc)  # acc' -> bits 0..n-1, C, Z, V
+            wire_outputs(net, drive, Ad + Bd, Sc, list(range(n + 3, 3 * n + 3)))  # A, B carried along (delayed tokens)
+            extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+            built.add(c.name)
+            continue
         if c.op == "LOAD":  # address = A (a level): ROM read driven by ACT^d into token latches, PASSB through the ALU
             A_rails = rails_of(c.a)
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
@@ -455,7 +528,7 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
     for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
-        if c.op in ("SEL", "SHL", "SHR"):
+        if c.op in ("SEL", "SHL", "SHR", "MULP_ROW"):
             continue
         unit, _ = ALU_OPS["MOV" if c.op == "LOAD" else c.op]
         for k in range(N_UNITS):
@@ -495,9 +568,12 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     comp = {c.completion.u: c for c in (o.master for o in pl.outputs)}
     outs = {c.name: [] for c in pl.outputs}
     last_wm = {u: None for u in comp}
-    loads, k = [], 0
+    loads, k, bad = [], 0, 0
     pending = []  # (completion step, output cell)
-    want = expect_outputs or (per_token * len(sched) if per_token else len(sched))  # total outputs over all cells
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
+    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
+    seen_f, seen_t = set(), set()
+    want = expect_outputs or (per_token or len(pl.outputs)) * len(sched)  # total outputs over all cells: one per output cell per token
     while sim.step_index < int(max_ms / params.dt):
         if k < len(sched):
             st, value, min_outs = sched[k]
@@ -512,9 +588,20 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 k += 1
         sim.step()
         s_ = sim.step_index - 1
+        if len(sim._spk_step) > 8 * window:  # keep the recent spikes only (memory); faults and timeouts are counted as they happen
+            for st_, nr in zip(sim._spk_step[: -4 * window], sim._spk_neuron[: -4 * window]):
+                for x in nr.tolist():
+                    if x in fault_n and x not in seen_f:
+                        seen_f.add(x)
+                    elif x in timeout_n and x not in seen_t:
+                        seen_t.add(x)
+            del sim._spk_step[: -4 * window]; del sim._spk_neuron[: -4 * window]
+            if hasattr(sim, "_spk_node"): del sim._spk_node[: -4 * window]
         while pending and s_ >= pending[0][0] + window:
             stp, cell = pending.pop(0)
-            outs[cell.name].append((stp, decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window)[0]))  # R bits; C Z V follow
+            v, status = decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window)  # R bits; C Z V follow
+            outs[cell.name].append((stp, v if status == "valid" else None))  # a faulted or partial word is None
+            bad += status != "valid"
         if k >= len(sched) and sum(len(v) for v in outs.values()) >= want:
             break
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
@@ -531,19 +618,16 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                     pending.append((s_, next(o for o in pl.outputs if o.master is master)))
                 last_wm[u] = s_
     first = outs[pl.outputs[0].name]
-    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
-    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
-    n_fault = n_timeout = 0
-    seen_f, seen_t = set(), set()
-    for st_, nr in zip(sim._spk_step, sim._spk_neuron):  # first spike of each fault / timeout latch
+    for st_, nr in zip(sim._spk_step, sim._spk_neuron):  # first spike of each fault / timeout latch (the rest was counted on trimming)
         for x in nr.tolist():
             if x in fault_n and x not in seen_f:
-                seen_f.add(x); n_fault += 1
+                seen_f.add(x)
             elif x in timeout_n and x not in seen_t:
-                seen_t.add(x); n_timeout += 1
+                seen_t.add(x)
+    n_fault, n_timeout = len(seen_f), len(seen_t)
     stats = {"neurons": net.n, "tokens": len(sched), "outputs": len(first), "outputs_by_cell": outs, "loaded": dict(loaded),
              "ready": dict(n_ready), "load_steps": loads,
-             "faults": n_fault, "timeouts": n_timeout,
+             "faults": n_fault, "timeouts": n_timeout, "bad_outputs": bad,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
     return first, sim, stats
@@ -605,9 +689,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     k[b] += 1
         sim.step()
         s_ = sim.step_index - 1
+        if len(sim._spk_step) > 8 * window:  # keep the recent spikes only: 128 nodes' whole run was OOM-killed at 96 GB
+            del sim._spk_step[: -4 * window]; del sim._spk_neuron[: -4 * window]; del sim._spk_node[: -4 * window]
         while pending and s_ >= pending[0][0] + window:
             stp, b, cell = pending.pop(0)
-            outs[b][cell.name].append((stp, decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window, node=b)[0]))
+            v, status = decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window, node=b)
+            outs[b][cell.name].append((stp, v if status == "valid" else None))
         for b in range(B):
             if not done_nodes[b] and k[b] >= len(scheds[b]) and sum(len(v) for v in outs[b].values()) >= want[b]:
                 done_nodes[b] = True

@@ -75,8 +75,9 @@ def lower(prog: Program) -> list[tuple]:
                 emit("STORE", prog.ports["out"])
             elif op == "CALL":
                 inline_id[0] += 1
-                body(ins.target, f"{suffix}@{inline_id[0]}")
-                place(f"__ret{suffix}@{inline_id[0]}")
+                k = inline_id[0]  # nested calls advance the counter: keep this call's id for its return label
+                body(ins.target, f"{suffix}@{k}")
+                place(f"__ret{suffix}@{k}")
             elif op == "RET":
                 if ins is not prog.functions[fn][-1]:  # an early return: jump past the inlined body
                     emit("JMP", f"__ret{suffix}")  # (review finding: it fell through before)
