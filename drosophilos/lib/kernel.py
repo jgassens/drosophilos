@@ -401,9 +401,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
             n_words, contents = c.mem
             addr_taps = [[A_rails[j][0].u, A_rails[j][1].u] for j in range(max(1, (n_words - 1).bit_length()))]
+            # a bit that is the same in every word needs one relay, not one per word (a 256-entry
+            # one-bit map cost sixteen bits' worth of relays before this: 12k neurons per read)
+            same = {i: ((next(iter(contents.values())) >> i) & 1) for i in range(n)
+                    if contents and all(((v >> i) & 1) == ((next(iter(contents.values())) >> i) & 1) for v in contents.values())}
+            for i, r in same.items():
+                add_veto_relay(net, drive, f"{name}.rom.b{i}", act_d, [], Bt[i][r])
             for w, value in contents.items():  # an unwritten address reads nothing: the cell stalls (fail-stop)
                 vn = add_veto_neuron(net, drive, f"{name}.rom.w{w}.notw", address_vetoes(addr_taps, w))
                 for i in range(n):
+                    if i in same:
+                        continue
                     r = (value >> i) & 1
                     add_veto_relay(net, drive, f"{name}.rom.w{w}.b{i}", act_d, [], Bt[i][r], veto_neurons=[vn])
             U = _unit_rails(net, drive, f"{name}.u", "MOV", G)

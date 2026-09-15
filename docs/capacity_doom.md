@@ -59,6 +59,14 @@ estimate below scales accordingly (~3 minutes per frame at 10⁴ columns in flig
 411 s of neural time, every pixel right, 7,992 s of wall time; the slideshow's three 80 × 50
 frames in 344 s of neural time. The cluster estimate below is measured at 128 brains.
 
+**Measured Doom-shaped program (`examples/doom1.c`, 2026-09-15):** a tick kernel moving the
+player (19 cells), a column pass casting a four-step ray per column into RAM height and
+distance buffers (48 cells), a pixel pass (13 cells): 443k neurons per copy at 16 bits, so
+one copy is about three brains — the column kernel alone is ~265k. The cells, not the
+tables, are the cost (~5.5k neurons per 16-bit cell); the constant bits of a ROM are now
+one relay each. An 8-bit column kernel would halve it; a shorter ray walk (two steps) or a
+distance table per (cell, angle) would halve it again.
+
 **Measured pixel kernel (2026-09-15):** `examples/frame.c`, one pixel per token, sixteen
 cells, 64,948 neurons at 16 bits, ~1.2 s per pixel per kernel: a 160 × 100 frame on 128
 kernels is ~150 s of neural time, on 1,000 ~20 s. The simulator, not the substrate, is the
