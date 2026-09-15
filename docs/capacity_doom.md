@@ -134,3 +134,15 @@ interneuron (the relay → GABA → relay motif). H0 found its 50 embeddings by 
 motif as a whole; the netlist search must place motifs (latch pair + relay + inhibitor,
 chains as paths) rather than neurons, with backtracking. That is the Stage H search, not
 built; the number to beat is 10 %.
+
+**Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
+loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual
+projection and centrifugal, photoreceptors). The frame used none of them (Profile 3). Under
+Profile 2 they would barely be usable for this circuit family: of the 1,223 reciprocal
+cholinergic pairs strong enough for a latch at the H0 policy, 5 are in the visual system
+(368 of 12,315 at four times the scale; MeTu1–MeTu1, MeTu2b–MeTu2b, LC10a–LC10a lead). The
+optic lobes are wired feed-forward, column by column; the latch-and-relay machine would live
+in the central brain and nerve cord, as H0's circuit did. Two separate experiments would
+bring the visual system in: driving the 6,098 photoreceptor and lamina neurons with the
+rendered frame as light (the fly watching, input to the visual system) or a circuit family
+built from the optic lobe's own motifs (not started).
