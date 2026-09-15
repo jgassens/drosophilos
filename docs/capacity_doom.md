@@ -122,3 +122,15 @@ interneuron driving 455 latch members) have no anatomical counterpart — the pl
 must split them into trees of inhibitory neurons, the relay overhead H0 measured as zero for
 its 15 neurons. That search, netlist-driven rather than hand-designed as H0's was, is the
 first task of Stage H; its target is the 4-bit adder, then one cell.
+
+First tool, first number (`connectome/embed_netlist.py`): a greedy placement of the 4-bit
+ordered adder's netlist (614 neurons, 1,146 edges) onto MCNS under the H0 rules — most
+constrained neuron first, candidates restricted to real neurons adjacent with enough
+synapses and the right sign to every placed neighbour, no backtracking — places 226 neurons
+and carries 116 edges (10 %) in under a second. What it misses says what the real search
+must do: delay-chain hops (96 of 100 unplaced: a chain is a path of strong cholinergic
+edges, which a greedy start rarely lands on), latch members and their relay's inhibitory
+interneuron (the relay → GABA → relay motif). H0 found its 50 embeddings by searching the
+motif as a whole; the netlist search must place motifs (latch pair + relay + inhibitor,
+chains as paths) rather than neurons, with backtracking. That is the Stage H search, not
+built; the number to beat is 10 %.
