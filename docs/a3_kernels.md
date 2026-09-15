@@ -290,6 +290,29 @@ programs the compiler accepted and compiled to something other than their meanin
 | The batched runner reported no faults, timeouts or bad outputs | It counts them per node |
 | An outer loop that is only a counter was refused | Allowed: its stream only paces |
 
+## 11. Neural pacing: the phase order moves into the substrate (Stage F2, first step)
+
+Until now the host kept the frame's phase order — a frame's columns, then its pixels, then
+the tick — by holding tokens back until earlier outputs were out (§7, the hybrid control
+plane). Now the order is the substrate's. Each phase has an OK pair (a kill pair: "this phase
+is open"); a stream's input register commits a token only while its phase is open (the pair
+joins the register's commit chain like a reader's "free" rail). A phase ends with a pulse
+that closes its pair and opens the next one: for a pass of K tokens per frame, the compiler
+adds a wrapping counter (three cells: `cnt = cnt == K−1 ? 0 : cnt + 1`, requested by the
+pass's output cell) and the end pulse is the counter's done, delayed 32 ms, vetoed by the
+count's "not zero" rail; the tick phase ends at the tick kernel's state landing (its state
+carrier's done — measured: ending it at the tick *token's* landing let the next frame's
+columns read the old heading). The first phase is open at power-up.
+
+The host then only deals tokens in program order, as fast as each register's READY allows;
+tokens for a closed phase wait in their register's stage. Measured on the two-pass renderer
+(three kernels, 36,880 neurons with the two counters): two frames, sixteen pixels and two
+frame records equal to the interpreter's, no fault, with a barrier-free schedule
+(`tests/test_kernel.py::test_neural_pacing_replaces_the_host_barriers`). What stays with
+the host: dealing tokens to copies, the per-copy token counts (image constants), and the
+tick's *input* (the game's controls, which are input by definition). The benchmark label
+for the frame loop's ordering moves from *hybrid* to *neural*; the dealing stays hybrid.
+
 ## 8. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel

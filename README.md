@@ -94,6 +94,9 @@ uv run pytest
   token per pixel, on 128 copies of a 16-cell pixel kernel (65k neurons each) on one H200 —
   all 16,000 pixels equal to the reference in 411 s of neural time; a three-frame slideshow
   with a tick kernel turning the view likewise (`RESULTS.md`, `docs/img/frame160_neural.png`).
+- **Neural pacing (Stage F2, first step).** The frame's phase order lives in the substrate
+  (phase gates on the input registers, wrapping counters from the compiler); the host only
+  deals tokens in program order (`docs/a3_kernels.md` §11).
 - **Profile 2 feasibility measured.** The kernels above are free synthesis (Profile 3). MCNS
   holds 1,223 reciprocal cholinergic pairs strong enough for a latch at the H0 weight
   policy (12,315 at four times the scale), 5 of them in the visual system; the render

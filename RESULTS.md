@@ -829,6 +829,12 @@ policy in count; a kernel needs a larger weight scale or added edges, and a netl
 placement search that does not exist yet. That is Stage H, and every result here carries the
 label *Profile 3*.
 
+**Stage F2, first step (later the same day):** the frame's phase order — columns, then pixels,
+then the tick — is now enforced inside the substrate by phase gates on the input registers
+and wrapping counters the compiler adds, and the host only deals tokens in program order;
+the two-pass renderer ran two frames correctly with no host barrier at all
+(`docs/a3_kernels.md` §11).
+
 What this is: the plan's Stage E1 shape (exact integer rendering, pixel records streamed,
 assets compiled into ROM relays) and Stage D shape (a world-update kernel driving it) on
 the batched simulator that stands in for a cluster of brains, under the hybrid control

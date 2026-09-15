@@ -30,12 +30,17 @@ def main():
     ap.add_argument("--max-ms", type=float, default=3600000)
     ap.add_argument("--out", default="data/a2/doom1")
     ap.add_argument("--json", default=None)
+    ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     a = ap.parse_args()
     prog = compile_c(open(a.source).read())
-    ks = compile_program(prog, params={"px": 128, "py": 128, "heading": 0})
-    col_s, tick_s, pix_s = ks.streams  # "input" (columns), the frame counter (tick), the pixel loop
     W, H, B, F = a.width, a.height, a.nodes, a.frames
+    per_node_cols = -(-W // B)  # neural pacing needs the same token counts on every copy: W must divide by B
+    if a.pacing == "neural" and W % B:
+        raise SystemExit(f"neural pacing: the width {W} must be a multiple of the copies {B}")
+    ks = compile_program(prog, params={"px": 128, "py": 128, "heading": 0}, pacing=a.pacing,
+                         counts={"input": per_node_cols, "p": per_node_cols * H} if a.pacing == "neural" else None)
+    col_s, tick_s, pix_s = ks.streams[:3]  # "input" (columns), the frame counter (tick), the pixel loop
     sx, sy = 160 // W, 100 // H
     cols = [x * sx for x in range(W)]
     rows = [y * sy for y in range(H)]
@@ -61,17 +66,18 @@ def main():
     for b in range(B):
         sc, owed = [], 0
         for f in range(F):
-            sc += [("input", c, owed) for c in deal[b]]
+            bar = (lambda x: x) if a.pacing == "host" else (lambda x: 0)  # neural pacing: no host barrier
+            sc += [("input", c, bar(owed)) for c in deal[b]]
             owed += len(deal[b]) * len(store_cells)
-            sc += [(pix_s, (r << 8) | c, owed) for c in deal[b] for r in rows]
+            sc += [(pix_s, (r << 8) | c, bar(owed)) for c in deal[b] for r in rows]
             owed += len(deal[b]) * len(rows)
-            sc.append((tick_s, ticks[f], owed))
+            sc.append((tick_s, ticks[f], bar(owed)))
             owed += n_tick
         scheds.append(sc)
         expect.append(owed)
     P = Params()
-    pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams)
-    print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {W}x{H} pixels x {F} frames", flush=True)
+    pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams, phases=ks.phases)
+    print(f"kernels: {len(ks.cells)} cells, {pl.net.n} neurons per node, {B} nodes, {W}x{H} pixels x {F} frames, pacing {a.pacing}", flush=True)
     t0 = time.time()
     if B == 1:
         outs1, sim, st = run_pipeline(pl, P, scheds[0], max_ms=a.max_ms, expect_outputs=expect[0])
