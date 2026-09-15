@@ -12,7 +12,11 @@ level) and a datapath on the levels of its sources:
 Cell kinds: ALU ops (ADD SUB AND OR XOR MOV MUL) on sources a, b; LOAD (RAM read at
 address a); SEL (c != 0 ? a : b, c a cell whose Z flag decides). Sources: "input" (the
 input register the host loads, one token after each READY), ("const", name), or a cell
-name. A source built later than its reader is a feedback edge (loop-carried state): the
+name, "input:NAME" (another input stream: a second host-loaded register), or
+("param", cell) — a level read without a request and without holding the producer's commit,
+for a value that changes only between the reader's tokens (a renderer's heading from the
+world update); the host must pace the streams so the producer never commits while a reader
+of the parameter is in flight. A source built later than its reader is a feedback edge (loop-carried state): the
 reader's request for it is asserted by the image, and the cell carries `init`, the state's
 value at power-up. A cell listing "input" in `trigger` is requested by every input token
 even if it does not read it (a state update paced by the tick). `outputs` names the cells
@@ -73,6 +77,11 @@ class Cell:
                 out.append(src)
         return out
 
+    @property
+    def request_sources(self) -> list:
+        """Sources whose done pulse requests the cell: cells and input streams, not params or constants."""
+        return [x for x in self.sources if isinstance(x, str)] + [t for t in self.trigger if t not in self.sources]
+
 
 @dataclass
 class Pipeline:
@@ -87,6 +96,7 @@ class Pipeline:
     image_latches: list = field(default_factory=list)  # levels the host lights once (idle, no-request, ...)
     in_creq: list = None
     outputs: list = field(default_factory=list)  # output cells
+    inputs: dict = field(default_factory=dict)  # stream name -> (StagedRegister, producer P)
 
     @property
     def output(self) -> Cell:
@@ -141,33 +151,42 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
 
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
-                   outputs: list | None = None, in_watchdog_hops: int | None = None) -> Pipeline:
+                   outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
-    `outputs`: names of the cells the host decodes (default: the last)."""
+    `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
+    stream names (default ["input"]; a stream NAME is the source "input:NAME")."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
-    # ---- input register: producer P (host-loaded) -> stage -> master, commit gated by its readers
-    P = add_register(net, drive, "IN.P", n, with_completion=False)
-    S = add_register(net, drive, "IN.Q", n, with_completion=True)
-    for i in range(n):
-        for r in (0, 1):
-            relay = add_edge_relay(net, drive, f"IN.data.b{i}r{r}", P.rails[i][r].u)
-            net.synapse(relay, S.rails[i][r].u, drive.ignite)
-    connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)
-    wire_fault_path(net, drive, P, S)
-    # the producer's watchdog must outlast the stage's completion, which grows with the width
-    # (the completion tree is one level deeper per doubling and the rail events are more):
-    # 148 ms after the load at 8 bits, 308 ms at 32. A fixed 55 hops (~290 ms) timed out the
-    # 32-bit input register before its stage completed, cleared the stage, and the commit
-    # then copied an empty stage as double rails (measured).
-    add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
-    in_reg = add_staged_commit(net, drive, "IN", S, P, ordered_grant=True)
-    in_creq = add_kill_pair(net, drive, "IN.creq")  # [nothing to commit, commit pending]
-    rl = add_edge_relay(net, drive, "IN.autocommit", S.completion.u, fast_inhibitor=True)
-    net.synapse(rl, in_creq[1].u, drive.ignite)
-    image.append(in_creq[0])
+    streams = list(streams or ["input"])
+
+    def input_register(stream: str):
+        """Producer P (host-loaded) -> stage -> master, the commit gated by its readers."""
+        pre = "IN" if stream == "input" else f"IN.{stream}"
+        P = add_register(net, drive, f"{pre}.P", n, with_completion=False)
+        S = add_register(net, drive, f"{pre}.Q", n, with_completion=True)
+        for i in range(n):
+            for r in (0, 1):
+                relay = add_edge_relay(net, drive, f"{pre}.data.b{i}r{r}", P.rails[i][r].u)
+                net.synapse(relay, S.rails[i][r].u, drive.ignite)
+        connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)
+        wire_fault_path(net, drive, P, S)
+        # the producer's watchdog must outlast the stage's completion, which grows with the
+        # width (the completion tree is one level deeper per doubling and the rail events are
+        # more): 148 ms after the load at 8 bits, 308 ms at 32. A fixed 55 hops (~290 ms) timed
+        # out the 32-bit input register before its stage completed, cleared the stage, and the
+        # commit then copied an empty stage as double rails (measured).
+        add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
+        reg = add_staged_commit(net, drive, pre, S, P, ordered_grant=True)
+        creq = add_kill_pair(net, drive, f"{pre}.creq")  # [nothing to commit, commit pending]
+        rl = add_edge_relay(net, drive, f"{pre}.autocommit", S.completion.u, fast_inhibitor=True)
+        net.synapse(rl, creq[1].u, drive.ignite)
+        image.append(creq[0])
+        return reg, P, creq
+
+    inputs = {st: input_register(st) for st in streams}
+    in_reg, P, in_creq = inputs[streams[0]]
     const_rails = {name: _const_rails(net, drive, f"K.{name}", n) for name in (consts or {})}
     # Memories a kernel reads are ROMs: the contents are wired into the read relays (a rail
     # relay per set bit and per word, vetoed by "address is not w"), ~25 neurons per 8-bit
@@ -202,27 +221,36 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             for i, r in rails_for(c.init, n):
                 image.append(c.master.rails[i][r])
 
-    def rails_of(src):
+    def stream_of(src):
         if src == "input":
-            return [[in_reg.master.rails[i][0], in_reg.master.rails[i][1]] for i in range(n)]
+            return streams[0]
+        return src[len("input:"):] if isinstance(src, str) and src.startswith("input:") else None
+
+    def rails_of(src):
+        st = stream_of(src)
+        if st is not None:
+            m = inputs[st][0].master
+            return [[m.rails[i][0], m.rails[i][1]] for i in range(n)]
         if isinstance(src, tuple) and src[0] == "const":
             return const_rails[src[1]]
+        if isinstance(src, tuple) and src[0] == "param":
+            src = src[1]
         return [[cells[src].master.rails[i][0], cells[src].master.rails[i][1]] for i in range(n)]
 
     def done_of(src):
-        return in_reg.done_relay if src == "input" else cells[src].reg.done_relay
+        st = stream_of(src)
+        return inputs[st][0].done_relay if st is not None else cells[src].reg.done_relay
 
     # ---- pass 2: requests, start, datapath
     built = set()
     for c in order:
-        req_sources = [s for s in c.sources if isinstance(s, str)] + [t for t in c.trigger if t not in c.sources]
-        for src in req_sources:
+        for src in c.request_sources:
             pair = add_kill_pair(net, drive, f"{c.name}.req.{src}")
             c.reqs[src] = pair
             trig = net.neuron(f"{c.name}.trigger.{src}")
             net.synapse(done_of(src), trig, drive.relay_in)
             net.synapse(trig, pair[1].u, drive.ignite)
-            if src != "input" and src not in built:  # feedback: the state is there at power-up
+            if stream_of(src) is None and src not in built:  # feedback: the state is there at power-up
                 c.feedback.add(src)
                 image.append(pair[1])
                 assert cells[src].init is not None, f"{c.name} reads {src} before it is written: it needs an init"
@@ -324,9 +352,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
 
     for c in order:
         c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, [r for r in order if c.name in r.reqs])
-    gate_commit("input", in_creq, in_reg.commit_in, [r for r in order if "input" in r.reqs])
+    for st, (reg, _, creq) in inputs.items():
+        key = "input" if st == streams[0] else f"input:{st}"
+        gate_commit(key, creq, reg.commit_in, [r for r in order if key in r.reqs])
     outs = [cells[o] for o in (outputs or [order[-1].name])]
-    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs)
+    pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
+                  {st: (reg, P_) for st, (reg, P_, _) in inputs.items()})
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: v for k, (_, v) in (mems or {}).items()}
     return pl
@@ -432,57 +463,77 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
             sim.add_events(node, [step], [pl.net.roles.index(f"{c.name}.u{k}r{r}.u")], [pl.drive.ignite])
 
 
-def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: float = 60000, gap_ms: float = 0.0,
+def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 60000, gap_ms: float = 0.0,
                  sim=None, per_token: int | None = None) -> tuple[list, RefSim, dict]:
-    """Streams `tokens` into the input producer (each after the input stage's READY, and no
-    sooner than `gap_ms` after the previous one) and decodes every completion of each output
-    cell's master in order. Steps the simulator one step at a time and reads the per-step
-    spike lists (a trace rebuild per poll is quadratic). Returns the first output's list of
-    (step, value) as before; `stats["outputs_by_cell"]` holds every output's list. The run ends
-    when every output has produced `per_token` values per token (default 1) or at `max_ms`."""
+    """Streams `tokens` into the input producers and decodes every completion of each output
+    cell's master in order. A token is a value (the first stream), a pair (stream, value), or
+    a triple (stream, value, min_outputs): the host schedule; a triple is loaded only once the
+    outputs so far (all cells) number at least min_outputs, which is how the host paces a
+    parameter's producer (a world-update tick) behind the readers in flight (a frame's
+    columns). Every token goes in after its stream's READY and no sooner than `gap_ms` after
+    the previous load. Steps the simulator one step at a time and reads the per-step spike
+    lists (a trace rebuild per poll is quadratic). Returns the first output's list of (step,
+    value); `stats["outputs_by_cell"]` holds every output's list. The run ends when the outputs
+    number `per_token` per token (default: one per token over all output cells... see `want`)
+    or at `max_ms`."""
     net, drive = pl.net, pl.drive
     sim = sim or RefSim(net.topology(), params)
     load_pipeline_image(sim, pl)
     sim.run(3000)  # the image's completions settle
-    P, S = pl.input_producer, pl.input_reg.stage
+    first_stream = next(iter(pl.inputs))
+    sched = []
+    for t in tokens:
+        if isinstance(t, tuple):
+            sched.append((t[0], t[1], t[2] if len(t) > 2 else 0))
+        else:
+            sched.append((first_stream, t, 0))
     window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
     gap = int(gap_ms / params.dt)
-    ready_n = S.ready
+    ready_of = {st: reg.stage.ready for st, (reg, _) in pl.inputs.items()}
+    n_ready = {st: 0 for st in pl.inputs}
+    loaded = {st: 0 for st in pl.inputs}
+    last_ready = {st: None for st in pl.inputs}
     comp = {c.completion.u: c for c in (o.master for o in pl.outputs)}
     outs = {c.name: [] for c in pl.outputs}
     last_wm = {u: None for u in comp}
-    loads, last_ready, n_ready, k = [], None, 0, 0
+    loads, k = [], 0
     pending = []  # (completion step, output cell)
-    want = (per_token or 1) * len(tokens)
+    want = per_token * len(sched) if per_token else len(sched)  # total outputs over all cells
     while sim.step_index < int(max_ms / params.dt):
-        if k < len(tokens) and n_ready >= k and (not loads or sim.step_index >= loads[-1] + gap):  # after the k-th READY
-            t = sim.step_index + 5
-            for i, r in rails_for(tokens[k], pl.n):
-                sim.add_events(0, [t], [P.rails[i][r].u], [drive.ignite])
-            loads.append(t)
-            k += 1
+        if k < len(sched):
+            st, value, min_outs = sched[k]
+            n_out = sum(len(v) for v in outs.values())
+            if n_ready[st] >= loaded[st] and n_out >= min_outs and (not loads or sim.step_index >= loads[-1] + gap):
+                t = sim.step_index + 5
+                Pst = pl.inputs[st][1]
+                for i, r in rails_for(value, pl.n):
+                    sim.add_events(0, [t], [Pst.rails[i][r].u], [drive.ignite])
+                loads.append(t)
+                loaded[st] += 1
+                k += 1
         sim.step()
         s_ = sim.step_index - 1
         while pending and s_ >= pending[0][0] + window:
-            st, cell = pending.pop(0)
-            outs[cell.name].append((st, decode_recent(sim, cell.master.rail_taps[: pl.n], st + window, window)[0]))  # R bits; C Z V follow
-        if all(len(v) >= want for v in outs.values()):
+            stp, cell = pending.pop(0)
+            outs[cell.name].append((stp, decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window)[0]))  # R bits; C Z V follow
+        if k >= len(sched) and sum(len(v) for v in outs.values()) >= want:
             break
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
             continue
         fired = sim._spk_neuron[-1]
-        if ready_n in fired:
-            if last_ready is None or s_ - last_ready > 3 * period:
-                n_ready += 1
-            last_ready = s_
+        for st, rn in ready_of.items():
+            if rn in fired:
+                if last_ready[st] is None or s_ - last_ready[st] > 3 * period:
+                    n_ready[st] += 1
+                last_ready[st] = s_
         for u, master in comp.items():
             if u in fired:
                 if last_wm[u] is None or s_ - last_wm[u] > 3 * period:
                     pending.append((s_, next(o for o in pl.outputs if o.master is master)))
                 last_wm[u] = s_
     first = outs[pl.outputs[0].name]
-    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {pl.input_reg.stage.fault_latch.u}
-    timeout_n = {pl.input_producer.watchdog.timeout.u} if pl.input_producer.watchdog is not None else set()
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
+    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     n_fault = n_timeout = 0
     seen_f, seen_t = set(), set()
     for st_, nr in zip(sim._spk_step, sim._spk_neuron):  # first spike of each fault / timeout latch
@@ -491,7 +542,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: flo
                 seen_f.add(x); n_fault += 1
             elif x in timeout_n and x not in seen_t:
                 seen_t.add(x); n_timeout += 1
-    stats = {"neurons": net.n, "tokens": len(tokens), "outputs": len(first), "outputs_by_cell": outs,
+    stats = {"neurons": net.n, "tokens": len(sched), "outputs": len(first), "outputs_by_cell": outs,
              "faults": n_fault, "timeouts": n_timeout,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}

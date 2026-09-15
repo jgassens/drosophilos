@@ -58,6 +58,9 @@ def main():
     chunk = 2000
     while sim.step_index < max_steps:
         sim.run(chunk)
+        if len(sim._spk_step) > 4 * chunk:  # keep the recent spikes only: the whole trace of a long run does not fit (a 517-instruction run was OOM-killed at 16 GB)
+            del sim._spk_step[: -2 * chunk]; del sim._spk_neuron[: -2 * chunk]
+            if hasattr(sim, "_spk_node"): del sim._spk_node[: -2 * chunk]
         for s_ in recent_spikes(sim, wm, sim.step_index - chunk - 1):  # never poll sim.trace: it sorts everything
             if last is None or s_ - last > 3 * period:
                 v = decode_recent(sim, out.rail_taps, int(s_), window)[0]

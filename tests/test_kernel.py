@@ -166,3 +166,22 @@ def test_neural_perspective_kernel_renders_eight_columns():
     assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, list(range(8)))], (outs, st)
     assert st["faults"] == 0 and st["timeouts"] == 0
     print("perspective kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+@pytest.mark.slow
+def test_two_streams_with_a_parameter_edge_host_paced():
+    """A world-update cell (state: heading += 1 per tick token) and a column kernel reading the
+    heading as a parameter; the host streams a frame's columns, then a tick, then the next frame."""
+    spec = [{"name": "hd", "op": "ADD", "a": "hd", "b": ("const", "k1"), "init": 3, "trigger": ["input:tick"]},
+            {"name": "c1", "op": "ADD", "a": "input", "b": ("param", "hd")},
+            {"name": "c2", "op": "AND", "a": "c1", "b": ("const", "k7")}]
+    pl = build_pipeline(PARAMS, 8, spec, consts={"k1": 1, "k7": 7}, outputs=["c2", "hd"], streams=["input", "tick"])
+    # the host paces both ways: a tick waits for the frame's columns (their pixels are out), and
+    # the next frame's columns wait for the tick's state to have landed (its output is out);
+    # the third number is the count of outputs, over all cells, that must be out first
+    sched = [0, 1, 2, ("tick", 0, 3), ("input", 0, 4), ("input", 1, 4), ("input", 2, 4), ("tick", 1, 7), ("input", 5, 8)]
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=40000)
+    expect = [(0 + 3) & 7, (1 + 3) & 7, (2 + 3) & 7, (0 + 4) & 7, (1 + 4) & 7, (2 + 4) & 7, (5 + 5) & 7]
+    assert [v for _, v in outs] == expect, (outs, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0
+    print("two streams", {k: v for k, v in st.items() if k != "outputs_by_cell"})
