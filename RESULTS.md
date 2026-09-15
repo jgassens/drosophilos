@@ -831,7 +831,8 @@ How it is known to have worked, with nothing taken on trust from the machine:
   body of the IR becomes a resident pipeline, one cell per operation, the induction variable
   streamed by the host, loop-invariant variables as image-time parameters, arrays as memories
   addressed by the index (the base folds away). The renderer's column loop compiles to four
-  cells (ADD, AND, LOAD map, LOAD htab; 13,727 neurons at 8 bits) and the kernel reference
+  cells (ADD, AND, LOAD map, LOAD htab; 10,820 neurons at 8 bits with the two tables as ROM
+  relays, 13,727 with RAM masters) and the kernel reference
   equals the IR interpreter's pixels for three headings. **Neural: 8 columns, 8 correct
   pixels, one per 1.18 s self-paced, 4.5 s latency** — against ~32 s per column on the
   sequencer, a ~27× gain at the machine's neuron count. Getting there took a handshake
@@ -842,7 +843,10 @@ How it is known to have worked, with nothing taken on trust from the machine:
   state, two outputs per tick) compiles to 13 cells (28,420 neurons) and runs three ticks
   neurally with every output correct, one tick per 6.0 s against ~45 s on the sequencer.
   The builder now joins a cell's requests over every source and gates a commit on every
-  reader (`docs/a3_kernels.md` §4).
+  reader. With the velocity read every tick (`examples/tick2.c`) the token is the input and
+  eight ticks of varied input, wall wrap and clamp included, come out right; 32-bit cells run
+  (a three-cell 32-bit kernel, 1.99 s per token) once the input register's watchdog scales
+  with the width (`docs/a3_kernels.md` §4–5).
 - **Second review** (Kimi stalled; the `claude-fable` fallback reviewed `26fa035`): the empty
   status word found independently; the refusal window after completion corrected to ~25 ms;
   a commit watchdog added (a hung COMMIT is now a counted timeout); the written/cleared pulses
@@ -866,7 +870,9 @@ How it is known to have worked, with nothing taken on trust from the machine:
   player, contact costs health, three ticks, one pixel record per entity per tick and the
   health at the end): 65 machine words, 133 instructions per run; the C reference, the IR
   interpreter and the machine reference agree on all outputs and the canonical state for
-  three inputs. Its neural run is in progress (`bench/run_program.py examples/tick.c --inputs 5`).
+  three inputs. **Neural (sequencer): all seven outputs match** — [25, 88, 30, 86, 35, 84,
+  100] in 154 s of neural time (936 s wall on one core) — after the ALU hole below was
+  closed; the first attempt faulted at the sixth instruction.
 - **Stage E1 shape, on the references**: `examples/render.c`, a toy renderer in the shape of
   the `r_segs` column loop (for each of 8 columns the wall distance from a map array indexed by
   the heading, the height from a lookup table, one pixel record per column, a frame record,

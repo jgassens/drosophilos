@@ -29,7 +29,7 @@ stands:
 |---|---|
 | one tick (10 objects × 100 ops, Q16.16 at 32 bits) | ~10³ instructions ≈ 17 min of neural time |
 | one frame (16,000 columns-pixels × ~30 ops) | ~5 × 10⁵ instructions ≈ 6 days of neural time |
-| 32-bit datapath | ALU ~9k neurons, array multiplier ~50k (16 rows re-timed), fits one 166k-neuron brain as a resident kernel |
+| 32-bit datapath | measured: a 32-bit ADD cell ~10.8k neurons (with its input register), 1.99 s per token in a pipeline; a 16-bit MUL cell 27.9k neurons (`docs/a3_kernels.md` §5); a 32×32 multiplier cell is estimated at ~100k, so it must be shared |
 | program of 5,000 words | ~1.2 M neurons of program image: seven brains of nothing but code |
 
 The sequencer is the wrong execution model for the renderer by four orders of magnitude,

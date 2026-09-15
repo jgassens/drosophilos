@@ -87,3 +87,28 @@ def test_neural_state_kernel_runs_three_ticks():
     got = [[v for _, v in st["outputs_by_cell"][o]] for o in ks.outputs]
     assert got == [list(col) for col in zip(*kernel_outputs(ks, [3, 2, 1]))], (got, st)
     print("state kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+TICK2 = open("examples/tick2.c").read()
+VELS = [5, 5, 250, 3, 0, 40, 40, 40]  # includes a west-wall wrap and an east-wall clamp
+
+
+def test_per_tick_input_makes_the_velocity_the_token():
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(TICK2)
+    ks = compile_kernel(prog, loop_body(prog), "i")
+    assert "input" in (ks.cells[0]["a"], ks.cells[0].get("b")) and not ks.cells[0].get("trigger")  # px + vel reads the token itself
+    assert [v for pair in kernel_outputs(ks, VELS) for v in pair] == interpret(prog, VELS)["outs"][:16]
+
+
+@pytest.mark.slow
+def test_neural_state_kernel_with_fresh_input_every_tick():
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(TICK2)
+    ks = compile_kernel(prog, loop_body(prog), "i")
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs)
+    outs, sim, st = run_pipeline(pl, PARAMS, VELS, max_ms=90000)
+    got = [[v for _, v in st["outputs_by_cell"][o]] for o in ks.outputs]
+    assert got == [list(col) for col in zip(*kernel_outputs(ks, VELS))], (got, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0
+    print("state kernel, fresh input", {k: v for k, v in st.items() if k != "outputs_by_cell"})

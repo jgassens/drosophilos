@@ -38,7 +38,8 @@ from .control import add_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
-from .ram import Memory, add_memory, add_read_port
+from .ram import address_vetoes
+from ..protocol.celement import add_veto_neuron
 from .staged import StagedRegister, add_staged_commit
 
 
@@ -49,7 +50,7 @@ class Cell:
     a: object  # source: a Cell name, "input", or ("const", name)
     b: object = None  # ALU second operand / SEL's "c == 0" arm; None for LOAD
     c: object = None  # SEL's condition cell (its Z flag)
-    mem: Memory | None = None  # for LOAD cells
+    mem: tuple | None = None  # for LOAD cells: (n_words, contents) of the ROM
     init: int | None = None  # state cells: the master's value at power-up
     trigger: tuple = ()  # extra request sources ("input")
     reg: StagedRegister | None = None
@@ -139,7 +140,7 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
 
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
-                   outputs: list | None = None) -> Pipeline:
+                   outputs: list | None = None, in_watchdog_hops: int | None = None) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last)."""
@@ -155,14 +156,23 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             net.synapse(relay, S.rails[i][r].u, drive.ignite)
     connect_trigger(net, drive, S.completion.u, P.reset_trigger, P.reset_edge)
     wire_fault_path(net, drive, P, S)
-    add_liveness(net, drive, P, S, 55)
+    # the producer's watchdog must outlast the stage's completion, which grows with the width
+    # (the completion tree is one level deeper per doubling and the rail events are more):
+    # 148 ms after the load at 8 bits, 308 ms at 32. A fixed 55 hops (~290 ms) timed out the
+    # 32-bit input register before its stage completed, cleared the stage, and the commit
+    # then copied an empty stage as double rails (measured).
+    add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
     in_reg = add_staged_commit(net, drive, "IN", S, P, ordered_grant=True)
     in_creq = add_kill_pair(net, drive, "IN.creq")  # [nothing to commit, commit pending]
     rl = add_edge_relay(net, drive, "IN.autocommit", S.completion.u, fast_inhibitor=True)
     net.synapse(rl, in_creq[1].u, drive.ignite)
     image.append(in_creq[0])
     const_rails = {name: _const_rails(net, drive, f"K.{name}", n) for name in (consts or {})}
-    mem_objs = {name: add_memory(net, drive, f"MEM.{name}", nw, n) for name, (nw, _) in (mems or {}).items()}
+    # Memories a kernel reads are ROMs: the contents are wired into the read relays (a rail
+    # relay per set bit and per word, vetoed by "address is not w"), ~25 neurons per 8-bit
+    # word against ~250 for a RAM master with its completion and reset. A kernel never
+    # writes memory (STOREX is rejected), so nothing is lost.
+    mem_objs = {name: (nw, dict(contents)) for name, (nw, contents) in (mems or {}).items()}
 
     # ---- pass 1: every cell's stage, master, handshake pairs (sources may be built later: feedback)
     cells: dict[str, Cell] = {}
@@ -230,11 +240,16 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name
-        if c.op == "LOAD":  # address = A (a level): read port driven by ACT^d into token latches, PASSB through the ALU
+        if c.op == "LOAD":  # address = A (a level): ROM read driven by ACT^d into token latches, PASSB through the ALU
             A_rails = rails_of(c.a)
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
-            addr_taps = [[A_rails[j][0].u, A_rails[j][1].u] for j in range(max(1, (c.mem.n_words - 1).bit_length()))]
-            add_read_port(net, drive, f"{name}.rd", c.mem, act_d, addr_taps, [[l for l in pair] for pair in Bt])
+            n_words, contents = c.mem
+            addr_taps = [[A_rails[j][0].u, A_rails[j][1].u] for j in range(max(1, (n_words - 1).bit_length()))]
+            for w, value in contents.items():  # an unwritten address reads nothing: the cell stalls (fail-stop)
+                vn = add_veto_neuron(net, drive, f"{name}.rom.w{w}.notw", address_vetoes(addr_taps, w))
+                for i in range(n):
+                    r = (value >> i) & 1
+                    add_veto_relay(net, drive, f"{name}.rom.w{w}.b{i}", act_d, [], Bt[i][r], veto_neurons=[vn])
             U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
@@ -388,10 +403,6 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
     for name, rails in pl.consts.items():
         for i, r in rails_for(pl.const_values[name], pl.n):
             sim.add_events(node, [step], [rails[i][r].u], [pl.drive.ignite])
-    for name, mem in pl.mems.items():
-        for addr, v in pl.mem_contents[name].items():
-            for i, r in rails_for(v, pl.n):
-                sim.add_events(node, [step], [mem.words[addr].rails[i][r].u], [pl.drive.ignite])
     for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
@@ -436,7 +447,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: flo
         s_ = sim.step_index - 1
         while pending and s_ >= pending[0][0] + window:
             st, cell = pending.pop(0)
-            outs[cell.name].append((st, decode_recent(sim, cell.master.rail_taps, st + window, window)[0]))
+            outs[cell.name].append((st, decode_recent(sim, cell.master.rail_taps[: pl.n], st + window, window)[0]))  # R bits; C Z V follow
         if all(len(v) >= want for v in outs.values()):
             break
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
@@ -452,7 +463,18 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list[int], *, max_ms: flo
                     pending.append((s_, next(o for o in pl.outputs if o.master is master)))
                 last_wm[u] = s_
     first = outs[pl.outputs[0].name]
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {pl.input_reg.stage.fault_latch.u}
+    timeout_n = {pl.input_producer.watchdog.timeout.u} if pl.input_producer.watchdog is not None else set()
+    n_fault = n_timeout = 0
+    seen_f, seen_t = set(), set()
+    for st_, nr in zip(sim._spk_step, sim._spk_neuron):  # first spike of each fault / timeout latch
+        for x in nr.tolist():
+            if x in fault_n and x not in seen_f:
+                seen_f.add(x); n_fault += 1
+            elif x in timeout_n and x not in seen_t:
+                seen_t.add(x); n_timeout += 1
     stats = {"neurons": net.n, "tokens": len(tokens), "outputs": len(first), "outputs_by_cell": outs,
+             "faults": n_fault, "timeouts": n_timeout,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
     return first, sim, stats

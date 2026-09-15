@@ -67,10 +67,14 @@ def array_contents(prog: Program, fn: str = "main") -> dict:
     return out
 
 
-def loop_body(prog: Program, fn: str, label: str) -> list:
+def loop_body(prog: Program, fn: str = "main", label: str | None = None) -> list:
     """The instructions between the loop's exit test (the conditional jump after `label`) and
-    the back-jump to `label`, exclusive."""
+    the back-jump to `label`, exclusive. `label` None: the function's first loop."""
     body = prog.functions[fn]
+    if label is None:
+        label = next((x for x in body if isinstance(x, str) and x.startswith("loop")), None)
+        if label is None:
+            raise NotAKernel(f"no loop in {fn}")
     if label not in body:
         raise NotAKernel(f"no label {label} in {fn}")
     start = body.index(label) + 1
@@ -91,7 +95,9 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     default for any variable the body reads before writing and writes). Structured `if` /
     `if-else` inside the body (a JZ/JNZ over a label, an optional JMP to an end label) become
     select cells: both arms are computed and a SEL cell picks by the condition cell's Z flag.
-    Calls are inlined. Every OUT names an output cell."""
+    Calls are inlined. Every OUT names an output cell. An `in_read()` inside the body makes
+    its variable the token (fresh input per token); the induction variable is then only the
+    count the host streams."""
     params = dict(params or {})
     width = prog.width
     mask = (1 << width) - 1
@@ -106,6 +112,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     spec.state_cells = {}  # variable -> the cell that holds it across tokens
     env: dict = {stream: "input"}  # variable -> "input" | cell name | ("const", name)
     xaddr = [None]  # what __x holds: ("const", k) or (base_value, index source)
+    input_var = [None]  # the variable an in_read() inside the body assigns (the token)
     n_cells = [0]
     written = set()
     # variables read before they are written, and written somewhere in the body: state
@@ -124,7 +131,15 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             if ins.dst and ins.dst != "__x":
                 writes.add(ins.dst)
     scan(body)
-    for v in reads_first & writes:
+    in_vars = set()
+    def scan_in(instrs):
+        for ins in instrs:
+            if isinstance(ins, Instr) and ins.op == "IN":
+                in_vars.add(ins.dst)
+            elif isinstance(ins, Instr) and ins.op == "CALL":
+                scan_in(prog.functions[ins.target])
+    scan_in(body)
+    for v in (reads_first & writes) - in_vars:
         if v in params:
             raise NotAKernel(f"{v} is a parameter but the body writes it")
         if v not in state:
@@ -187,8 +202,14 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             if isinstance(ins, str):
                 continue
             op = ins.op
-            if op in ("JMP", "RET", "STOREX", "IN", "HALT"):
+            if op in ("JMP", "RET", "STOREX", "HALT"):
                 raise NotAKernel(f"{op} inside a kernel body")
+            if op == "IN":  # fresh input each token: the variable is the token itself
+                if input_var[0] is not None:
+                    raise NotAKernel("one in_read() per token")
+                input_var[0] = ins.dst
+                env[ins.dst] = "input"
+                continue
             if op == "CALL":
                 fbody = prog.functions[ins.target]
                 if fbody and isinstance(fbody[-1], Instr) and fbody[-1].op == "RET":

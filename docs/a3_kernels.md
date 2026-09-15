@@ -83,7 +83,7 @@ with the array bases folded away and `heading` an image-time parameter.
 
 | quantity | value |
 |---|---|
-| neurons | 13,727 (8-bit cells; the two memories are 8 words each) |
+| neurons | 10,820 (8-bit cells; the two 8-word memories are ROMs: the contents are wired into the read relays, ~25 neurons per word against ~250 for a RAM master; 13,727 with masters) |
 | pipeline latency, load to first pixel | 4.54 s |
 | throughput, self-paced | one pixel per 1.18 s (8 columns, 8 correct) |
 | the same loop on the sequencer | ~32 instructions per column ≈ 32 s |
@@ -129,10 +129,34 @@ the fan-out test run unchanged on the new builder.
 | gain | ~7.5× (a dependent loop pipelines nothing; the gain is the sequencer's overhead) |
 | simulation | 75 s wall for 22 s of neural time |
 
-## 5. What it is not yet
+With fresh input every tick (`examples/tick2.c`: `vel = in_read()` at the top of the loop, so
+the velocity is the token and px, mx, health the state) the same kernel runs eight ticks with
+velocities that wrap the player into the west wall and clamp it at the east one: all sixteen
+outputs equal the IR interpreter's, 5.92 s per tick, no fault or timeout.
+
+## 5. Wider cells (2026-09-15)
+
+| cell | neurons (with the input register) | note |
+|---|---|---|
+| 32-bit ADD cell | 10,754 | a three-cell 32-bit kernel (ADD, XOR, SUB): 28,507 neurons, four tokens correct, 1.99 s per token, 4.8 s latency (the 32-stage carry ripple) |
+| 16-bit MUL cell | 27,877 | built, not yet run |
+
+The input register's producer watchdog now scales with the width (60 + 4n hops): the stage's
+completion comes 148 ms after the load at 8 bits and 308 ms at 32 (a deeper completion tree
+and more rail events), and the fixed 55 hops (~290 ms) timed the 32-bit register out before
+its stage completed; the timeout cleared the stage, the commit then copied an empty stage as
+double rails, and the operand gates of the first cell were vetoed on every bit. Two more
+rules from it: the runner decodes the R bits only (a master carries C, Z and V above them:
+bit 32 read as 2³² until masked), and every kernel run reports its fault-latch and timeout
+counts, which the pipeline's `stats` now carry.
+
+## 6. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel
   of its own with a stream, and joining two kernels is the next compiler step.
+- Memories are read-only (ROM relays); a kernel that writes memory (a framebuffer, a
+  z-buffer) needs RAM masters with the write port's handshake, which the sequencer has and
+  the kernels do not yet use.
 - Kernel parameters are image-time constants; a per-frame parameter (the heading) needs a
   parameter port the host rewrites between frames, which is a staged register like the input.
 - The cells are 8-bit; the Q16.16 datapath of `minidoom` needs 32-bit cells and a multiplier
