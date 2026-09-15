@@ -185,15 +185,17 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
         spec.consts[name] = v
         return ("const", name)
 
-    def src(v):
-        if v in env:
-            return env[v]
+    def src_in(env_, v):
+        """The source for variable v in the environment of the arm being compiled (an if-arm's
+        temporaries live in its own copy of the environment: review-found closure bug)."""
+        if v in env_:
+            return env_[v]
         if v not in prog.variables:
             raise NotAKernel(f"unknown variable {v}")
         if v not in params:
             raise NotAKernel(f"{v} is read before it is written: give it as a parameter")
-        env[v] = const(params[v])
-        return env[v]
+        env_[v] = const(params[v])
+        return env_[v]
 
     def is_const(s_):
         return isinstance(s_, tuple) and s_[0] == "const"
@@ -250,7 +252,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 base, length = arrs[name]
                 spec.mems[name] = (length, dict(contents.get(name, {})), "ram")
                 spec.rams.add(name)
-                data = src(ins.srcs[0])
+                data = src_in(env, ins.srcs[0])
                 spec.outputs.append(cell("STORE", a, data, mem=name))  # the host sees every write land (pacing)
                 continue
             if op == "IN":  # fresh input each token: the variable is the token itself
@@ -268,7 +270,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             if op in ("JZ", "JNZ"):
                 # structured if: the jump skips the then-arm to `else`; an optional `JMP end` before `else` starts an else-arm
                 cond_var = ins.srcs[0]
-                cond = src(cond_var)
+                cond = src_in(env, cond_var)
                 l_else = ins.target
                 if l_else not in labels:
                     raise NotAKernel("a branch out of the body")
@@ -298,6 +300,8 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                         env[v] = t_
                         continue
                     if t_ is None or e_ is None:
+                        if v.startswith("__t"):
+                            continue  # an arm's temporary: dead after the arm
                         raise NotAKernel(f"{v} is defined on one arm only")
                     if is_const(cond):  # decided at compile time
                         env[v] = t_ if (cval(cond) != 0) == taken_nonzero else e_
@@ -318,17 +322,17 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 else:
                     env[ins.dst] = const(ins.imm)
             elif op == "MOV":
-                env[ins.dst] = src(ins.srcs[0])
+                env[ins.dst] = src_in(env, ins.srcs[0])
             elif op in ("SHL", "SHR"):
-                a = src(ins.srcs[0])
+                a = src_in(env, ins.srcs[0])
                 if is_const(a):
                     env[ins.dst] = const(ir_apply(op, cval(a), ins.imm, width))
                     continue
                 env[ins.dst] = cell(op, a, imm=ins.imm)
                 written.add(ins.dst)
             elif op in IR_OPS:
-                a = src(ins.srcs[0])
-                b = const(ins.imm) if ins.imm is not None else src(ins.srcs[1])
+                a = src_in(env, ins.srcs[0])
+                b = const(ins.imm) if ins.imm is not None else src_in(env, ins.srcs[1])
                 if ins.dst == "__x":  # an address: base + index
                     if op != "ADD":
                         raise NotAKernel("only base + index addressing")
@@ -371,7 +375,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 env[ins.dst] = cell("LOAD", a, mem=name)
                 written.add(ins.dst)
             elif op == "OUT":
-                s_ = const(ins.imm) if ins.imm is not None else src(ins.srcs[0])
+                s_ = const(ins.imm) if ins.imm is not None else src_in(env, ins.srcs[0])
                 if not (isinstance(s_, str) and not s_.startswith("input") and not s_.startswith("state_")):
                     paced = isinstance(s_, tuple)  # a constant or a parameter has no done pulse: the token paces it
                     s_ = cell("MOV", s_, s_)  # the output must be a cell's master
