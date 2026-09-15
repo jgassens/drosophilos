@@ -24,10 +24,11 @@ def test_doom1_reference_frames_are_byte_identical_to_docs_img(monkeypatch, tmp_
         "--source", "examples/doom1.c", "--width", "40", "--height", "25", "--frames", "2",
         "--inputs", "2,258",  # the H200 run's inputs (Juno job 404188): docs/img/doom40_*_reference.png are its references
     ])
-    for f in range(2):
-        got = (Path(f"{out}_{f}_reference.png")).read_bytes()
-        want = Path(f"docs/img/doom40_{f}_reference.png").read_bytes()
-        assert got == want
+    from PIL import Image
+    for f in range(2):  # pixel-identical (the PNG bytes differ by the zlib that wrote them)
+        got = Image.open(f"{out}_{f}_reference.png").convert("RGB")
+        want = Image.open(f"docs/img/doom40_{f}_reference.png").convert("RGB")
+        assert got.size == want.size and list(got.getdata()) == list(want.getdata()), f
 
 
 def test_doom4_reference_runs_through_the_driver_with_its_four_streams(monkeypatch, tmp_path):
