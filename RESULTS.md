@@ -858,8 +858,9 @@ the kernel oracle at 160 × 100 (`docs/img/doom3_0_reference.png`, `doom4_2_refe
 **Stage F2, first step (later the same day):** the frame's phase order — columns, then pixels,
 then the tick — is now enforced inside the substrate by phase gates on the input registers
 and wrapping counters the compiler adds, and the host only deals tokens in program order;
-the two-pass renderer ran two frames correctly with no host barrier at all
-(`docs/a3_kernels.md` §11).
+the two-pass renderer ran two frames correctly with no host barrier at all, and so did the
+Doom-shaped program itself (two frames of a 4 × 3 sample, one CPU copy, 279 s of neural
+time; `docs/a3_kernels.md` §11).
 
 What this is: the plan's Stage E1 shape (exact integer rendering, pixel records streamed,
 assets compiled into ROM relays) and Stage D shape (a world-update kernel driving it) on

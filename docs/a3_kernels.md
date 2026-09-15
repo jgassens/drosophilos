@@ -344,7 +344,12 @@ tick's *input* (the game's controls, which are input by definition). The benchma
 for the frame loop's ordering moves from *hybrid* to *neural*; the dealing stays hybrid.
 Both drivers take `--pacing neural` (`bench/render_doom.py` deals columns,
 `bench/render_game.py` pixels); the per-copy counts are image constants, so the columns or
-pixels must divide evenly across the copies.
+pixels must divide evenly across the copies. The phase counter is requested by every STORE
+of the pass as well as its last output (a STORE deeper in the dataflow than the last output
+would otherwise land after its phase had ended; the review of §10.1's round found it).
+Measured on the Doom-shaped program itself (`doom1.c`, 93 cells with the two counters,
+482,596 neurons, one CPU copy on Juno): two frames of a 4 × 3 sample under neural pacing,
+every pixel equal to the reference, no fault, 279 s of neural time (job 405122).
 
 ## 8. What it is not yet
 
