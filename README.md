@@ -94,6 +94,7 @@ uv run pytest
   memory-read cells with a neural handshake between them; the toy renderer's column loop
   runs one column per 1.18 s, ~27× the sequencer, on 13.7k neurons; the toy world update
   (`examples/tick.c`: calls, ifs as select cells, loop-carried state) runs as a 13-cell state
-  kernel at one tick per 6 s with every output correct (`docs/a3_kernels.md`).
+  kernel at one tick per 6 s with every output correct; a 16-bit perspective column
+  (reciprocal table and multiply) renders at 6.6 s per column (`docs/a3_kernels.md`).
 
 Data: `uv run python -m drosophilos.connectome.mcns_download` (1.1 GB, Janelia, CC-BY, no login).

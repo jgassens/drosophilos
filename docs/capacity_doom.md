@@ -68,7 +68,9 @@ inside the substrate, and every pixel of it is a spike-decoded word.
    and a measured ~27× throughput gain; select cells, fan-out values, feedback state and
    several outputs followed, and the toy world update runs as a state kernel (6 s per tick,
    ~7.5× the sequencer: a dependent loop gains only the sequencer's overhead). Next inside
-   this item: nested loops as joined kernels, per-frame parameter ports, 32-bit cells.
+   this item: nested loops as joined kernels, per-frame parameter ports. Shifts, ROM tables
+   and a 16-bit perspective column (reciprocal table × scale) run; the array multiplier's
+   n² latency (6.6 s per 16-bit product) is now the number to beat: a carry-save multiplier.
 2. **32-bit datapath as a resident kernel**, not as the sequencer's width: the multiplier is
    the cost driver and only the kernels need it.
 3. **Memory-serving nodes** with ROM as fetch relays (3 neurons per bit) for map and texture

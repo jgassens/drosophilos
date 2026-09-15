@@ -847,6 +847,10 @@ How it is known to have worked, with nothing taken on trust from the machine:
   eight ticks of varied input, wall wrap and clamp included, come out right; 32-bit cells run
   (a three-cell 32-bit kernel, 1.99 s per token) once the input register's watchdog scales
   with the width (`docs/a3_kernels.md` §4–5).
+- **E1 shape, 16 bits**: constant shifts as wiring cells, ROM tables as read relays, and
+  `examples/render2.c` (distance from the map, reciprocal table, multiply, shift) renders
+  eight column heights correctly as a six-cell kernel of 47,775 neurons at 6.6 s per column;
+  the array multiplier is the bottleneck (`docs/a3_kernels.md` §5.1).
 - **Second review** (Kimi stalled; the `claude-fable` fallback reviewed `26fa035`): the empty
   status word found independently; the refusal window after completion corrected to ~25 ms;
   a commit watchdog added (a hung COMMIT is now a counted timeout); the written/cleared pulses

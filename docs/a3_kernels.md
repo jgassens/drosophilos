@@ -150,6 +150,30 @@ rules from it: the runner decodes the R bits only (a master carries C, Z and V a
 bit 32 read as 2³² until masked), and every kernel run reports its fault-latch and timeout
 counts, which the pipeline's `stats` now carry.
 
+### 5.1 Shifts, ROM tables and a perspective column (E1 shape)
+
+A shift by a constant is wiring: `SHL k` / `SHR k` cells route the source's rails k bits over
+and drive zeros into the vacated bits (four relays per bit, no ALU); DrosoC gained `<<` and
+`>>` by constants (the sequencer lowers a left shift to doublings and has no right shift).
+Memories a kernel reads are ROM relays (§3). With those, `examples/render2.c` is the E1 shape
+at 16 bits: the wall distance from the map, its reciprocal from a Q8 table, the projected
+height as `(recip * scale) >> 8` — a perspective divide done as a table and a multiply.
+
+| perspective kernel (16-bit) | value |
+|---|---|
+| cells | ADD, AND, LOAD map, LOAD recip, MUL, SHR 8 |
+| neurons | 47,775 (the 16-bit multiplier cell is ~28k of them) |
+| eight columns | all heights correct against the C reference and the IR interpreter |
+| per column | 6.6 s — the 16 × 16 array multiplier's latency (n rows of n-bit ripple adders, ~n² × 29 ms) |
+| latency to the first pixel | 12.1 s |
+| simulation | 383 s wall for 60 s of neural time |
+
+The multiplier is now the bottleneck of the E1 path by a factor of ~6 over every other cell,
+and it grows as n²: a 32-bit array multiplier would take ~30 s per token. The plan's Q16.16
+renderer needs a carry-save multiplier (rows that do not ripple; one final ripple), which the
+ordered-gate discipline supports and which is the next arithmetic block to build and
+campaign, and interleaved multiplier cells (k copies taking alternate tokens) for throughput.
+
 ## 6. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel

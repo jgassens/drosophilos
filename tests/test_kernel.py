@@ -139,3 +139,30 @@ def test_neural_shift_cells_are_wiring():
     assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, ins)], (outs, st)
     assert st["faults"] == 0 and st["timeouts"] == 0
     print("shift kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
+
+
+RENDER2 = open("examples/render2.c").read()
+
+
+def test_perspective_column_loop_matches_the_references():
+    from drosophilos.compiler.golden import run_golden
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(RENDER2)
+    ks = compile_kernel(prog, loop_body(prog), "col", params={"heading": 3})
+    assert [c["op"] for c in ks.cells] == ["ADD", "AND", "LOAD", "LOAD", "MUL", "SHR"]
+    ko = [v for p in kernel_outputs(ks, list(range(8))) for v in p]
+    assert ko == interpret(prog, [3])["outs"] == run_golden(RENDER2, [3], ["col", "d", "r", "h", "heading"], 16)["outs"]
+
+
+@pytest.mark.slow
+def test_neural_perspective_kernel_renders_eight_columns():
+    """16-bit cells with a multiplier: the heights of eight columns (~6.6 s per column, the
+    array multiplier's latency; ~6 minutes of wall time)."""
+    from drosophilos.compiler.kernel import kernel_outputs
+    prog = compile_c(RENDER2)
+    ks = compile_kernel(prog, loop_body(prog), "col", params={"heading": 3})
+    pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs)
+    outs, sim, st = run_pipeline(pl, PARAMS, list(range(8)), max_ms=120000)
+    assert [v for _, v in outs] == [p[0] for p in kernel_outputs(ks, list(range(8)))], (outs, st)
+    assert st["faults"] == 0 and st["timeouts"] == 0
+    print("perspective kernel", {k: v for k, v in st.items() if k != "outputs_by_cell"})
