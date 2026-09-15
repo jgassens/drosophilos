@@ -16,6 +16,12 @@ Export: an output port word (a data-memory master) gets one edge relay per rail
 (`LINK.out.b{i}r{r}`), which fires once per rail rise, i.e. once per STORE to that word.
 Import: the input port word's completion feeds the machine's interrupt-pending rail
 through an edge relay: a message's arrival is an interrupt, and the handler LOADs the word.
+INTP has a one-entry shadow queue, INTQ. If an arrival or timeout occurs while INTP is
+already pending, INTQ holds that second request. Taking the active request clears INTP and,
+after 20 relay hops (~106 ms), promotes INTQ; that delay is longer than both the ~80 ms
+paralysis caused by the INTP kill train and the 55 ms veto-residual interval. Three more
+hops clear INTQ after promotion. A depth of one is sufficient for this milestone's single
+message in flight: the only overlap is its arrival and its timeout.
 
 ## Demo 1 shape, measured (clean model, two 4-bit machines, 6,082 + 4,524 neurons)
 
@@ -52,6 +58,16 @@ a fault, so `acked` stayed 0 although B had delivered once. The rule it settles:
 word a handler may read on any path must hold a value on every path**. The status word now
 starts at 0 in the image, the timer writes 1 through a write port of its own, and the handler
 stores 0 back instead of emptying it (`docs/a2_ram_control.md` §2.2).
+
+A late ACK exposed a second ordering rule. If the original send timer expires first, the
+timeout and arrival cannot be merged into the same INTP state: the timeout handler must run
+first (status = 1), re-send, and leave the held ACK for the queued arrival handler (status =
+0). Nor is arrival completion a receive credit. The timer is now cancelled only when the
+handler consumes the input word: its `CLR` finishes the word's reset and raises READY, which
+launches a four-pulse cancellation train across the timer chain. Thus a held late ACK cannot
+cancel the re-send's timer, while the eventual arrival handler's CLR does cancel it. The
+slow late-ACK regression delays B→A so that `TIMER.h1899 < LINK.in.arrive < INTP.clear`, and
+checks two handler entries, one retry, one delivery and `acked = 1`.
 
 Still not built: epochs, credits beyond one message in flight, corruption detection at the
 receiver (a corrupted rail event is a double rail, refused by the completion tree as a fault,

@@ -58,14 +58,14 @@ def _word_value(sim, word, at_end=True):
     return decode_at(sim.trace, word.rail_taps, int(st[-1]), 94)[0]
 
 
-def _run(faults_ab=None, payload=5, seq=8, max_ms=45000):
+def _run(faults_ab=None, payload=5, seq=8, max_ms=45000, delay_ba_steps=200):
     mA = build_machine(PARAMS, n=4, n_prog=64, n_data=8, handler_pc=16, port_in_word=6, port_out_word=7, timer_hops=1900, status_word=5)
     mB = build_machine(PARAMS, n=4, n_prog=32, n_data=8, handler_pc=8, port_in_word=6, port_out_word=7)
     simA, simB = RefSim(mA.net.topology(), PARAMS), RefSim(mB.net.topology(), PARAMS)
     load_image(simA, mA, sender(), {0: payload, 1: seq, 2: 0, 4: 0})
     load_image(simB, mB, receiver(), {0: seq, 4: 0})
     ab = word_link(mA, mB, 200, 0, 1, faults=faults_ab)
-    ba = word_link(mB, mA, 200, 1, 0)
+    ba = word_link(mB, mA, delay_ba_steps, 1, 0)
     run_linked([simA, simB], [ab, ba], int(max_ms / PARAMS.dt))
     got = {name: _word_value(simA, mA.dmem.words[k]) for name, k in (("acked", 2), ("retries", 4))}
     got.update({name: _word_value(simB, mB.dmem.words[k]) for name, k in (("received", 1), ("deliveries", 4), ("pixel", 5), ("expected", 0))})
@@ -87,3 +87,28 @@ def test_dropped_event_is_repaired_by_retransmit():
     assert got["received"] == 5 and got["deliveries"] == 1 and got["acked"] == 1, got
     assert got["retries"] == 1, got  # one timeout, one resend
     print("exact channel, one dropped rail event:", got, "injected", ab.injected)
+
+
+@pytest.mark.slow
+def test_late_ack_after_timeout_is_queued_and_cancels_only_when_consumed():
+    """The ACK lands after the original send timer expires but before its interrupt is
+    taken. The timeout remains the first handler invocation and the arrival is queued for a
+    second invocation; merely holding the ACK word must not cancel the retransmit timer."""
+    got, ab, ba, mA, _, simA, _ = _run(delay_ba_steps=45000)
+    ev = simA.trace.events
+
+    def rises(role):
+        steps = ev["step"][ev["neuron"] == mA.net.roles.index(role)]
+        gap = 3 * mA.drive.loop_period_steps
+        return [int(s) for i, s in enumerate(steps) if i == 0 or s - steps[i - 1] > gap]
+
+    timeout = rises("TIMER.h1899")[0]
+    arrival = rises("LINK.in.arrive.edge")[0]
+    first_clear = rises("INTP.clear.edge")[0]
+    handler_entries = rises("PC.16.u")
+    assert timeout + 600 < arrival < first_clear, (timeout, arrival, first_clear)
+    assert len(handler_entries) == 2, handler_entries
+    assert got["received"] == 5 and got["deliveries"] == 1, got
+    assert got["acked"] == 1 and got["retries"] == 1, got
+    print("exact channel, late ACK:", got, "timer/arrival/clear", timeout, arrival, first_clear,
+          "events A->B", len(ab.log), "B->A", len(ba.log))
