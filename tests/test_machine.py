@@ -5,7 +5,9 @@ Python reference execution of the same ISA."""
 import numpy as np
 
 from drosophilos.lib.control import build_machine, random_program, reference_run, run_machine
+from drosophilos.protocol.token import recent_spikes
 from drosophilos.sim.model import Params
+from drosophilos.sim.ref64 import RefSim
 
 PARAMS = Params()
 
@@ -68,6 +70,55 @@ def test_interrupt_lands_at_safe_point_and_resumes():
     for i, k in enumerate(pcs):
         if k == 10:
             assert pcs[i + 6] == pcs[i - 1], pcs
+
+
+def test_interrupt_request_survives_pending_clear_paralysis_window():
+    """INTS keeps requests queueable until a cleared INTP has actually settled."""
+    m = build_machine(PARAMS, n=1, n_prog=2, n_data=1, handler_pc=1, port_in_word=0)
+    topology, roles = m.net.topology(), m.net.roles
+
+    def steps(ms):
+        return int(round(ms / PARAMS.dt))
+
+    def run_probe(initial_roles, events, end_ms):
+        sim = RefSim(topology, PARAMS)
+        for role in initial_roles:
+            sim.add_events(0, [steps(1)], [roles.index(role)], [m.drive.ignite])
+        for ms, role in events:
+            sim.add_events(0, [steps(ms)], [roles.index(role)], [m.drive.ignite])
+        sim.run(steps(end_ms))
+        return sim
+
+    def lit(sim, role, window_ms=40):
+        return bool(recent_spikes(sim, roles.index(role), sim.step_index - steps(window_ms)))
+
+    clear_ms = 100
+    pending_state = ("INTPr1.u", "INTQr0.u", "INTSr0.u")
+    for offset_ms in (0, 2, 5, 10, 15, 20, 25, 30, 35, 45):
+        request_ms = clear_ms + offset_ms
+        sim = run_probe(
+            pending_state,
+            [(clear_ms, "IT.d.d11"), (request_ms, "LINK.in.arrive.edge")],
+            clear_ms + 250,
+        )
+        queued = bool(recent_spikes(sim, roles.index("INTQr1.u"), steps(request_ms)))
+        assert lit(sim, "INTPr1.u"), (offset_ms, queued, "request lost")
+        assert lit(sim, "INTSr0.u"), (offset_ms, queued, "promoted pending state not recorded")
+
+    # Once INTP is settled empty, INTS.r1 vetoes the shadow queue while the request is taken
+    # directly. Its subsequent INTP.r1 rise must return INTS to the pending/unsettled state.
+    request_ms = 100
+    sim = run_probe(
+        ("INTPr0.u", "INTQr0.u", "INTSr1.u"),
+        [(request_ms, "LINK.in.arrive.edge")],
+        250,
+    )
+    assert lit(sim, "INTPr1.u") and lit(sim, "INTSr0.u")
+    assert not recent_spikes(sim, roles.index("INTQr1.u"), steps(request_ms))
+
+    # With an already-pending INTP, INTS.r0 leaves the queue relay open.
+    sim = run_probe(pending_state, [(request_ms, "LINK.in.arrive.edge")], 250)
+    assert lit(sim, "INTQr1.u")
 
 
 def test_clr_empties_a_word_and_the_machine_continues():

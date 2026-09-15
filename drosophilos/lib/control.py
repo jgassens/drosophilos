@@ -247,6 +247,7 @@ class Machine:
     wdone: list = field(default_factory=list)
     intp: list | None = None  # interrupt pending kill pair [r0, r1]; the host ignites r1
     intq: list | None = None  # one-deep interrupt queue [empty, queued]
+    ints: list | None = None  # INTP settled kill pair [unsettled, settled-empty]
     handler_pc: int | None = None
     lr: Ring | None = None
     link_out_taps: list = field(default_factory=list)  # [[r0 relay, r1 relay] per bit] of the output port word
@@ -382,7 +383,7 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
     add_veto_relay(net, drive, "JT.nz", NEXT.u, [ir_jnz[0].u, z1], jt)
     nx = add_delay_chain(net, drive, "NEXT.d", NEXT.u, next_hops)
     # interrupts (safe point = NEXT, after the commit and any store)
-    intp = intq = mask = lr = None
+    intp = intq = ints = mask = lr = None
     it = irt = None
     extra_pc_vetoes = []
     if handler_pc is not None:
@@ -390,11 +391,18 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         # A request that arrives while INTP is already pending must not merge with it: taking
         # the first request asserts INTP.r0, which would otherwise erase both. INTQ stores one
         # additional request (the required depth for one message in flight plus its timeout).
-        # Sources below always set INTP.r1 and also try INTQ.r1 through an INTP.r0 veto: the
-        # first request sees the established r0 and is not queued; a later request sees r0
-        # stably dead and is. Promotion waits 20 hops (~106 ms) after INTP.clear. This exceeds
-        # both the ~80 ms paralysis from INTP.r0's kill train and the 55 ms veto-residual rule.
+        # Sources below always set INTP.r1 and also try INTQ.r1. INTS distinguishes a genuinely
+        # settled-empty INTP from the refractory interval after INTP.clear: r1 vetoes the queue
+        # only after that interval, while every actual INTP.r1 rise promptly asserts r0. Thus a
+        # first request is taken directly, but a pending or temporarily paralysed INTP queues it.
+        # Promotion waits 20 hops (~106 ms) after INTP.clear, beyond INTP's ~80 ms paralysis.
         intq = add_kill_pair(net, drive, "INTQ")  # r1 = one queued request, r0 = empty
+        ints = add_kill_pair(net, drive, "INTS")  # r1 = INTP settled-empty, r0 = pending/unsettled
+        add_veto_relay(net, drive, "INTS.unsettle", intp[1].u, [], ints[0])
+        # Normally the prompt relay above flips a long-settled INTS before another request can
+        # arrive. If INTP.r1 rises just after INTS.r1, however, that rail's kill train has made
+        # r0 temporarily refractory; each concrete request source also retries after 12 hops
+        # (~64 ms), when both INTS members have recovered.
         mask = add_kill_pair(net, drive, "MASK")  # r1 = in the handler
         lr = add_onehot_ring(net, drive, "LR", n_prog)
         it = add_latch(net, drive, "IT")  # interrupt taken this NEXT
@@ -410,8 +418,11 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         add_veto_relay(net, drive, "PC.handler", itd2, [], pc.lines[handler_pc])
         add_veto_relay(net, drive, "INTP.clear", itd, [], intp[0])  # taken: no longer pending
         add_veto_relay(net, drive, "MASK.set", itd, [], mask[1])
+        settled = add_delay_chain(net, drive, "INTS.settle_d", itd, 8)
+        add_veto_relay(net, drive, "INTS.settle", settled, [], ints[1])
         qpromote = add_delay_chain(net, drive, "INTQ.promote_d", itd, 20)
-        add_veto_relay(net, drive, "INTQ.promote", qpromote, [intq[0].u], intp[1])
+        promote = add_veto_relay(net, drive, "INTQ.promote", qpromote, [intq[0].u], intp[1])
+        net.synapse(promote, ints[0].u, drive.ignite)
         qclear = add_delay_chain(net, drive, "INTQ.clear_d", qpromote, 3)
         add_veto_relay(net, drive, "INTQ.clear", qclear, [], intq[0])
         irtd = add_delay_chain(net, drive, "IRT.d", irt.u, next_hops)
@@ -436,7 +447,9 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
         assert intp is not None, "port_in_word needs handler_pc (the arrival is an interrupt)"
         arr = add_edge_relay(net, drive, "LINK.in.arrive", dmem.words[port_in_word].completion.u, fast_inhibitor=True)
         net.synapse(arr, intp[1].u, drive.ignite)
-        add_veto_relay(net, drive, "INTQ.arrive", arr, [intp[0].u], intq[1])
+        add_veto_relay(net, drive, "INTQ.arrive", arr, [ints[1].u], intq[1])
+        arr_unsettle_retry = add_delay_chain(net, drive, "INTS.arrive_retry_d", arr, 12)
+        net.synapse(arr_unsettle_retry, ints[0].u, drive.ignite)
     if timer_hops is not None:  # send timer: out-word completion starts it, consuming in-word cancels it
         assert port_out_word is not None and status_word is not None and intp is not None
         start = add_edge_relay(net, drive, "TIMER.start", dmem.words[port_out_word].completion.u, fast_inhibitor=True)
@@ -491,10 +504,12 @@ def build_machine(params: Params, n: int = 4, n_prog: int = 8, n_data: int = 8, 
                 net.synapse(msel.u, relay, -int(round(0.5 * drive.loop)))
         add_kill_train(net, drive, "TIMER.sel.kill", wp.done[status_word], [tsel, msel])
         net.synapse(prev, intp[1].u, drive.ignite)
-        add_veto_relay(net, drive, "INTQ.timeout", prev, [intp[0].u], intq[1])
+        add_veto_relay(net, drive, "INTQ.timeout", prev, [ints[1].u], intq[1])
+        timeout_unsettle_retry = add_delay_chain(net, drive, "INTS.timeout_retry_d", prev, 12)
+        net.synapse(timeout_unsettle_retry, ints[0].u, drive.ignite)
         m_status_one = one
     mach = Machine(net, drive, n, a, n_prog, acc, imem, pc, fsm, ir, dmem, jt, sp[1], wp.done,
-                   intp, intq, handler_pc, lr, link_out, port_in_word)
+                   intp, intq, ints, handler_pc, lr, link_out, port_in_word)
     mach.status_word = status_word
     mach.status_one = locals().get("m_status_one")
     mach.commit_timeout = cto
@@ -529,6 +544,7 @@ def load_image(sim, m: Machine, program: list[tuple], dmem: dict | None, node: i
     if m.intp is not None:  # "no interrupt pending" and "not masked" are asserted rails, not silence
         sim.add_events(node, [step], [m.intp[0].u], [m.drive.ignite])
         sim.add_events(node, [step], [m.intq[0].u], [m.drive.ignite])
+        sim.add_events(node, [step], [m.ints[1].u], [m.drive.ignite])
         mask_r0 = m.net.roles.index("MASKr0.u")
         sim.add_events(node, [step], [mask_r0], [m.drive.ignite])
     sim.add_events(node, [step + 20], [m.pc.lines[0].u], [m.drive.ignite])  # FETCH is lit before the image completes
