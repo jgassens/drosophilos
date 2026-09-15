@@ -1,0 +1,440 @@
+{
+ "8x4": {
+  "max_fanout": 8,
+  "k_max": 4,
+  "netlist": {
+   "neurons": 663,
+   "neurons_unsplit": 614,
+   "synapses": 1293,
+   "synapses_unsplit": 1146,
+   "copies": {
+    "P.reset_inh": 5,
+    "add.actd.d10": 1,
+    "add.fa0.x.y1.u": 1,
+    "Q.reset_inh": 15,
+    "P.wd.cancel_inh": 12,
+    "Q.reset_relay3": 2,
+    "Q.reset_relay2": 3,
+    "Q.reset_relay1": 3,
+    "Q.reset": 3,
+    "Q.comp.c2_0.L.u": 2,
+    "Q.faultL.u": 2
+   },
+   "max_out_degree": 8
+  },
+  "placement": {
+   "carried": 776,
+   "carried_fraction": 0.6002,
+   "by_class": {
+    "hard": {
+     "carried": 637,
+     "total": 888
+    },
+    "hub": {
+     "carried": 96,
+     "total": 265
+    },
+    "tree_in": {
+     "carried": 43,
+     "total": 140
+    }
+   },
+   "neurons_placed": 658,
+   "neurons_total": 663,
+   "parasitic_to_zero": 18506,
+   "parasitic_zeroed_image": 18507,
+   "search_seconds": 28.9,
+   "sim_seconds": 26.1
+  },
+  "hubs": {
+   "Q.reset_inh": {
+    "members": 16,
+    "members_placed": 16,
+    "out_carried": 48,
+    "out_total": 122,
+    "out_carried_original": 7,
+    "out_carried_copies": 41,
+    "in_carried": 15,
+    "in_total": 64,
+    "in_carried_copies": 11,
+    "in_total_copies": 60,
+    "copies_with_all_inputs": 1,
+    "per_member": {
+     "Q.reset_inh": [
+      7,
+      8,
+      1
+     ],
+     "Q.reset_inh.c1": [
+      7,
+      8,
+      1
+     ],
+     "Q.reset_inh.c2": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c3": [
+      7,
+      8,
+      1
+     ],
+     "Q.reset_inh.c4": [
+      5,
+      8,
+      1
+     ],
+     "Q.reset_inh.c5": [
+      0,
+      8,
+      1
+     ],
+     "Q.reset_inh.c6": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c7": [
+      3,
+      8,
+      1
+     ],
+     "Q.reset_inh.c8": [
+      3,
+      8,
+      1
+     ],
+     "Q.reset_inh.c9": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c10": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c11": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c12": [
+      2,
+      8,
+      1
+     ],
+     "Q.reset_inh.c13": [
+      1,
+      8,
+      1
+     ],
+     "Q.reset_inh.c14": [
+      1,
+      6,
+      1
+     ],
+     "Q.reset_inh.c4.c1": [
+      2,
+      4,
+      1
+     ]
+    }
+   },
+   "P.wd.cancel_inh": {
+    "members": 13,
+    "members_placed": 13,
+    "out_carried": 31,
+    "out_total": 102,
+    "out_carried_original": 4,
+    "out_carried_copies": 27,
+    "in_carried": 18,
+    "in_total": 26,
+    "in_carried_copies": 16,
+    "in_total_copies": 24,
+    "copies_with_all_inputs": 7,
+    "per_member": {
+     "P.wd.cancel_inh": [
+      4,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c1": [
+      3,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c2": [
+      3,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c3": [
+      0,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c4": [
+      0,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c5": [
+      8,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c6": [
+      0,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c7": [
+      0,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c8": [
+      2,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c9": [
+      2,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c10": [
+      2,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c11": [
+      1,
+      8,
+      1
+     ],
+     "P.wd.cancel_inh.c12": [
+      6,
+      6,
+      1
+     ]
+    }
+   },
+   "P.reset_inh": {
+    "members": 6,
+    "members_placed": 6,
+    "out_carried": 17,
+    "out_total": 41,
+    "out_carried_original": 7,
+    "out_carried_copies": 10,
+    "in_carried": 4,
+    "in_total": 24,
+    "in_carried_copies": 1,
+    "in_total_copies": 20,
+    "copies_with_all_inputs": 0,
+    "per_member": {
+     "P.reset_inh": [
+      7,
+      8,
+      1
+     ],
+     "P.reset_inh.c1": [
+      2,
+      8,
+      1
+     ],
+     "P.reset_inh.c2": [
+      2,
+      8,
+      1
+     ],
+     "P.reset_inh.c3": [
+      2,
+      8,
+      1
+     ],
+     "P.reset_inh.c4": [
+      4,
+      8,
+      1
+     ],
+     "P.reset_inh.c5": [
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  "conditions": {
+   "A": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 517,
+    "no_accept": 0,
+    "missing_completion": 0,
+    "chained_correct": 20,
+    "reached": [
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 166
+     },
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 167
+     },
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 170
+     }
+    ],
+    "profile3_by_class_top": {
+     "c -> hop": 67,
+     "c -> c": 52,
+     "edge -> u": 50,
+     "c -> v": 42,
+     "c -> u": 40,
+     "edge_inh -> edge": 33,
+     "reset_relay -> c": 28,
+     "u -> veto": 19,
+     "hop -> hop": 18,
+     "veto -> edge": 17,
+     "u -> start": 13,
+     "v -> u": 12
+    }
+   },
+   "B": {
+    "correct": 0,
+    "n": 20,
+    "profile3_edges": 0,
+    "no_accept": 20,
+    "missing_completion": 20,
+    "chained_correct": null,
+    "reached": [
+     {
+      "q_bits_lit": 0,
+      "q_neurons_fired": 0,
+      "arithmetic_fired": 1
+     },
+     {
+      "q_bits_lit": 0,
+      "q_neurons_fired": 0,
+      "arithmetic_fired": 13
+     },
+     {
+      "q_bits_lit": 0,
+      "q_neurons_fired": 0,
+      "arithmetic_fired": 14
+     }
+    ],
+    "profile3_by_class_top": {}
+   },
+   "F": {
+    "correct": 20,
+    "n": 20,
+    "profile3_edges": 348,
+    "no_accept": 0,
+    "missing_completion": 0,
+    "chained_correct": 1,
+    "reached": [
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 166
+     },
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 167
+     },
+     {
+      "q_bits_lit": 5,
+      "q_neurons_fired": 114,
+      "arithmetic_fired": 170
+     }
+    ],
+    "profile3_by_class_top": {
+     "edge -> u": 50,
+     "c -> c": 47,
+     "edge_inh -> edge": 33,
+     "reset_relay -> c": 28,
+     "u -> veto": 19,
+     "hop -> hop": 18,
+     "veto -> edge": 17,
+     "u -> start": 13,
+     "v -> u": 12,
+     "u -> d": 10,
+     "u -> v": 9,
+     "u -> and": 8
+    }
+   }
+  },
+  "missing_by_class_top": {
+   "cancel_inh -> hop": [
+    71,
+    100
+   ],
+   "reset_relay -> reset_inh (tree input)": [
+    51,
+    60
+   ],
+   "edge -> u": [
+    50,
+    76
+   ],
+   "reset_inh -> v": [
+    43,
+    73
+   ],
+   "reset_inh -> u": [
+    41,
+    73
+   ],
+   "edge_inh -> edge": [
+    33,
+    77
+   ],
+   "u -> veto": [
+    19,
+    32
+   ],
+   "hop -> hop": [
+    18,
+    99
+   ],
+   "veto -> edge": [
+    17,
+    56
+   ],
+   "reset -> reset_inh (tree input)": [
+    17,
+    20
+   ],
+   "u -> start": [
+    13,
+    18
+   ],
+   "v -> u": [
+    12,
+    72
+   ],
+   "u -> d": [
+    10,
+    15
+   ],
+   "u -> v": [
+    9,
+    73
+   ],
+   "u -> and": [
+    8,
+    19
+   ]
+  }
+ }
+}
