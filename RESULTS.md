@@ -891,8 +891,18 @@ silent within 18 ms of CLEAR), and the fly has a proxy for almost every usable p
 1,030 / 3,712 disjoint pair-and-proxy triples at ×4 / ×8 / ×16). A dual-rail register on
 flip-flop storage crosses the four-phase handshake (48 fail-stop errors and no wrong value in
 10,000 mix-B transfers, against ~1 in 100,000 for the latch register); the placement motif for
-flip-flops is in. Not yet done: the register through the proxy, the triple's placement motif, a
-perturbation campaign through the proxy.
+flip-flops is in, and with the proxy it is the better fit for the fly: a toy of 32 flip-flops
+with proxies, joined by relays, places with **219 of 220 edges carried (99.5 %)** — every
+triple and every proxy readout on real neurons — where the same toy of 32 excitatory latches
+reaches 86 % (`docs/h1_placement.md`, "Placing flip-flops"). The hosts are hubs (a mean of
+6,500 external input synapses), so the whole-brain exposure problem stands. The register
+now reads its rails through the proxies (233 neurons for 4 bits, accept latency 166 ms against
+152 for the u-readout and 154 for the latch register): 200 random transfers with no error, and
+in 10,000 mix-B transfers 37 fail-stops (0.37 %) and no wrong value on a clean transfer (two
+wrong values were cascades after a fail-stop under the harness's fixed load period, which a
+producer waiting for READY cannot reach). Every traced fail-stop has one cause: under ±4 %
+weights a flip-flop can fall into *lockstep*, both members firing alternately instead of one
+silencing the other — the next fix. Not yet done: an adder on flip-flops placed and simulated.
 
 **The first perturbation campaigns on kernels (2026-09-16, Juno H200, 100 copies × 8 tokens,
 mix B).** With no perturbation every copy of every block is correct. Under mix B the render
