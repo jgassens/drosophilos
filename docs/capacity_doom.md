@@ -181,6 +181,26 @@ cycles of length 2–4 holds **368** latches at k_max 4 (292 pairs, 32 triangles
 recurrent motifs is what it is: a few hundred to a few thousand, and the fly spends them on
 its hubs.
 
+**Where the supply doubles: mutual inhibition** (`bench/h1_inhpairs.py`, `docs/h1_inhpairs.json`).
+The shuffled controls showed that many of the fly's strongest reciprocal pairs are between
+inhibitory neurons, which a two-neuron excitatory latch cannot use. A latch could instead be a
+flip-flop — two inhibitory neurons that inhibit each other, each with a tonic excitatory driver,
+so exactly one fires — and the wiring's supply of those, counting only pairs whose members each
+have a strong driver and a strong inhibitory readout, is 707 / 3,904 / 12,557 at k_max 4 / 8 /
+16, of which **358 / 1,105 / 3,717 are disjoint**: about the same as the excitatory pairs, on
+different neurons, so the two kinds add: **~700 / ~2,150 / ~6,600 latches** in all. At k_max 16
+that is, for the first time, more than one pixel kernel's ~5,300 — in count. Two things about
+*which* neurons: at the H0 bound the driven inhibitory pairs are quiet (a mean of 66 external
+input synapses per member, against ~3,000 for the adder's excitatory hosts; ellipsoid-body ring
+neurons ER4m/ER4d and nerve-cord interneurons), which is exactly what the whole-brain runs
+found decisive; and at k_max 16 the supply lives in the optic lobe — 3,592 of 7,434 members
+are optic-lobe intrinsic, led by the medulla's Mi4 and Mi9 (1,147 disjoint pairs, one per
+column) — so the visual system, useless to the excitatory design (§Is the fly's visual system
+involved), is where an inhibition-based latch would go. No such latch exists in this repo: a
+flip-flop needs tonic drive, reads out as silence versus firing, and every timing contract of
+the token protocol (relay recovery, veto windows, kill trains) would have to be re-measured
+for it. That design is the next fork.
+
 **Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
 loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual
 projection and centrifugal, photoreceptors). The frame used none of them (Profile 3). Under

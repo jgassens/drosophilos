@@ -869,7 +869,11 @@ specific: a random graph with the same degrees has 24 strong reciprocal pairs to
 1,223 and carries 50 % of the adder to the fly's 60 %; permuting the synapse strengths over
 the real edges drops it to 44 %; and permuting the transmitter labels *raises* it to 65 %,
 because many of the fly's strongest reciprocal pairs are inhibitory and useless to an
-excitatory latch (`docs/h1_placement.md`, shuffled controls).
+excitatory latch (`docs/h1_placement.md`, shuffled controls). Counting those inhibitory pairs
+as flip-flop latches instead — 358 / 1,105 / 3,717 disjoint driven pairs at ×4 / ×8 / ×16, on
+quiet neurons at the H0 bound and in the optic lobe's medulla columns at ×16 — would roughly
+double the supply, to about one pixel kernel's worth at ×16. That latch is not designed yet
+(`docs/capacity_doom.md` §5).
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
