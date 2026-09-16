@@ -355,6 +355,10 @@ output is wrong and nothing detects it (copy 0: `25, 25, 30, 30, 19, 33, 30, 59`
 27, 27, 67, 107, 0`). Whether the guard fix above removes the stalls as well as the duplicates is
 the question the fixed campaign answers.
 
+(The same pre-fix campaign in single precision on G2's RTX 3090s, 30 s ceiling — fan-out 769 /
+25 wrong, tick 516 / 208, render 799, perspective 276 — matches the H200's double-precision
+numbers within noise: the GeForce cards' fp32 is fine for campaigns.)
+
 **After the fix** (Juno 407450, the same 100 copies, seeds and 90 s): fan-out **795 / 800, 0
 wrong** (one copy stalled at its fourth token); tick **1,598 / 1,600, 2 wrong, 0 missing, one
 copy** — the stalls were the same stale-guard replay, now gone; render 799 / 800 (the same single
