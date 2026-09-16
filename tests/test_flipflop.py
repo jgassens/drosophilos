@@ -209,9 +209,9 @@ def test_proxy_noise_margins():
 
 
 def test_edge_relay_on_proxy_fires_once_per_set():
-    """The reader's contract redone through p: once per SET (3 of 3), ~4.2 ms after p's first
-    spike, ~24 ms after the first SET pulse (u: ~11); never on the train; once at power-on if the
-    power-on pulse omits p."""
+    """The reader's contract redone through p: once per SET (3 of 3), 4.2 ms after p's first
+    spike, 22.6-27.3 ms after the first SET pulse over the 47 phases (u: ~11); never on the
+    train; once at power-on if the power-on pulse omits p."""
     net, ff = _ff_proxy()
     relay = add_edge_relay(net, D, "r", ff.p)
     ev = list(power_on_pulse(ff, D))
@@ -221,7 +221,7 @@ def test_edge_relay_on_proxy_fires_once_per_set():
     r = _spikes(sim, relay)
     assert len(r) == 3, r
     for k in range(3):
-        assert 1220 + 3000 * k <= r[k] <= 1260 + 3000 * k, r
+        assert 1220 + 3000 * k <= r[k] <= 1275 + 3000 * k, r
         assert 35 <= r[k] - _spikes(sim, ff.p, 1000 + 3000 * k)[0] <= 50
     assert len(_spikes(sim, ff.p)) > 80
     sim = _sim(net, 100, [(0, ff.u, -D.loop)])  # u's pulse alone: p fires at 2.5 ms and the relay follows
@@ -320,3 +320,73 @@ def test_split_hubs_copies_carry_the_bias():
     copies = net.split_hubs(2)
     assert copies and all(net.bias[c] == 58.0 for c in copies[h])
     assert len(net.bias) == net.n
+
+
+# ---- lockstep under mix B (docs/a1_flipflop.md, Lockstep) ----------------------------
+
+def _mix_b_flipflops(pulses: int, n_pert: int = 500, n_phase: int = 4, seed: int = 0):
+    """`n_pert` mix-B-perturbed copies of a proxied flip-flop with its set chain (`pulses`) and
+    clear chain, each SET and CLEARed twice through the chains at `n_phase` random phases of
+    v, with 5 Hz x 150 quanta stray input, as one TorchSim on the CPU. The recipe is
+    tests/test_ffregister.py::run_ff_campaign's: log-normal weights on every synapse (the
+    chains' too), threshold drift, bias drift on top of the flip-flop's 58 mV. Returns the
+    per-node (u, v, p) spike counts in the four hold windows."""
+    from drosophilos.lib.campaign import Perturbation
+
+    pert = Perturbation(0.04, 0.2, 0.2, 5.0, 150, 100)  # mix B
+    net = Netlist(P)
+    ff = add_flipflop(net, D, "ff", proxy=True)
+    trig = add_set_chain(net, D, "ff", ff, pulses=pulses)
+    ctrig, _ = add_clear_chain(net, D, "ff", [ff])
+    topo = net.topology()
+    rng = np.random.default_rng(seed)
+    B = n_pert * n_phase
+    q = np.rint(topo.quanta[None, :] * np.exp(rng.normal(0, pert.weight_sigma, size=(n_pert, topo.nnz)))).astype(np.int32)
+    vth = P.V_th + rng.normal(0, pert.th_sigma_mv, size=(n_pert, topo.n))
+    bias = topo.sim_bias()[None, :] + rng.normal(0, pert.bias_sigma_mv, size=(n_pert, topo.n))
+    q, vth, bias = (np.repeat(a, n_phase, 0) for a in (q, vth, bias))
+    sim = TorchSim(topo, P, n_nodes=B, V_th=vth, bias=bias, quanta=q, stray_rate_hz=pert.stray_rate_hz,
+                   stray_quanta=pert.stray_quanta, stray_seed=seed)
+    t_set, t_clr, t_set2, t_clr2, t_end = 1000, 2500, 4000, 5500, 7000
+    for b in range(B):
+        ph = int(rng.integers(0, 47))
+        ev = power_on_pulse(ff, D) + [(t_set + ph, trig, D.ignite), (t_clr + ph, ctrig, D.pulse),
+                                      (t_set2 + ph, trig, D.ignite), (t_clr2 + ph, ctrig, D.pulse)]
+        sim.add_events(b, [s for s, _, _ in ev], [n for _, n, _ in ev], [x for _, _, x in ev])
+    sim.run(t_end)
+    e = sim.trace.events
+    out = {}
+    for name, lo, hi in (("set1", t_set + 400, t_clr), ("clear1", t_clr + 400, t_set2),
+                         ("set2", t_set2 + 400, t_clr2), ("clear2", t_clr2 + 400, t_end)):
+        m = (e["step"] >= lo) & (e["step"] < hi)
+        out[name] = tuple(np.bincount(e["node"][m & (e["neuron"] == n)], minlength=B) for n in (ff.u, ff.v, ff.p))
+    return out
+
+
+def _classify(cu, cv, thresh=3):
+    return np.where((cu >= thresh) & (cv >= thresh), "LOCK", np.where(cu >= thresh, "SET", np.where(cv >= thresh, "CLEAR", "SILENT")))
+
+
+def test_500_mix_b_flipflops_set_and_clear_without_lockstep():
+    """500 mix-B-perturbed flip-flops (x 4 phases = 2,000 copies) SET and CLEAR twice through
+    the chains: with the four-pulse default no copy locks step (measured 0 of 16,000 SETs on
+    the bench, 0 of 16,000 at 1.5x mix B; the bound here allows 2 of 4,000), every SET holds
+    with p running and every CLEAR with p silent. The three-pulse train the same copies were
+    built with before locks a few of them (0.1-0.5 % of SETs on the bench), which is the
+    register campaign's fail-stop (docs/contracts/ffregister.yaml)."""
+    r = _mix_b_flipflops(pulses=4)
+    n = len(r["set1"][0])
+    for name in ("set1", "set2"):
+        cu, cv, cp = r[name]
+        st = _classify(cu, cv)
+        assert (st == "LOCK").sum() <= 2 and ((st != "SET") & (st != "LOCK")).sum() == 0, (name, np.unique(st, return_counts=True))
+        assert (cp[st == "SET"] >= 0.9 * cu[st == "SET"]).all()  # p runs with u
+    for name in ("clear1", "clear2"):
+        cu, cv, cp = r[name]
+        st = _classify(cu, cv)
+        assert (st == "CLEAR").all(), (name, np.unique(st, return_counts=True))
+        assert (cp <= 2).all()  # p parked (a stray may fire it once)
+    r3 = _mix_b_flipflops(pulses=3)
+    locks3 = sum(int((_classify(*r3[k][:2]) == "LOCK").sum()) for k in ("set1", "set2"))
+    assert locks3 >= 1, locks3  # the design this replaces, on the same perturbations
+    assert all((_classify(*r3[k][:2]) == "CLEAR").all() for k in ("clear1", "clear2"))  # the clear train resolves every lockstep

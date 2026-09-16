@@ -41,9 +41,10 @@ only delays the running member by a few ms, so switching needs either a train or
 | SET (from CLEAR) | ≥ 2.25× ignite | 3 × 0.75 ignite, or 2 × 1.25, or 4 × 0.6 | 1.5× ignite into u + 1.5× loop into v |
 | CLEAR (from SET) | ≥ 4.0× loop | 3 × 1.0 loop, or 2 × 1.5, or 4 × 0.75 (the standard reset train; 0.7 switches only 75 %) | 1.5× loop into u + 1.5× ignite into v |
 
-Defaults (`set_pulse`, `clear_pulse`) carry a margin: SET = three standard ignite pulses
-(or one 3× pulse); CLEAR = three standard reset pulses at −1.5× loop (or one 5× loop
-pulse). All switch at every one of the 47 phases.
+Defaults (`set_pulse`, `clear_pulse`) carry a margin: SET = **four** standard ignite pulses
+(`SET_TRAIN_PULSES`; three until 2026-09-16 — three switch every phase of the nominal pair
+but lock a mix-B-perturbed one, §Lockstep) or one 3× pulse; CLEAR = three standard reset
+pulses at −1.5× loop (or one 5× loop pulse). All switch at every one of the 47 phases.
 
 Switching time: SET train — `u`'s first spike 6.0–6.5 ms after the first pulse (it is the
 second pulse that fires it), `v`'s last spike ≤ 12.6 ms; SET single pulse — 1.4–1.7 ms and
@@ -66,8 +67,8 @@ and about as hard to knock down.
 ## Power-on and lockstep — the part that does not take care of itself
 
 Both members start at rest, so with nothing else they reach threshold together at 2.5 ms,
-inhibit each other together, recover together, and keep firing **in lockstep** (~100 Hz
-each at 1.0× loop) for ever. This is a stable third state. Giving `v` a larger bias does
+inhibit each other together, recover together, and keep firing **in lockstep** (~105 Hz
+each at 1.0× loop) for ever. This is a stable third state (§Lockstep, below, maps it). Giving `v` a larger bias does
 not break it: +10 mV still locks at 1.0× loop, and the +15 mV that does resolve it leaves
 `v` unparked in SET (its rate is 240 Hz and its park depth ~0). So:
 
@@ -82,7 +83,7 @@ not break it: +10 mV still locks at 1.0× loop, and the +15 mV that does resolve
 |---|---|---|
 | `add_edge_relay(source=ff.u)` | **yes** | fires exactly once per SET (3 of 3 cycles, ~4.5 ms after `u`'s first spike), never on the tonic train; spurious once at power-on without the power-on pulse |
 | `add_veto_relay(vetoes=[ff.u])` | **yes** | relay and target held while SET; a re-drive 50 ms after CLEAR fires the relay and ignites the target, 40 ms does not — the 55 ms rule holds unchanged (`u` stops at once on CLEAR, like a killed latch) |
-| `add_veto_relay(target=ff)` and `celement._ignite_from` | **no** | their single ignite pulse into `.u` never sets it (0 of 47). Fix: `add_set_chain` — a 3-relay chain that turns one ignite pulse into three (measured end to end: latch train → edge relay → chain → SET) |
+| `add_veto_relay(target=ff)` and `celement._ignite_from` | **no** | their single ignite pulse into `.u` never sets it (0 of 47). Fix: `add_set_chain` — a chain of a trigger and three relays that turns one ignite pulse into four (measured end to end: latch train → edge relay → chain → SET) |
 | `add_reset` on `ff.members` | **no** | a train into **both** members (4 × 0.75 or 3 × 1.5 loop) leaves the flip-flop where it was (SET stays SET, 12 of 12 phases). Fix: `add_clear_chain` — the same controller aimed at `u` only (measured: trigger → 3 pulses → CLEAR) |
 | kill train into `u` only | **yes** | 3 × 1.0 loop at every phase; the standard 4 × 0.75 loop too, with ~7 % margin |
 | a single ignition pulse | **no** | see above |
@@ -91,7 +92,99 @@ So the flip-flop is a drop-in as a **rail** in a simulation (anything that reads
 213 Hz train: edge relays, veto neurons, rate-mode gates see the same statistics) — on the
 connectome the rail has to be the excitatory proxy `p`, §below — but not as a **target**:
 every ignition or reset path that touches `.u` or `.members` directly must go through the
-two adapters, at 3 neurons per flip-flop for SET and 4 shared neurons for CLEAR.
+two adapters, at 4 neurons per flip-flop for SET (3 until the lockstep fix, §Lockstep) and
+4 shared neurons for CLEAR.
+
+## Lockstep — what it is, when a SET train causes it, and the four-pulse fix (2026-09-16)
+
+Everything here is the CPU simulator (`TorchSim`, float64, trace-identical to `RefSim`) on
+a single proxied flip-flop with its set and clear chains, batched as the nodes of one run;
+"mix B" is the register campaign's perturbation (`tests/test_ffregister.py`, `MIX_B`: 4 %
+log-normal weight noise on every synapse, the chains' included; 0.2 mV threshold and bias
+drift per neuron on top of the 58 mV; 5 Hz × 150 quanta stray input into every neuron),
+applied with `run_ff_campaign`'s recipe. Numbers are in the contract under `lockstep`.
+
+**What it is.** Both members spike within the synaptic delay (1.8 ms) of each other, so
+neither inhibition arrives before the other's spike. Both are then inhibited together,
+recover together, and repeat: period ~96 steps, ~105 Hz each, `p` and `q` running at the
+same rate. The synchronous pair is an *attractor* — a member that spikes late receives the
+other's inhibition earlier in its own cycle, more of it inside its 2.2 ms refractory hold,
+so it recovers sooner and catches up — with a basin of roughly ±18 steps (the delay) of
+relative phase. Once in it, the pair stays: from power-on without a pulse it is still locked
+after 1 s at every (`u→v`, `v→u`) in 0.7–1.5× loop within ~0.3× of each other, with and
+without stray input; a bias difference of up to +12 mV on `v` does nothing; and 500 of 500
+mix-B-perturbed copies were still locked at 2 s. Only an asymmetry of ≥ 0.4× loop between
+the two inhibitions resolves it (to the side with the stronger inhibition). Noise does not
+break it toward a state. (A lock *started by a stray* — 1.5× ignite into a parked `u` at
+nominal weights — also holds for 1 s, but it carries a phase offset and any asymmetry ≥ 0.1×
+loop between the two inhibitions resolves it to the stronger side.)
+
+**How a SET train causes it.** `u`'s park is ~15 mV × (`v→u` / loop) and one ignite pulse
+climbs 12.6 mV, so at nominal weights the *second* pulse fires `u` (6.0–6.4 ms after the
+first), `v` is inhibited before its next spike, and `u` leads by more than the delay from
+then on. Once `v→u` is ~12 % strong, the park is deeper than two pulses reach and `u` first
+fires on the *third* — the last — pulse. Its next tonic spike comes ~5.4 ms later (delayed
+by `v`'s inhibition landing on it), `v` recovers from `u`'s single inhibition at about the
+same moment, the two spikes fall within 18 steps of each other, and the pair is in the
+basin with no pulse left to push `u` ahead. The maps:
+
+| sweep (47 phases each, 3 × 1.0 ignite train) | locks |
+|---|---|
+| `u→v` × `v→u`, 0.70–1.30 in 0.05 steps (169 pairs, 7,943 runs) | only `v→u` ≥ 1.15× (28 % of phases at 1.125, 100 % at 1.175–1.2; ≥ 1.325 fails to SET instead), and below the bistability floor (`u→v` ≤ 0.75, `v→u` ≤ 0.95: the parked member escapes). `u→v` > `v→u` helps by 2–3× at a given `v→u`, no more |
+| `u` bias × `v` bias, 57.0–59.0 mV in 0.2 mV steps | 0 locks, 0 failures anywhere |
+| `u` threshold −45 to −43.5 mV, `u` bias 57–59 mV, one at a time | 0 locks, 0 failures for any train |
+| train spacing 47 / 53 / 60 / 70 steps | the cliff stays at `v→u` = 1.10–1.125×: the pair's 4.7 ms rhythm is not what the train has to match |
+| stray input on / off | no difference |
+
+So the lever is the *length* (or strength) of the train against the park depth. The
+largest `v→u` at which all 47 phases SET with no lock and no failure:
+
+| SET train | clean up to `v→u` = | cost |
+|---|---|---|
+| 3 × 1.0 ignite (the old default) | 1.10× | — |
+| 3 × 1.25 | 1.20× | fatter synapses on `u` |
+| 3 × 1.5 | 1.30× | 1.5× ignite synapses on `u` (436 anatomical synapses per relay edge instead of 291) |
+| **4 × 1.0 (the new default)** | **1.25×** | **one more relay neuron per set chain** |
+| 4 × 1.25 | 1.40× | both |
+| 5 × 1.0 | 1.375× | two more relays |
+
+The CLEAR train's own margin, measured the same way against `u→v`: 3 × 1.5 loop (the
+default) 1.40×, 4 × 1.5 loop (the register's reset train) 1.50×, the top of the sweep. The
+clear side had a 40 % margin where the set side had 10 %; four pulses bring the set side to
+25 %, five to parity.
+
+**Pair-level candidates, rejected.** Stronger symmetric inhibition deepens the park as fast
+as it deepens the hold: 1.2× loop locks half of all mix-B SETs, 1.5× fails to SET at all.
+An asymmetry `u→v` = 1.2× moves the SET cliff only from 1.10 to 1.125× and drops the CLEAR
+margin to 1.175× (0 SET locks of 8,000 at mix B, but 1 CLEAR lock). Self-inhibition of 0.3×
+loop on both members locks half of all switches — it slows both alike and breaks nothing.
+Bias asymmetry has no effect on the attractor.
+
+**Before and after under mix B** (500 perturbations × 16 random phases of `v`, SET and
+CLEAR twice each through the real chains, 5 Hz stray; the same perturbed copies for every
+train):
+
+| | SETs that lock | CLEARs that lock | spontaneous, 2 s hold |
+|---|---|---|---|
+| 3 × 1.0 (before) | 9 / 8,000, 15 / 8,000, 74 / 16,000 in three draws (0.1–0.5 %: a handful of pairs with `v→u` ~3σ strong lock at a third to all of their phases) | 0 / 16,000 | 0 / 500 in SET, 0 / 500 in CLEAR |
+| **4 × 1.0 (after)** | **0 / 16,000** | 0 / 16,000 | 0 / 500, 0 / 500 |
+| 4 × 1.0 at 1.5× mix B (6 % weights, 0.3 mV) | 0 / 16,000 (3 pulses: 589) | 0 / 16,000 (3 pulses: 1) | — |
+| 4 × 1.0 at 2× mix B | 52 lock + 63 fail / 16,000 (3 pulses: 1,169 + 247; 5 pulses: 4 + 31) | ~100 / 16,000 for every SET train — the clear train's own 2× limit, and 4 clear pulses do not move it | — |
+
+**What changed and what did not.** `SET_TRAIN_PULSES = 4` is the default of `set_pulse` and
+`add_set_chain`; the set chain is a trigger and three relays (4 neurons per flip-flop, one
+more than before); the clear train stays 3 × 1.5 loop. Measured at all 47 phases, the
+contract is unchanged step for step: `u`'s first spike 6.0–6.4 ms after the first pulse
+(the second pulse still fires it), `v`'s last ≤ 12.6 ms, `p` up 18.4–23.1 ms after the
+first pulse and 10.5–14.0 after `v`'s last, `p`'s last spike ≤ 18.2 ms after the first CLEAR
+pulse, the edge relay on `p` once per SET at 22.6–27.3 ms over the 47 phases (the old
+"24.1–24.6" was three cycles' worth of phases), the rate 200–220 Hz in the first 50 ms (200
+with three pulses: the fourth pulse adds one early spike at some phases) and 212.8 Hz from
+then on, hold, noise margins and the 4 × 0.6 ignite all-phase minimum. The register's
+`Q.b{i}r{r}` set chains grow by one relay each (+8 neurons on 225); its campaign line is not
+re-run here. Test: `test_500_mix_b_flipflops_set_and_clear_without_lockstep` — 500
+perturbations × 4 phases, bound 2 locks in 4,000 SETs (measured 0; the three-pulse train
+locks 3 of the same 4,000, and every one of those is resolved by the next clear train).
 
 ## The excitatory proxy: reading a flip-flop on the fly (`add_flipflop(proxy=True)`, 2026-09-16)
 
@@ -195,8 +288,9 @@ the contract's six words unless stated.
 ### How it is wired
 
 - **SET**: the producer's data edge relay fires one ignite pulse into `Q.b{i}r{r}.set`, the
-  trigger of a per-rail `add_set_chain` (trigger + 2 relays), which puts three ignite pulses
-  5.3 ms apart into `u`. `Register.rail_inputs[i][r]` names that trigger; for a latch register
+  trigger of a per-rail `add_set_chain` (trigger + 2 relays at the time of this measurement;
+  trigger + 3 relays since the lockstep fix, §Lockstep), which puts three (now four) ignite
+  pulses 5.3 ms apart into `u`. `Register.rail_inputs[i][r]` names that trigger; for a latch register
   it is the rail's own `u`, so `build_channel` wires `relay -> rail_inputs` in both cases.
 - **CLEAR**: no second controller. The register's reset controller `inh` (which already fires
   once per reset relay, 4 times) gets one extra synapse per flip-flop, −1.5× loop into `u`
@@ -316,9 +410,10 @@ nodes, by two routes:
 `wrong_value_after_failstop` and the slow test asserts only the fresh count is zero. So the
 direction: fewer fail-stops, and the timeout class now has a tail that a fixed-period harness
 turns into two wrong words in 10,000 (one of them from the proxy's 12 ms). The fix is
-upstream of the readout — keep a perturbed pair out of lockstep on SET (the next design
-step; ±4 % weights and ±0.2 mV bias are enough to get there at some phases) and lengthen the
-reset trigger's re-arm past the proxy's lag — and neither is a proxy change.
+upstream of the readout — keep a perturbed pair out of lockstep on SET (done: the four-pulse
+train, §Lockstep; ±4 % weights and ±0.2 mV bias were enough to get there at some phases with
+three) and lengthen the reset trigger's re-arm past the proxy's lag — and neither is a proxy
+change.
 
 `lib/contracts.measure_contract` classes a `Q.b*.p` role as control, not latch (its rule is
 `.u`/`.v`), so the by-class spike split in the contract moves the proxies' spikes from latch to

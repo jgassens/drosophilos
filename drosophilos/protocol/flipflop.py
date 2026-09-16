@@ -19,15 +19,29 @@ are all-phase minima at the default inhibition (1.0x loop per spike):
   SET              : 3 x 0.75 ignite 5.3 ms apart, or one 2.25x ignite pulse into u
   CLEAR            : 3 x 1.0 loop 5.3 ms apart, or one 4x loop pulse into u
   power-on         : both members start at rest and, left alone, fire in LOCKSTEP for ever
-                     (a stable third state, ~100 Hz each); one 1.0x loop inhibitory pulse
+                     (a stable third state, ~105 Hz each); one 1.0x loop inhibitory pulse
                      into u at step 0 starts it CLEAR with u never firing
   margins          : silent member survives a stray 1.8x ignite pulse (latch: ignites at
                      1.1x need); firing member survives a stray 2.25x loop pulse (latch's
                      single member: survives 2x, dies at 3x)
 
-The defaults of set_pulse / clear_pulse carry a margin over those minima: SET is three
-standard ignite pulses (1.0x, minimum 0.75x) or one 3x ignite pulse (minimum 2.25x); CLEAR
-is three standard reset pulses (1.5x loop, minimum 1.0x) or one 5x loop pulse (minimum 4x).
+The defaults of set_pulse / clear_pulse carry a margin over those minima: SET is FOUR
+standard ignite pulses (1.0x; three switch at every phase of the unperturbed pair, and
+lock the pair in step once v -> u is 12.5 % over nominal) or one 3x ignite pulse (minimum
+2.25x); CLEAR is three standard reset pulses (1.5x loop, minimum 1.0x) or one 5x loop
+pulse (minimum 4x).
+
+Lockstep (docs/a1_flipflop.md, Lockstep): the pair has a third stable state in which both
+members fire within the synaptic delay (1.8 ms) of each other, are inhibited together and
+recover together, ~105 Hz each; it holds for ever under mix-B noise and stray input, and
+any asymmetry short of ~0.4x loop between the two inhibitions leaves it standing. A SET
+train drops the pair into it when the train ends before v is parked: u's first spike comes
+one pulse late (v -> u a few per cent strong: the park is deeper than the 12.6 mV pulse
+climbs) and u's next tonic spike lands within 1.8 ms of v's recovery. A three-pulse train
+is clean up to 1.10x v -> u, a four-pulse train up to 1.25x, five to 1.375x (the CLEAR
+train's own margin is 1.4x); under mix B (4 % weights, 0.2 mV threshold and bias, 5 Hz
+stray) three pulses lock 0.1-0.5 % of SETs, four pulses 0 of 16,000 (and 0 of 16,000 at
+1.5x mix B). Neither state locks on CLEAR or spontaneously (0 of 500 over 2 s each).
 
 Readout on the connectome (add_flipflop(proxy=True)): u is inhibitory, so no host can carry an
 excitatory read of it. p, an EXCITATORY neuron on the same bias inhibited by v at 1.0x loop,
@@ -49,6 +63,11 @@ from ..lib.netlist import Drive, Netlist
 BIAS_213HZ_MV = 58.0
 #: Spacing of the pulses of a switching train, steps (the reset controller's relay hop, ~5.3 ms).
 TRAIN_SPACING_STEPS = 53
+#: Pulses in the default SET train (set_pulse, add_set_chain). Three switch every phase of the
+#: nominal pair but leave it in LOCKSTEP once v -> u is 12.5 % over nominal (mix B: 0.1-0.5 % of
+#: SETs); four are clean to 25 % over (0 of 16,000 SETs at mix B and at 1.5x mix B). Five reach
+#: 37.5 %, the CLEAR train's own margin, for one more relay (docs/a1_flipflop.md, Lockstep).
+SET_TRAIN_PULSES = 4
 #: v -> p inhibition per spike as a multiple of drive.loop: the pair's own loop strength. p is
 #: silent while CLEAR from 0.8x up (0.75x leaks); 1.0x parks it 15 mV down like u, restarts
 #: 10.5-14 ms after v stops; heavier inhibition only slows the restart (1.5x: 20-23 ms).
@@ -118,11 +137,12 @@ def add_flipflop(net: Netlist, drive: Drive, name: str, bias_mv: float = BIAS_21
     return FlipFlop(u, v, float(bias_mv), q, p, qq, pq)
 
 
-def set_pulse(ff: FlipFlop, drive: Drive, pulses: int = 3) -> list[tuple[int, int, int]]:
-    """What to inject to SET: a list of (offset_steps, neuron, quanta). `pulses` = 3: three
-    standard ignite pulses into u, 5.3 ms apart (all-phase minimum 3 x 0.75 ignite);
-    `pulses` = 1: one 3x ignite pulse (minimum 2.25x). Excitation into u alone; nothing into
-    v (u's own spikes stop v)."""
+def set_pulse(ff: FlipFlop, drive: Drive, pulses: int = SET_TRAIN_PULSES) -> list[tuple[int, int, int]]:
+    """What to inject to SET: a list of (offset_steps, neuron, quanta). `pulses` >= 2: that
+    many standard ignite pulses into u, 5.3 ms apart (all-phase minima 3 x 0.75 ignite, 4 x
+    0.6); the default four keep a mix-B-perturbed pair out of lockstep (three do not: see
+    SET_TRAIN_PULSES). `pulses` = 1: one 3x ignite pulse (minimum 2.25x). Excitation into u
+    alone; nothing into v (u's own spikes stop v)."""
     if pulses == 1:
         return [(0, ff.u, 3 * drive.ignite)]
     return [(k * TRAIN_SPACING_STEPS, ff.u, drive.ignite) for k in range(int(pulses))]
@@ -158,14 +178,18 @@ def schedule(sim, ff_events: list[tuple[int, int, int]], at_step: int, node: int
         sim.add_events(node, [at_step + off], [neuron], [q])
 
 
-def add_set_chain(net: Netlist, drive: Drive, name: str, ff: FlipFlop, pulses: int = 3,
+def add_set_chain(net: Netlist, drive: Drive, name: str, ff: FlipFlop, pulses: int = SET_TRAIN_PULSES,
                   strength: float = 1.0) -> int:
     """Adapter from the protocol's one-shot sources to the flip-flop's train: a trigger
     neuron `name.set` that, fired once (an ignite pulse from an edge or veto relay), starts
     a relay chain whose every member delivers `strength` x ignite to u, `pulses` pulses
     ~5.3 ms apart (the reset controller's construction, add_reset, mirrored to excitation).
-    Returns the trigger. `net.synapse(relay, chain, drive.ignite)` is the flip-flop's
-    replacement for `net.synapse(relay, latch.u, drive.ignite)`."""
+    Returns the trigger; the chain is `pulses` neurons (the trigger and pulses - 1 relays).
+    `net.synapse(relay, chain, drive.ignite)` is the flip-flop's replacement for
+    `net.synapse(relay, latch.u, drive.ignite)`. Four pulses by default (SET_TRAIN_PULSES):
+    three leave a mix-B-perturbed pair in lockstep on 0.1-0.5 % of SETs, four on 0 of
+    16,000; `strength` = 1.5 with three pulses is about as robust for no extra neuron but
+    puts a 1.5x ignite synapse on u."""
     trigger = net.neuron(f"{name}.set")
     q = int(round(strength * drive.ignite))
     net.synapse(trigger, ff.u, q)
