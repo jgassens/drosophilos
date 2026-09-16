@@ -243,7 +243,7 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
-                   phases: list | None = None) -> Pipeline:
+                   phases: list | None = None, relight_requests: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -399,9 +399,15 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # vetoed by a pending request. Ordering: the earliest legitimate re-rise of REQ true is
         # the producer's free -> commit guard -> master reset -> done, >= ~150 ms after the
         # start; one drive per start, >= a cell cycle apart. (Kimi review run-20260916-150155.)
-        relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
-        for src, pr in c.reqs.items():
-            add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u], pr[0])
+        # Off by default: the 100-copy mix-B campaign (Juno 408987) gave 0 wrong values in every
+        # block for the first time, but the tick state kernel stalled 22 copies (1,396 / 1,600
+        # against 1,598) and fan-out / render lost a few each — the ordering assumption above
+        # does not hold where a source's done can land within ~74 ms of the reader's start.
+        # `relight_requests=True` keeps the mechanism buildable for the §10.5 reproduction.
+        if relight_requests:
+            relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
+            for src, pr in c.reqs.items():
+                add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u], pr[0])
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name

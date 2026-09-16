@@ -937,7 +937,10 @@ stalled copies under noise and was reverted. The duplicate was then localized fr
 dump to a request rail left dark by a failed re-ignition (§10.5); the third remedy, re-igniting
 it from the row's own `ACT^d` pulse, removed every perspective duplicate (714 / 800, 0 wrong)
 but stalled copies in all four blocks and corrupted a tick state, and was reverted too. The
-perspective duplicate stays open, with its mechanism known. (The first campaign's large "missing"
+perspective duplicate stays open, with its mechanism known; a fourth, gated remedy (a veto relay
+re-lighting the rail only while no request is pending) gave the first campaign with no wrong value
+in any block (perspective 779 / 800) but stalled 22 of the tick kernel's 100 copies, and is kept
+buildable but off (`docs/a3_kernels.md` §10.5). (The first campaign's large "missing"
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 

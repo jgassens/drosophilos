@@ -606,8 +606,31 @@ unconditional re-light — vetoes it. `IDLE` is not re-lit. Ordering assumptions
 legitimate re-rise of `REQ` true after a start is the producer's free → commit guard → master
 reset → done chain, ≥ ~150 ms; one drive per start, ≥ a cell cycle apart. The §10.5
 reproduction now zeroes this relay's ignition on its second copy and passes (`[9, 15, 6]`
-against `[9, 15, 15]`). The 100-copy mix-B campaigns (Juno, `kc_<block>_B90s106.json`) decide
-it, against §10.3's 795 / 799 / 1,598 / 760 (7 wrong).
+against `[9, 15, 15]`).
+
+**Outcome (Juno 408987, the 100-copy mix-B campaigns, 90 s): off by default.** For the first
+time no block produced a wrong value, and the pipelined perspective kernel improved on both
+counts; but the state kernel stalled eleven times more copies, and fan-out and render each
+lost a few:
+
+| block | §10.3 alone (407450) | gated re-light (408987) |
+|---|---|---|
+| perspective | 760 / 800, 7 wrong, 33 missing | **779 / 800, 0 wrong**, 21 missing in 5 copies |
+| fan-out | 795 / 800, 0 wrong | 783 / 800, 0 wrong, 17 missing in 4 copies, 2 faults |
+| render | 799 / 800, 1 wrong | 793 / 800, 0 wrong, 7 missing in 1 copy |
+| tick | 1,598 / 1,600, 2 wrong | 1,396 / 1,600, 0 wrong, **204 missing in 22 copies** |
+
+The tick stalls come at every point of the stream (copies stop after 2, 3, … 13 outputs; no
+fault, no timeout), i.e. the ordering assumption (ii) does not hold in a state kernel: a
+source's done can land inside the 15 ms the veto needs to establish before the ~74 ms tap,
+the relay then re-lights `REQ` false with `REQ` true already rising, the pair's own kill
+takes the true rail, and the request is lost. Trading 10 wrong in 4,000 outputs for 249
+stalls is not a trade the machine can take (a frame of a thousand tokens never finishes), so
+`build_pipeline(relight_requests=False)` is the default — `lib/kernel.py` is functionally at
+the §10.3 state — and the mechanism stays buildable for the reproduction. What the next
+attempt needs is an evaluation that cannot straddle a rising `REQ` true: an ignition held for
+the veto's establishment time (a two-stage relay whose second stage is vetoed by the same
+rail 15 ms later), or a tap placed by the source's done rather than the reader's start.
 
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 

@@ -217,7 +217,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     from drosophilos.sim.ref64 import RefSim
 
     pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3})
+                        consts={"k": 3}, relight_requests=True)
     assert pl.net.n < 30000
     cell = next(c for c in pl.cells if c.name == "m.r2")
     req = cell.reqs["m.r1"]
