@@ -336,6 +336,25 @@ The local Apple-GPU seed rerun could not be measured in the isolated worker: alt
 devices and rejects allocation as an unsupported OS. The seed-0/1/2/3 eight-copy rerun and
 the 100-copy cluster campaigns therefore remain external confirmation runs.
 
+**Rates before the fix, with the ceiling removed** (Juno 407291; 100 copies × 8 tokens, mix B,
+90 s of neural time allowed; every copy's outputs kept):
+
+| block | ok | wrong | missing | faults | copies with errors |
+|---|---|---|---|---|---|
+| render (ROM tables, one reader per value) | 799 / 800 | 1 | 0 | 0 | 1 |
+| fan-out (one value read by two cells) | 775 / 800 | 16 | 9 | 0 | 8 |
+| perspective (16-bit, pipelined multiplier) | 760 / 800 | 7 | 33 | 0 | 7 |
+| tick (13-cell state kernel, two state outputs) | 666 / 1,600 | 296 | 638 | 18 | 94 |
+
+Every wrong value found in the records is one of two shapes. (1) The **duplicate** above: render's
+single wrong value is its seventh output emitted again in the eighth slot; the tick records hold 56
+such signatures. (2) A **stall**: 33 tick copies produced one output and nothing more, 33 two, 19
+three — a third of the copies stop at the second token. And in a *state* kernel a duplicate is not a
+shifted stream but a corrupted state: the duplicated run applies the update twice, so every later
+output is wrong and nothing detects it (copy 0: `25, 25, 30, 30, 19, 33, 30, 59` for `25, 30, 24,
+27, 27, 67, 107, 0`). Whether the guard fix above removes the stalls as well as the duplicates is
+the question the fixed campaign answers.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

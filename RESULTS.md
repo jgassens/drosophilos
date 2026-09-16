@@ -897,9 +897,14 @@ which shifts the rest of the stream. In eight copies of the fan-out block one di
 eight of the perspective kernel, one. That is a silent error at the protocol level, not a
 fail-stop, and it is the "guard-doublet" risk the second review round documented for two-reader
 cells. Its mechanism is being traced at the spike level and the fix will carry its own test;
-the rates with the time ceiling removed are being re-measured. (The first campaign's large
-"missing" counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for
-eight tokens and the perspective kernel 39 s.)
+the rates with the time ceiling removed (`docs/a3_kernels.md` §10.3): render 799 / 800,
+fan-out 775 / 800, perspective 760 / 800 — and the tick state kernel 666 / 1,600, with 94 of 100
+copies failing, a third of them stalling at their second token, and every duplicated run of a
+state cell leaving the state silently wrong from then on. The mechanism (a cached "both sources
+ready" flag replayed after a two-order guard's doublet) is fixed with end-to-end vetoes on the
+final guard; the campaigns are being rerun on the fix. (The first campaign's large "missing"
+counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
+tokens and the perspective kernel 39 s.)
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
