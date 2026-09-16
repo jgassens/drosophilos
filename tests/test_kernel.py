@@ -59,6 +59,72 @@ def test_neural_pipeline_with_a_fan_out_value():
     print("fan-out pipeline", st)
 
 
+def test_chained_guard_rechecks_sources_when_passed_pair_is_reignited():
+    """A stale intermediate `passed` rail must not replay a multi-source cell.
+
+    The two nodes run the same unperturbed three-input guard. After its legitimate start,
+    both get IDLE again, but node 1 also gets a strong synthetic stray on the cached passed
+    rail. This deterministically models the mix-B guard-doublet failure: before the final
+    source recheck, node 1 emitted a second start with both source REQs false.
+    """
+    import torch
+
+    from drosophilos.lib.control import add_kill_pair, add_kill_train
+    from drosophilos.lib.kernel import _chain_true
+    from drosophilos.lib.netlist import Drive, Netlist
+    from drosophilos.sim.lif_torch import TorchSim
+
+    drive = Drive.from_params(PARAMS)
+    net = Netlist(PARAMS)
+    image = []
+    a = add_kill_pair(net, drive, "a")
+    b = add_kill_pair(net, drive, "b")
+    idle = add_kill_pair(net, drive, "idle")
+    image += [a[0], b[0], idle[1]]
+    start = net.neuron("start")
+    _chain_true(net, drive, "go", [a, b, idle], start, image, start)
+    for latch in (a[0], b[0], idle[0]):
+        net.synapse(start, latch.u, drive.ignite)
+    add_kill_train(net, drive, "start.kill", start, [a[1], b[1], idle[1]])
+    passed = net.roles.index("go.p0r1.u")
+
+    class InjectPassed(TorchSim):
+        def __init__(self):
+            super().__init__(net.topology(), PARAMS, n_nodes=2, device="cpu", dtype=torch.float32)
+            self.injected_at = None
+
+        def step(self):
+            before = len(self._spk_step)
+            super().step()
+            for k in range(before, len(self._spk_step)):
+                for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
+                    if node == 1 and neuron == start and self.injected_at is None:
+                        now = self.step_index
+                        self.injected_at = now + 1000  # after the start reset has recovered
+                        self.add_events(1, [self.injected_at, now + 2000], [passed, idle[1].u],
+                                        [drive.ignite, drive.ignite])
+                        self.add_events(0, [now + 2000], [idle[1].u], [drive.ignite])
+
+    sim = InjectPassed()
+    for node in range(2):
+        for latch in image:
+            sim.add_events(node, [1], [latch.u], [drive.ignite])
+        sim.add_events(node, [1000, 1000], [a[1].u, b[1].u], [drive.ignite, drive.ignite])
+    sim.run(7000)
+
+    starts = [[] for _ in range(2)]
+    passed_after_injection = False
+    for steps, nodes, neurons in zip(sim._spk_step, sim._spk_node, sim._spk_neuron):
+        step = int(steps[0])
+        for node, neuron in zip(nodes.tolist(), neurons.tolist()):
+            if neuron == start and (not starts[node] or step - starts[node][-1] > 100):
+                starts[node].append(step)
+            if node == 1 and neuron == passed and sim.injected_at is not None and step >= sim.injected_at:
+                passed_after_injection = True
+    assert sim.injected_at is not None and passed_after_injection
+    assert [len(node_starts) for node_starts in starts] == [1, 1], starts
+
+
 TICK = open("examples/tick.c").read()
 
 

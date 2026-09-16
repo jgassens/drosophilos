@@ -130,27 +130,39 @@ class _N:
         self.u = u
 
 
-def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20) -> None:
+def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
+                  extra_vetoes: tuple[int, ...] = ()) -> None:
     """One pulse on `target` when A and B are both true, issued at the later of their rises: A
     and B are kill pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
     d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
     rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
     ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
     its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
-    are within the overlap; the target's consumers take a doublet as one event."""
+    are within the overlap; the target's consumers take a doublet as one event. `extra_vetoes`
+    recheck source-false rails hidden behind a chained guard's cached passed pair."""
     a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
     b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
-    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u], _N(target))
-    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u], _N(target))
+    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target))
+    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
 
 
 def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
-    """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse)."""
+    """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse).
+
+    Intermediate passed pairs are only a cache: the final guard also vetoes on every original
+    pair that cache represents. A guard doublet can otherwise perturb a passed pair around its
+    reset and leave it true; when the last pair (a cell's IDLE, or a reader-free condition)
+    rises later, the stale cache would issue a second start or commit with no new requests.
+    """
     cur = pairs[0]
     for k, pr in enumerate(pairs[1:]):
         last = k == len(pairs) - 2
         if last:
-            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target)
+            # `cur` is a passed pair once three or more inputs are chained. Recheck the
+            # original inputs it summarises, whose false rails have been stable for the whole
+            # completed run when a stale passed pair meets a later rise of `pr`.
+            recheck = tuple(p[0].u for p in pairs[: k + 1]) if k else ()
+            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck)
             return
         passed = add_kill_pair(net, drive, f"{name}.p{k}")
         pk = net.neuron(f"{name}.p{k}.pulse")

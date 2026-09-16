@@ -293,6 +293,49 @@ programs the compiler accepted and compiled to something other than their meanin
 | The batched runner reported no faults, timeouts or bad outputs | It counts them per node |
 | An outer loop that is only a counter was refused | Allowed: its stream only paces |
 
+### 10.3 Multi-pair guard replay (2026-09-16)
+
+The warning from the first review was real. In the mix-B fan-out campaign (8-bit, eight
+copies, seed 0 on Juno's H200), node 6 produced
+`[3, 11, 11, 19, 19, 203, 203, 83]` instead of
+`[3, 11, 11, 19, 19, 203, 83, 11]`: the sixth value completed at 10,348 ms and again at
+11,517 ms. The same signature appeared in the 16-bit perspective kernel and in 8 of 100
+fan-out copies. Mix 0 and the ROM renderer (one reader per value) did not show it.
+
+This was a **second run of the output cell**, not a second input token or two commits of one
+stage. A two-source cell has three start conditions (`REQ.a`, `REQ.b`, `IDLE`), so
+`_chain_true` first caches `REQ.a && REQ.b` in a `passed` kill pair, then guards that pair
+against `IDLE`. The two-order guard can legitimately emit a doublet. In an unperturbed
+one-bit fan-out used to retain the whole handshake record, c2/c3 DONE both fired at
+2,413.6 ms, both c4 REQ-true rails at 2,422.0 ms, and `c4.go.p0.pulse` fired at 2,496.6 and
+2,536.0 ms (39.4 ms apart). The passed-true rail rose at 2,500.8 ms; c4 started once at
+2,572.8 ms, reset both REQs and IDLE at 2,577.0 ms and reset the passed pair to false at
+2,578.7 ms. Its first commit, master completion and DONE were at 3,015.3, 3,338.6 and
+3,342.8 ms.
+
+That 39.4 ms doublet is inside the passed pair's kill-relay recovery margin. Under mix B the
+cached true rail can survive or re-arm around the start reset. A deterministic reproduction
+injects that stale passed-true spike after the first DONE: it rose at 3,365.3 ms, IDLE rose at
+3,453.0 ms, and the old circuit started c4 again at 3,567.4 ms although there was no new
+c2/c3 DONE and both c4 REQ-false rails were live. The second run committed at 4,009.9 ms and
+completed the same value at 4,332.1 ms. Thus the failure is the passed pair flipping back;
+the commit pulse's kill train and the input register are not the source of the duplicate.
+
+The fix is an end-to-end check on the final guard: when its left input is a cached passed
+pair, both final veto relays also see every original source's false rail. Those rails are
+already dead well before a legitimate final driver, so the normal timing is unchanged. If a
+passed rail is stale when IDLE later rises, any reset REQ blocks the start. The same rule
+protects chained commit guards from a stale cache. The fast two-copy regression injects the
+passed-true spike and re-arms IDLE: before the fix its start-cluster steps were `[2534]` and
+`[2534, 5703]`; after the fix they are `[2534]` and `[2534]`. In the full two-copy one-bit
+fan-out, both fixed copies likewise started only at 2,572.9 ms and completed once at
+3,338.7 ms; the injected copy produced no replay through the 4,500 ms ceiling.
+
+The local Apple-GPU seed rerun could not be measured in the isolated worker: although
+`system_profiler` reports the M1 Pro and Metal support, this PyTorch process reports zero MPS
+devices and rejects allocation as an unsupported OS. The seed-0/1/2/3 eight-copy rerun and
+the 100-copy cluster campaigns therefore remain external confirmation runs.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
@@ -362,5 +405,6 @@ every pixel equal to the reference, no fault, 279 s of neural time (job 405122).
   parameter port the host rewrites between frames, which is a staged register like the input.
 - The cells are 8-bit; the Q16.16 datapath of `minidoom` needs 32-bit cells and a multiplier
   cell of ~50k neurons (`docs/capacity_doom.md` §2).
-- No perturbation campaign yet on a kernel; the handshake's margins (55 ms veto recovery, 86 ms
-  relay recovery, 80 ms reset paralysis) are the ones measured on the machine.
+- Kernel perturbation campaigns now cover the renderer, fan-out and perspective blocks. The
+  first fan-out run exposed and fixed the multi-pair replay in §10.3; the fixed 100-copy
+  cluster rerun is still due.
