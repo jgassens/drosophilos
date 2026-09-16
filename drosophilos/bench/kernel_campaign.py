@@ -100,7 +100,10 @@ def main():
     rec = {"block": a.block, "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
-           "nodes_with_errors": sum(1 for x in per_node if x[1] or x[2]), "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0)}
+           "nodes_with_errors": sum(1 for x in per_node if x[1] or x[2]), "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0),
+           "per_node": per_node, "reference": ref, "tokens_list": list(tokens), "output_cells": list(ks.outputs),
+           "outputs": [{o: [[int(s_), int(v)] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
+           "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
     print(json.dumps(rec, indent=1), flush=True)
     if a.out:
         json.dump(rec, open(a.out, "w"), indent=1)
