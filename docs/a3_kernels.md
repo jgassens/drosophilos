@@ -363,6 +363,77 @@ eight-copy seed-0 rerun still duplicates the fifth value. So the multi-pair guar
 and state kernels' whole problem, and the pipelined multiplier's duplicate — and the ROM reader's
 single case — come from somewhere else (§10.4 when found).
 
+### 10.4 A REQ rail is not permission until its pair has settled (2026-09-16)
+
+The remaining perspective and ROM-reader records have one cause at two different places in
+the pipeline: a per-source REQ kill pair can be observed while both rails are live. The old
+`guarded_pulse` checked the *other* pair's false rail but not the false rail belonging to its
+driver. Thus the same ambiguous REQ could mean "pending" to the reader's start guard and
+"free" to the producer's commit guard.
+
+That gives both recorded shapes:
+
+- If REQ-true survives or reappears as the reader becomes idle, the reader runs once more on
+  the source's still-current master. In a MULP row this injects an extra old 3n+3-bit row word;
+  it advances through the remaining rows and adds a duplicate product and output (shape A).
+- If REQ-false survives or reappears while REQ-true is pending, it opens the producer's commit
+  guard early. A final LOAD can consequently start before its address source has established
+  the new master and read the preceding address (shape B). A run that stops after the expected
+  output count makes the extra old result look as though it replaced the last token; with a
+  longer ceiling the displaced request can appear as a later extra result.
+
+The timing explains why this is a perturbation-only failure. A general kill pair used three
+kill pulses, about 5.3 ms apart. The losing rail can still emit for about 15 ms, reset
+inhibition paralyses a latch for about 80 ms, and a relay needs about 86 ms of source silence
+to re-arm. A mix-B event is 150 quanta, `150 * 0.0171875 = 2.578 mV` of conductance jump: it
+does not ignite a resting rail across the 7 mV gap, but it can change the last spike of a rail
+which is already being killed or re-lit. Four-percent log-normal noise is not a ±4 % bound;
+the long tail over the perspective copy's roughly 110k neurons supplies occasional weak kill
+edges and strong loop edges. The one-reader ROM pipeline has four opportunities per token;
+the pipelined perspective kernel has those plus sixteen row handshakes, matching the large
+difference in observed incidence.
+
+The alternatives in the completion path were tested and do not make these stream shapes:
+
+| candidate | result and relevant margin |
+|---|---|
+| Master's completion train counted twice | No. Its nominal period is 4.7 ms and the runner requires a gap greater than three periods (~14 ms) to count another rise. Excitatory stray input does not extinguish the completion latch. |
+| Master's DONE relay re-fires | No. The fast inhibitor lands at about 3.6 ms, before the next 4.7 ms completion spike, and a live completion train continues to hold the relay down. It needs roughly 86 ms of source silence and a new rise; the next such rise is the next master rewrite. A close doublet is absorbed by the REQ latch and by the runner's three-period grouping. |
+| Stage-to-master COPY runs twice | No. `M.ready` lights one COPY latch; the COPY train holds every per-rail edge relay after its first firing. A close READY or COPY doublet only re-ignites the same state. A second copy needs a second grant/reset transaction, but CREQ is cleared by the commit pulse. |
+| A false completion-tree AND | A 150-q sweep of a one-input completion AND did not fire in the reference model, including coherent +4 % excitation and −0.2 mV threshold/+0.2 mV bias. If forced, its signature is an incomplete/faulted master or a stall, not a complete replay of the preceding word. |
+| 10.3 `passed` cache in a one-source cell | Not present. One cell source gives the direct `REQ && IDLE` guard; a MULP row has exactly this form. Intermediate `passed` pairs begin only with three guard inputs and retain the end-to-end false-rail recheck from §10.3. |
+
+The normal prev/row ordering itself has ample margin. A row samples at ACT^d, 11 hops or
+about 58 ms after start. Once its REQ-false acknowledgment is valid, the predecessor's commit
+takes the long guard path (now 22 hops, about 117 ms) and the staged register's 12-hop guard
+(about 64 ms) before master reset: over 120 ms after the sample. An erroneously restored
+REQ-false while the row is still busy bypassed that ordering by opening the commit guard
+*before the next start*; no increase to ACT^d could repair it.
+
+The fix is local to that permission boundary:
+
+1. Both final veto relays of every two-pair guard now also see both driver pairs' false rails.
+   A pair must be one-hot before either true rail has meaning. The earlier §10.3 source
+   rechecks remain in addition to these local checks.
+2. Per-source REQ pairs use four kill pulses, as register reset does, and the explicit start
+   clear uses four too. This closes the three-pulse transition in which the losing rail could
+   be restored.
+3. The two guard paths move from 12/20 to 14/22 hops. Their eight-hop (~42 ms) order overlap
+   is unchanged, while the short path now arrives after the fourth kill pulse and the ~55 ms
+   veto-recovery tail, with about 10 ms of clean-model margin.
+
+Two deterministic CPU-reference regressions retain the failure and the fix in one run each.
+They use two copies and remove exactly the new self-false veto synapse on copy 1 to reconstruct
+the old guard. A timed injection holds the losing REQ rail across evaluation — the deterministic
+postcondition of the rare mix-B transition, rather than a random search. The fixed copy rejects
+it. The 4-bit MULP circuit has 7,156 neurons and runs 8 s of neural time: copy 0 starts the
+chosen row once and outputs `[9]`; the old-guard copy starts it twice and outputs `[9, 9]` from
+one input token. The two-LOAD ROM chain has 3,586 neurons and runs 5 s: the fixed copy outputs
+`[9]`, while the old-guard copy reads the old address again and outputs `[9, 9]`. Both are below
+30k neurons and use `RefSim` on CPU (`tests/test_kernel.py`). The cluster campaign is still the
+statistical confirmation; the campaign runner can now retain the relevant evidence with
+`--dump-node N --dump-roles REGEX --dump-out trace.npz`.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

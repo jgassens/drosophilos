@@ -10,6 +10,8 @@ exact 95 % upper limits, like the block campaigns of A2.
 
 import argparse
 import json
+from pathlib import Path
+import re
 import time
 
 import numpy as np
@@ -67,10 +69,25 @@ def main():
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
+    ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
+    ap.add_argument("--dump-roles", default=None, help="regular expression matched against neuron roles")
+    ap.add_argument("--dump-out", default=None, help="write the selected step/neuron/role arrays to this .npz")
     a = ap.parse_args()
     P = Params()
     ks, pl, tokens, ref = block(a.block, P)
     B = a.copies
+    dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
+    if any(dump_given) and not all(dump_given):
+        ap.error("--dump-node, --dump-roles and --dump-out must be supplied together")
+    if a.dump_node is not None and not 0 <= a.dump_node < B:
+        ap.error(f"--dump-node must be in [0, {B})")
+    capture = None
+    if a.dump_node is not None:
+        try:
+            role_re = re.compile(a.dump_roles)
+        except re.error as exc:
+            ap.error(f"invalid --dump-roles expression: {exc}")
+        capture = (a.dump_node, [i for i, role in enumerate(pl.net.roles) if role_re.search(role)])
     pert = MIXES[a.mix]
     rng = np.random.default_rng(a.seed)
     n_steps = int(a.max_ms / P.dt) + 5000
@@ -79,7 +96,15 @@ def main():
     dtype = torch.float32 if a.fp32 else torch.float64
     sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype)
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
-                                         expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype)
+                                         expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
+                                         capture_spikes=capture)
+    captured = st.pop("captured_spikes", None)
+    if captured is not None:
+        steps, neurons = captured
+        dump_path = Path(a.dump_out)
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        roles = np.asarray([pl.net.roles[int(i)] for i in neurons], dtype=str)
+        np.savez(dump_path, step=steps, neuron=neurons, role=roles)
     ok = wrong = missing = 0
     per_node = []
     for b in range(B):

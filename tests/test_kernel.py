@@ -125,6 +125,101 @@ def test_chained_guard_rechecks_sources_when_passed_pair_is_reignited():
     assert [len(node_starts) for node_starts in starts] == [1, 1], starts
 
 
+def _run_request_ambiguity_reproduction(pl, cell_name, source, token, max_ms):
+    """Two CPU-reference copies receive the same forced both-live REQ transition.
+
+    Node 0 is the fixed topology.  On node 1 only, the new REQ-self-false input to the
+    start guard is zeroed, exactly reconstructing the old guard.  Repeated ignition of the
+    losing rail holds the deterministic state which a mix-B hit during an unlucky kill-pair
+    transition can leave behind; it is not random fault search.
+    """
+    import numpy as np
+
+    from drosophilos.lib.kernel import run_pipeline_batched
+    from drosophilos.sim.ref64 import RefSim
+
+    cell = next(c for c in pl.cells if c.name == cell_name)
+    req = cell.reqs[source]
+    topo = pl.net.topology()
+    veto = pl.net.roles.index(f"{cell.name}.go.g0.pa.veto")
+    self_veto = np.flatnonzero((topo.src == req[0].u) & (topo.dst == veto))
+    assert len(self_veto) == 1
+    quanta = np.broadcast_to(topo.quanta, (2, topo.nnz)).copy()
+    quanta[1, self_veto] = 0  # node 1 is the pre-fix guard
+
+    class InjectAmbiguousRequest(RefSim):
+        def __init__(self):
+            super().__init__(topo, PARAMS, n_nodes=2, quanta=quanta)
+            self.saw_done = [False, False]
+            self.injected = [False, False]
+            self.starts = [[], []]
+
+        def step(self):
+            before = len(self._spk_step)
+            super().step()
+            for k in range(before, len(self._spk_step)):
+                step = int(self._spk_step[k][0])
+                for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
+                    if neuron == cell.reg.done_relay:
+                        self.saw_done[node] = True
+                    if neuron == cell.idle[1].u and self.saw_done[node] and not self.injected[node]:
+                        self.injected[node] = True
+                        now = self.step_index
+                        steps = [now + 5] + [now + d for d in (400, 500, 600, 700, 800)]
+                        neurons = [req[1].u] + [req[0].u] * 5
+                        self.add_events(node, steps, neurons, [pl.drive.ignite] * len(steps))
+                    if neuron == cell.start and (not self.starts[node] or step - self.starts[node][-1] > 100):
+                        self.starts[node].append(step)
+
+    sim = InjectAmbiguousRequest()
+    outs, sim, stats = run_pipeline_batched(pl, PARAMS, [[token], [token]], max_ms=max_ms,
+                                             expect_outputs=[2, 2], sim=sim, progress=0)
+    return [[v for _, v in node[pl.output.name]] for node in outs], sim.starts, stats
+
+
+def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
+    """Shape A: one stale row request adds a second product without another input token."""
+    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                        consts={"k": 3})
+    assert pl.net.n < 30000
+    got, starts, stats = _run_request_ambiguity_reproduction(pl, "m.r1", "m.r0", 3, 8000)
+    assert got == [[9], [9, 9]], (got, starts, stats)
+    assert [len(x) for x in starts] == [1, 2]
+    # The fixed per-source pair has the fourth kill pulse on both transitions.
+    assert "m.r1.req.m.r0.k0.h3" in pl.net.roles and "m.r1.req.m.r0.k1.h3" in pl.net.roles
+
+
+def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
+    """Shape B: a final ROM reader re-runs on the preceding address while no token arrives."""
+    mem1 = {i: (i + 1) & 15 for i in range(16)}
+    mem2 = {i: (i * 3) & 15 for i in range(16)}
+    spec = [{"name": "a", "op": "LOAD", "a": "input", "mem": "m1"},
+            {"name": "out", "op": "LOAD", "a": "a", "mem": "m2"}]
+    pl = build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)})
+    assert pl.net.n < 30000
+    got, starts, stats = _run_request_ambiguity_reproduction(pl, "out", "a", 2, 5000)
+    assert got == [[9], [9, 9]], (got, starts, stats)
+    assert [len(x) for x in starts] == [1, 2]
+
+
+def test_batched_runner_captures_selected_spikes_before_trace_trimming():
+    import numpy as np
+
+    from drosophilos.lib.kernel import run_pipeline_batched
+    from drosophilos.sim.ref64 import RefSim
+
+    pl = build_pipeline(PARAMS, 1, [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}],
+                        consts={"zero": 0})
+    wanted = {pl.cells[0].start, pl.cells[0].reg.done_relay}
+    sim = RefSim(pl.net.topology(), PARAMS, n_nodes=2)
+    outs, sim, stats = run_pipeline_batched(pl, PARAMS, [[1], [0]], max_ms=3000, sim=sim, progress=0,
+                                             capture_spikes=(1, wanted))
+    steps, neurons = stats["captured_spikes"]
+    assert len(steps) == len(neurons) > 0
+    assert set(neurons.tolist()) == wanted
+    assert np.all(steps[1:] >= steps[:-1])
+
+
 TICK = open("examples/tick.c").read()
 
 

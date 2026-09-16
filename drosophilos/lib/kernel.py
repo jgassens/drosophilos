@@ -130,20 +130,23 @@ class _N:
         self.u = u
 
 
-def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
+def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 14, d2: int = 22,
                   extra_vetoes: tuple[int, ...] = ()) -> None:
     """One pulse on `target` when A and B are both true, issued at the later of their rises: A
     and B are kill pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
     d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
     rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
     ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
-    its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
-    are within the overlap; the target's consumers take a doublet as one event. `extra_vetoes`
-    recheck source-false rails hidden behind a chained guard's cached passed pair."""
+    its veto long dead (measured rule, `celement.add_veto_relay`). Each path also vetoes on its
+    *own* false rail: a kill pair perturbed around its transition must settle to one rail before
+    it can mean true. The extra two hops over the original 12/20 leave ~10 ms after the measured
+    false-rail tail plus the 55 ms veto recovery. Both paths may fire within the overlap; the
+    target's consumers take a doublet as one event. `extra_vetoes` recheck source-false rails
+    hidden behind a chained guard's cached passed pair."""
     a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
     b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
-    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target))
-    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
+    add_veto_relay(net, drive, f"{name}.pa", a_d, [A[0].u, B[0].u, *extra_vetoes], _N(target))
+    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, B[0].u, *extra_vetoes], _N(target))
 
 
 def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
@@ -176,6 +179,22 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
     always = add_kill_pair(net, drive, f"{name}.always")  # one pair: guard it against a constant true
     image.append(always[1])
     guarded_pulse(net, drive, f"{name}.g", cur, always, target)
+
+
+def _request_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
+    """A per-source REQ bit, with one more kill pulse than a general control pair.
+
+    A REQ transition is also a permission boundary: its false rail opens the source's
+    commit guard while its true rail opens the reader's start guard.  The general three-pulse
+    kill leaves the losing rail close enough to its loop for a mix-B hit during the handoff
+    to restore one spike (and, with an unlucky loop-weight draw, the rail).  Four pulses use
+    the register reset contract's ~80 ms paralysis.  The 14-hop short guard above waits until
+    that train and the 55 ms veto tail have cleared before accepting the winning rail.
+    """
+    r0, r1 = add_latch(net, drive, f"{name}r0"), add_latch(net, drive, f"{name}r1")
+    add_kill_train(net, drive, f"{name}.k0", r0.u, [r1], pulses=4)
+    add_kill_train(net, drive, f"{name}.k1", r1.u, [r0], pulses=4)
+    return [r0, r1]
 
 
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
@@ -300,7 +319,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     built = set()
     for c in order:
         for src in c.request_sources:
-            pair = add_kill_pair(net, drive, f"{c.name}.req.{src}")
+            pair = _request_pair(net, drive, f"{c.name}.req.{src}")
             c.reqs[src] = pair
             trig = net.neuron(f"{c.name}.trigger.{src}")
             net.synapse(done_of(src), trig, drive.relay_in)
@@ -317,7 +336,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # The pair's own kill (r0's rise kills r1) is a relay driven by r0's train, and r0 was
         # silent for only ~60 ms (killed by the request, re-lit by the start), inside its ~86 ms
         # recovery: the request rail survived (measured). The start pulse kills them itself.
-        add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()])
+        add_kill_train(net, drive, f"{c.name}.start.kill", c.start,
+                       [c.idle[1]] + [pr[1] for pr in c.reqs.values()], pulses=4)
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
@@ -817,7 +837,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
                          expect_outputs: list | None = None, dtype=None, sim=None,
-                         progress: "float | callable | None" = 300) -> tuple[list, object, dict]:
+                         progress: "float | callable | None" = 300,
+                         capture_spikes: "tuple[int, object] | None" = None) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
@@ -834,7 +855,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     `nodes_done`, `total_nodes`, `faults`, `timeouts`, plus `outs` — the per-node dict of
     output lists collected so far (the same live object the run fills in, for a caller that
     wants to assemble and write a partial result while the run continues). Wall time is
-    polled only every ~1000 steps, so the per-step cost of the run loop is unchanged."""
+    polled only every ~1000 steps, so the per-step cost of the run loop is unchanged.
+
+    `capture_spikes=(node, neuron_ids)` retains every matching `(step, neuron)` before the
+    runner trims the simulator's trace.  The arrays are returned in
+    `stats["captured_spikes"]`; campaigns use this for a narrow role-filtered handshake dump
+    without retaining every spike of a 100-copy run."""
     import torch
     from ..sim.lif_torch import TorchSim
     net, drive = pl.net, pl.drive
@@ -844,6 +870,19 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
     sim.run(3000)
+    captured_steps, captured_neurons = [], []
+    if capture_spikes is not None:
+        capture_node, capture_ids = capture_spikes
+        capture_ids = np.asarray(sorted(set(int(x) for x in capture_ids)), dtype=np.int64)
+
+        def capture_chunk(stp, nr, nd) -> None:
+            mask = (nd == capture_node) & np.isin(nr, capture_ids)
+            if np.any(mask):
+                captured_steps.extend(stp[mask].tolist())
+                captured_neurons.extend(nr[mask].tolist())
+
+        for stp, nr, nd in zip(sim._spk_step, sim._spk_neuron, sim._spk_node):
+            capture_chunk(stp, nr, nd)
     first_stream = next(iter(pl.inputs))
     scheds = []
     for sc in schedules:
@@ -905,7 +944,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     loads[b].append(t)
                     loaded[b][st] += 1
                     k[b] += 1
+        n_spike_chunks = len(sim._spk_step)
         sim.step()
+        if capture_spikes is not None:
+            for stp, nr, nd in zip(sim._spk_step[n_spike_chunks:], sim._spk_neuron[n_spike_chunks:],
+                                   sim._spk_node[n_spike_chunks:]):
+                capture_chunk(stp, nr, nd)
         s_ = sim.step_index - 1
         steps_since_check += 1
         if progress_interval and steps_since_check >= STEP_CHECK:
@@ -952,4 +996,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
              "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
              "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad}
+    if capture_spikes is not None:
+        stats["captured_spikes"] = (np.asarray(captured_steps, dtype=np.int64),
+                                    np.asarray(captured_neurons, dtype=np.int64))
     return outs, sim, stats
