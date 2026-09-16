@@ -886,6 +886,20 @@ bias is now a field of the netlist (a Profile 2 parameter edit, counted in the m
 carried by the topology into both simulators. Not yet done: a perturbation campaign on it and
 a register built from it.
 
+**The first perturbation campaigns on kernels (2026-09-16, Juno H200, 100 copies × 8 tokens,
+mix B).** With no perturbation every copy of every block is correct. Under mix B the render
+block (ROM tables, one reader per value) was 799 / 800; the fan-out block (one value read by
+two cells), the tick state kernel and the 16-bit perspective kernel each lost outputs in some
+copies, and the diagnostic run with every copy's outputs kept shows the failure's shape: **a
+duplicated output** — one token's value emitted twice (`…, 203, 203, 83` for `…, 203, 83, 11`),
+which shifts the rest of the stream. In eight copies of the fan-out block one did it once; in
+eight of the perspective kernel, one. That is a silent error at the protocol level, not a
+fail-stop, and it is the "guard-doublet" risk the second review round documented for two-reader
+cells. Its mechanism is being traced at the spike level and the fix will carry its own test;
+the rates with the time ceiling removed are being re-measured. (The first campaign's large
+"missing" counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for
+eight tokens and the perspective kernel 39 s.)
+
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
 then chases the player one step per tick with collision (`examples/doom4.c`), validated by
