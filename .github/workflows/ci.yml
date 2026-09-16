@@ -4,20 +4,38 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 7 * * *"   # the slow suite once a day (07:00 UTC), not on every push
+  workflow_dispatch:
 
 jobs:
-  tests:
-    name: CPU test suite
+  fast:
+    name: CPU fast suite
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
       - run: uv python install 3.12
       - run: uv sync --no-group dev && uv pip install pytest hypothesis
-      - run: uv run pytest -q -p no:warnings --ignore=tests/test_brian2_parity.py
+      - run: uv run pytest -q -p no:warnings -m "not slow" --ignore=tests/test_brian2_parity.py
+  slow:
+    name: CPU slow suite (daily / manual)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+      - run: uv sync --no-group dev && uv pip install pytest hypothesis
+      - run: uv run pytest -q -p no:warnings -m slow --ignore=tests/test_brian2_parity.py
   brian2:
     name: Brian2 cross-simulator parity
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
