@@ -170,8 +170,16 @@ anatomical weight it can host about half of one pixel kernel; and no bound teste
 Doom kernel, let alone three. That is the measured capacity statement for Profile 2 with one
 real neuron per designed neuron: a Doom-shaped engine on the fly's own synapses needs either
 time-multiplexing (the sequencer's few-hundred-latch machine, at ~1/30 the speed of the
-kernels), or latches built from something other than reciprocal pairs (a longer cycle, or a
-population), or the Profile 3 label.
+kernels), or latches built from something other than reciprocal pairs, or the Profile 3 label.
+
+Longer cycles do not change it (`bench/h1_cycles.py`, `docs/h1_cycles.json`): a latch could be
+a directed 3- or 4-neuron loop (period 3–4 hops instead of 2; every timing contract would need
+re-measuring), and MCNS has 8,402 such 3-cycles and 125,036 4-cycles at the H0 bound — but they
+share neurons with each other and with the pairs, and a greedy packing of vertex-disjoint
+cycles of length 2–4 holds **368** latches at k_max 4 (292 pairs, 32 triangles, 44 squares),
+1,096 at 8 and 2,834 at 16 — within a few percent of the pairs alone. The supply of strong
+recurrent motifs is what it is: a few hundred to a few thousand, and the fly spends them on
+its hubs.
 
 **Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
 loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual
