@@ -52,7 +52,11 @@ def run_transactions(ch: Channel, params: Params, words: list[int], *, max_steps
     """`expected[k]` is the value the consumer should decode for word k (defaults to the word
     itself; an adder channel expects the sum)."""
     net, drive = ch.net, ch.drive
+    fresh = sim is None
     sim = sim or RefSim(net.topology(), params)
+    if fresh:  # a flip-flop channel needs its power-on pulse (none for an all-latch channel)
+        for st, neuron, q in ch.power_on_events(sim.step_index):
+            sim.add_events(0, [st], [neuron], [q])
     P, Q = ch.producer, ch.consumer
     accept_n, cleared_n, ready_n, qreset_n = Q.completion.u, P.ready, Q.ready, Q.reset_trigger
     fault_set = set(Q.fault)

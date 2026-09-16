@@ -61,7 +61,7 @@ def make_perturbed_sim(topo, params: Params, B: int, pert: Perturbation, rng, n_
     base_q = topo.quanta.astype(np.float64)
     q = np.rint(base_q[None, :] * np.exp(rng.normal(0, pert.weight_sigma, size=(B, topo.nnz)))).astype(np.int32)
     vth = params.V_th + rng.normal(0, pert.th_sigma_mv, size=(B, topo.n))
-    bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n))
+    bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n)) + (0.0 if topo.bias is None else np.asarray(topo.bias, dtype=np.float64))  # drift ON TOP of the topology's biases (a flip-flop's 58 mV), which the caller's bias would otherwise replace
     # the stray Poisson input is drawn on the device as the simulation runs (TorchSim's
     # stray_rate_hz: a Bernoulli(rate * dt) draw per neuron per step, the same law as the
     # pre-drawn events it replaces); `n_steps` is kept for the signature and no longer bounds it
@@ -217,7 +217,7 @@ def run_campaign(build_fn, params: Params, n_transactions: int, *, batch: int = 
         # per-node perturbations
         q = np.rint(base_q[None, :] * np.exp(rng.normal(0, pert.weight_sigma, size=(B, topo.nnz)))).astype(np.int32)
         vth = params.V_th + rng.normal(0, pert.th_sigma_mv, size=(B, topo.n))
-        bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n))
+        bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n)) + (0.0 if topo.bias is None else np.asarray(topo.bias, dtype=np.float64))  # drift ON TOP of the topology's biases (a flip-flop's 58 mV), which the caller's bias would otherwise replace
         sim = TorchSim(topo, params, n_nodes=B, V_th=vth, bias=bias, quanta=q, device=device, dtype=dtype)
         n_steps = K * tx_period_steps + 200
         # loads

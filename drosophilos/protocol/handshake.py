@@ -168,11 +168,11 @@ def add_liveness(net: Netlist, drive: Drive, P: Register, Q: Register, watchdog_
     ignites STALE; at mix B that produced false retries in ~2 % of transactions, READY hangs,
     and, through mid-transaction resets, wrong values. A safe fraction (0.55 + 0.55) detects
     too slowly to beat READY. Stale state stays harness-observed (and rare: 8 per 10^6)."""
-    P.watchdog = add_watchdog(net, drive, "P.wd", [l.u for pair in P.rails for l in pair],
+    P.watchdog = add_watchdog(net, drive, "P.wd", [rail_of(l) for pair in P.rails for l in pair],  # a flip-flop producer's rails read through their proxies
                               [Q.completion.u, Q.fault_latch.u], watchdog_hops, P.reset_trigger, P.reset_edge, P.reset_inh)
     if monitor:
         for name, reg in (("P", P), ("Q", Q)):
-            taps = [l.u for l in reg.all_latches()] + ([reg.fault_latch.u] if reg.fault_latch is not None else [])
+            taps = [rail_of(l) for l in reg.all_latches()] + ([reg.fault_latch.u] if reg.fault_latch is not None else [])
             reg.monitor = add_stale_monitor(net, drive, f"{name}.mon", taps, reg.last_reset_relay, reg.ready,
                                             reg.ready_chain[-3:], reg.reset_trigger, reg.reset_edge, reg.reset_inh)
 
