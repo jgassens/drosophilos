@@ -1,0 +1,1196 @@
+{
+ "netlist": "build_adder_channel(Params(), 4, ordered=True, watchdog_hops=100)",
+ "search": "place_netlist(net, m, Policy(k_max=4), restarts=4, time_limit_s=300, seed=0, isolation_weight=w); best restart by objective (carried - w * sum(log1p(in_ext) + 0.25 log1p(out_ext)))",
+ "conditions": "isolated image, 20 additions, seed 0: A all missing edges added and parasitic zeroed; B carried only",
+ "isolated_mapping": {
+  "weight": "2.0",
+  "rule": "smallest external input total whose condition A computes every sum",
+  "path": "docs/h1_placement_mapping_isolated.json"
+ },
+ "results": {
+  "0.0": {
+   "isolation_weight": 0.0,
+   "placement": {
+    "carried": 690,
+    "edges": 1144,
+    "carried_fraction": 0.6031,
+    "hub_carried": 32,
+    "hub_total": 268,
+    "hard_carried": 659,
+    "hard_total": 878,
+    "neurons_placed": 613,
+    "neurons_total": 614,
+    "parasitic_to_zero": 14169,
+    "objective": 690.0,
+    "strategy": "hub_last seed 3",
+    "order_note": "backtracks 131; 663 carried before repair, +27 repaired; descent 5.0 s",
+    "search_seconds": 31.5
+   },
+   "exposure": {
+    "external_in_edges": 315326,
+    "external_out_edges": 271934,
+    "external_in_synapses": 3346626,
+    "external_out_synapses": 2616766,
+    "external_in_mean": 5459.4,
+    "external_out_mean": 4268.8,
+    "external_in_max": 47712,
+    "external_out_max": 30379,
+    "external_in_p90": 10793.0,
+    "external_out_p90": 8065.8
+   },
+   "host_superclasses": {
+    "cb_intrinsic": 350,
+    "vnc_intrinsic": 132,
+    "descending_neuron": 75,
+    "ascending_neuron": 31,
+    "visual_projection": 6,
+    "vnc_sensory": 5,
+    "cb_sensory": 5,
+    "cb_motor": 4,
+    "sensory_ascending": 2,
+    "vnc_motor": 2,
+    "visual_centrifugal": 1
+   },
+   "host_types": {
+    "u": {
+     "DNge036": 2,
+     "DNge173": 2,
+     "lLN1_bc": 2,
+     "CL092": 2,
+     "PS274": 2,
+     "FR1": 2
+    },
+    "v": {
+     "lLN1_bc": 4,
+     "?": 3,
+     "GNG224": 2,
+     "AVLP433_b": 2,
+     "PS027": 2,
+     "FR1": 2
+    },
+    "reset": {
+     "CL212": 1,
+     "IN03A042": 1
+    },
+    "reset_inh": {
+     "GNG119": 1,
+     "AVLP001": 1
+    },
+    "reset_edge": {
+     "AVLP076": 1,
+     "IN03B021": 1
+    },
+    "reset_relay": {
+     "AVLP451": 1,
+     "AVLP572": 1,
+     "CB3019": 1,
+     "AN19B009": 1,
+     "IN17A017": 1,
+     "IN19B003": 1
+    },
+    "ready_delay": {
+     "lLN2T_c": 2,
+     "DNp45": 1,
+     "VES088": 1,
+     "GNG104": 1,
+     "VES005": 1,
+     "DNg13": 1
+    },
+    "ready": {
+     "IN19B021": 1,
+     "LHPV4b4": 1
+    },
+    "or": {
+     "GNG553": 1,
+     "AVLP369": 1,
+     "INXXX464": 1,
+     "CB1920": 1,
+     "AVLP403": 1,
+     "GNG212": 1
+    },
+    "edge": {
+     "IN19B012": 3,
+     "DNa02": 2,
+     "DNge059": 2,
+     "DNge043": 2,
+     "IN20A.22A006": 2,
+     "INXXX239": 2
+    },
+    "edge_inh": {
+     "PS279": 4,
+     "IN19A020": 3,
+     "GNG240": 2,
+     "PS307": 2,
+     "SMP147": 2,
+     "lLN2F_b": 2
+    },
+    "hold_inh": {
+     "GNG114": 1,
+     "SMP543": 1,
+     "IN13A010": 1,
+     "LHPV12a1": 1,
+     "GNG639": 1,
+     "PS059": 1
+    },
+    "and": {
+     "CRE103": 1,
+     "AVLP488": 1,
+     "CB0218": 1,
+     "AVLP329": 1,
+     "AVLP332": 1,
+     "DNa11": 1
+    },
+    "d": {
+     "lLN1_bc": 3,
+     "GNG014": 2,
+     "AOTU012": 2,
+     "DNpe005": 2,
+     "GNG021": 2,
+     "IN10B011": 2
+    },
+    "veto": {
+     "lLN2P_b": 3,
+     "DNge101": 2,
+     "IN19A004": 2,
+     "INXXX385": 2,
+     "GNG017": 1,
+     "GNG107": 1
+    },
+    "start": {
+     "GNG029": 1
+    },
+    "hop": {
+     "IN17A001": 5,
+     "INXXX464": 4,
+     "IN19B003": 3,
+     "IN03A001": 3,
+     "IN01A012": 2,
+     "IN07B001": 2
+    },
+    "cancel_inh": {
+     "IN14A002": 1
+    }
+   },
+   "image_A": {
+    "profile3_edges": 453,
+    "parasitic_zeroed": 14167,
+    "synthetic_neurons": 1,
+    "scale_max": 3.99
+   },
+   "conditions": {
+    "A": {
+     "correct": 20,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 0,
+     "profile3_edges": 453,
+     "parasitic_kept": 0,
+     "chained_correct": 20
+    },
+    "B": {
+     "correct": 0,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 20,
+     "profile3_edges": 0,
+     "parasitic_kept": 0,
+     "chained_correct": null
+    }
+   },
+   "missing_by_class_top": {
+    "cancel_inh -> hop": [
+     94,
+     100
+    ],
+    "reset_inh -> u": [
+     63,
+     72
+    ],
+    "reset_inh -> v": [
+     57,
+     72
+    ],
+    "edge -> u": [
+     43,
+     76
+    ],
+    "edge_inh -> edge": [
+     31,
+     77
+    ],
+    "u -> edge": [
+     21,
+     41
+    ],
+    "veto -> edge": [
+     17,
+     56
+    ],
+    "u -> start": [
+     14,
+     18
+    ],
+    "v -> u": [
+     11,
+     72
+    ],
+    "u -> veto": [
+     10,
+     32
+    ]
+   }
+  },
+  "0.5": {
+   "isolation_weight": 0.5,
+   "placement": {
+    "carried": 587,
+    "edges": 1144,
+    "carried_fraction": 0.5131,
+    "hub_carried": 29,
+    "hub_total": 268,
+    "hard_carried": 558,
+    "hard_total": 878,
+    "neurons_placed": 612,
+    "neurons_total": 614,
+    "parasitic_to_zero": 7787,
+    "objective": -2256.2,
+    "strategy": "hub_last seed 2",
+    "order_note": "backtracks 160; 680 carried before repair, +-93 repaired; descent 4.0 s",
+    "search_seconds": 33.6
+   },
+   "exposure": {
+    "external_in_edges": 215864,
+    "external_out_edges": 212904,
+    "external_in_synapses": 1937497,
+    "external_out_synapses": 1941351,
+    "external_in_mean": 3165.8,
+    "external_out_mean": 3172.1,
+    "external_in_max": 39246,
+    "external_out_max": 37360,
+    "external_in_p90": 7131.7,
+    "external_out_p90": 6568.5
+   },
+   "host_superclasses": {
+    "cb_intrinsic": 256,
+    "vnc_intrinsic": 168,
+    "descending_neuron": 53,
+    "ascending_neuron": 36,
+    "cb_sensory": 35,
+    "vnc_sensory": 28,
+    "sensory_ascending": 16,
+    "visual_projection": 9,
+    "visual_centrifugal": 4,
+    "cb_motor": 3,
+    "vnc_motor": 3,
+    "ol_intrinsic": 1
+   },
+   "host_types": {
+    "u": {
+     "LgAG1": 4,
+     "LgLG6": 4,
+     "aPhM2a": 2,
+     "?": 2,
+     "aPhM1": 2,
+     "SNppxx": 2
+    },
+    "v": {
+     "LgAG1": 6,
+     "LgLG6": 4,
+     "aPhM2a": 2,
+     "LgLG4": 2,
+     "DNg04": 2,
+     "PS019": 2
+    },
+    "reset": {
+     "LAL144": 1,
+     "SAD006": 1
+    },
+    "reset_inh": {
+     "GNG119": 1,
+     "PS336": 1
+    },
+    "reset_edge": {
+     "LAL112": 1,
+     "AN06B088": 1
+    },
+    "reset_relay": {
+     "CB2551b": 1,
+     "GNG259": 1,
+     "DNge003": 1,
+     "CL155": 1,
+     "PS027": 1,
+     "DNg91": 1
+    },
+    "ready_delay": {
+     "MBON26": 2,
+     "LAL198": 1,
+     "LAL172": 1,
+     "MBON35": 1,
+     "LAL116": 1,
+     "LAL129": 1
+    },
+    "ready": {
+     "DNa11": 1,
+     "IN18B005": 1
+    },
+    "or": {
+     "LB4b": 1,
+     "Z_lvPNm1": 1,
+     "GNG200": 1,
+     "INXXX464": 1,
+     "IN19B003": 1,
+     "KC": 1
+    },
+    "edge": {
+     "DNge059": 2,
+     "IN01A023": 2,
+     "IN03A054": 2,
+     "GNG105": 2,
+     "SMP410": 2,
+     "AVLP396": 2
+    },
+    "edge_inh": {
+     "AOTU050": 6,
+     "IN16B029": 2,
+     "IN16B097": 2,
+     "GNG080": 2,
+     "GNG240": 2,
+     "GNG149": 2
+    },
+    "hold_inh": {
+     "CB2066": 1,
+     "PS193b": 1,
+     "GNG219": 1,
+     "AN09B017c": 1,
+     "IN14A043": 1,
+     "IN01B016": 1
+    },
+    "and": {
+     "LB4b": 1,
+     "LgAG5": 1,
+     "aPhM1": 1,
+     "IN03A094": 1,
+     "IN10B030": 1,
+     "IN19B003": 1
+    },
+    "d": {
+     "LgAG1": 4,
+     "GNG014": 2,
+     "GNG120": 1,
+     "GNG236": 1,
+     "GNG018": 1,
+     "GNG513": 1
+    },
+    "veto": {
+     "GNG471": 2,
+     "IN27X001": 2,
+     "LHAV2m1": 2,
+     "l2LN20": 2,
+     "CL029_b": 2,
+     "GNG355": 1
+    },
+    "start": {
+     "GNG387": 1
+    },
+    "hop": {
+     "IN01A045": 3,
+     "IN04B001": 2,
+     "ANXXX037": 2,
+     "IN07B001": 2,
+     "IN21A018": 2,
+     "AN18B003": 2
+    },
+    "cancel_inh": {
+     "DNg98": 1
+    }
+   },
+   "image_A": {
+    "profile3_edges": 559,
+    "parasitic_zeroed": 7784,
+    "synthetic_neurons": 2,
+    "scale_max": 3.99
+   },
+   "conditions": {
+    "A": {
+     "correct": 20,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 0,
+     "profile3_edges": 559,
+     "parasitic_kept": 0,
+     "chained_correct": 20
+    },
+    "B": {
+     "correct": 0,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 20,
+     "profile3_edges": 0,
+     "parasitic_kept": 0,
+     "chained_correct": null
+    }
+   },
+   "missing_by_class_top": {
+    "cancel_inh -> hop": [
+     94,
+     100
+    ],
+    "reset_inh -> u": [
+     68,
+     72
+    ],
+    "reset_inh -> v": [
+     54,
+     72
+    ],
+    "edge -> u": [
+     52,
+     76
+    ],
+    "edge_inh -> edge": [
+     45,
+     77
+    ],
+    "u -> v": [
+     30,
+     73
+    ],
+    "v -> u": [
+     28,
+     72
+    ],
+    "u -> edge": [
+     27,
+     41
+    ],
+    "u -> veto": [
+     15,
+     32
+    ],
+    "u -> start": [
+     13,
+     18
+    ]
+   }
+  },
+  "1.0": {
+   "isolation_weight": 1.0,
+   "placement": {
+    "carried": 535,
+    "edges": 1144,
+    "carried_fraction": 0.4677,
+    "hub_carried": 9,
+    "hub_total": 268,
+    "hard_carried": 526,
+    "hard_total": 878,
+    "neurons_placed": 610,
+    "neurons_total": 614,
+    "parasitic_to_zero": 7667,
+    "objective": -5079.93,
+    "strategy": "hub_last seed 3",
+    "order_note": "backtracks 161; 631 carried before repair, +-98 repaired; descent 3.4 s",
+    "search_seconds": 24.5
+   },
+   "exposure": {
+    "external_in_edges": 192076,
+    "external_out_edges": 197989,
+    "external_in_synapses": 1961692,
+    "external_out_synapses": 1837027,
+    "external_in_mean": 3215.9,
+    "external_out_mean": 3011.5,
+    "external_in_max": 50448,
+    "external_out_max": 46286,
+    "external_in_p90": 8381.8,
+    "external_out_p90": 6564.7
+   },
+   "host_superclasses": {
+    "cb_intrinsic": 252,
+    "vnc_intrinsic": 156,
+    "descending_neuron": 48,
+    "ascending_neuron": 45,
+    "cb_sensory": 40,
+    "vnc_sensory": 22,
+    "sensory_ascending": 19,
+    "visual_projection": 12,
+    "vnc_motor": 9,
+    "visual_centrifugal": 3,
+    "cb_motor": 2,
+    "cb_sensory_tbc": 1,
+    "ol_intrinsic": 1
+   },
+   "host_types": {
+    "u": {
+     "LgAG1": 7,
+     "LgLG6": 3,
+     "VL1_ilPN": 2,
+     "CRE011": 2,
+     "LgLG1a": 2,
+     "GNG494": 1
+    },
+    "v": {
+     "LgAG1": 7,
+     "LgLG6": 4,
+     "LgLG1a": 3,
+     "ORN_VL1": 2,
+     "SLP158": 2,
+     "CRE001": 2
+    },
+    "reset": {
+     "LAL144": 1,
+     "AN05B096": 1
+    },
+    "reset_inh": {
+     "CB1556": 1,
+     "SMP209": 1
+    },
+    "reset_edge": {
+     "LAL112": 1,
+     "AN00A006": 1
+    },
+    "reset_relay": {
+     "SAD007": 1,
+     "LAL025": 1,
+     "DNg04": 1,
+     "IN04B008": 1,
+     "IN03A088": 1,
+     "IN18B005": 1
+    },
+    "ready_delay": {
+     "vMS12_a": 6,
+     "CB2551b": 1,
+     "DNge023": 1,
+     "LBL40": 1,
+     "IN03A006": 1,
+     "AN04B003": 1
+    },
+    "ready": {
+     "AN17A004": 1,
+     "hg1 MN": 1
+    },
+    "or": {
+     "ORN_VL1": 1,
+     "KCab-c": 1,
+     "OCG01d": 1,
+     "SIP049": 1,
+     "AN08B112": 1,
+     "GNG438": 1
+    },
+    "edge": {
+     "MNad17": 4,
+     "?": 3,
+     "ORN_VA4": 3,
+     "WED004": 2,
+     "PS274": 2,
+     "ORN_VL2p": 2
+    },
+    "edge_inh": {
+     "INXXX409": 4,
+     "AOTU050": 3,
+     "OCG01a": 2,
+     "AN27X021": 2,
+     "GNG071": 2,
+     "GNG080": 2
+    },
+    "hold_inh": {
+     "LHPV4b2": 1,
+     "CB1786_a": 1,
+     "IN14A063": 1,
+     "IN14A026": 1,
+     "GNG345": 1,
+     "GNG256": 1
+    },
+    "and": {
+     "?": 2,
+     "ORN_VL1": 1,
+     "CB4085": 1,
+     "SIP003_a": 1,
+     "LgAG5": 1,
+     "LgAG4": 1
+    },
+    "d": {
+     "TRN_VP3a": 3,
+     "lLN1_bc": 3,
+     "GNG014": 2,
+     "INXXX468": 2,
+     "AN07B035": 2,
+     "MNad17": 2
+    },
+    "veto": {
+     "PS077": 3,
+     "GNG471": 2,
+     "GNG393": 2,
+     "INXXX336": 2,
+     "INXXX343": 2,
+     "LHAV4d5": 2
+    },
+    "start": {
+     "PS019": 1
+    },
+    "hop": {
+     "IN17A001": 5,
+     "INXXX464": 4,
+     "IN07B006": 2,
+     "DNg75": 2,
+     "DNa02": 2,
+     "DNa06": 2
+    },
+    "cancel_inh": {
+     "PS306": 1
+    }
+   },
+   "image_A": {
+    "profile3_edges": 609,
+    "parasitic_zeroed": 7664,
+    "synthetic_neurons": 4,
+    "scale_max": 3.985
+   },
+   "conditions": {
+    "A": {
+     "correct": 20,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 0,
+     "profile3_edges": 609,
+     "parasitic_kept": 0,
+     "chained_correct": 20
+    },
+    "B": {
+     "correct": 0,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 20,
+     "profile3_edges": 0,
+     "parasitic_kept": 0,
+     "chained_correct": null
+    }
+   },
+   "missing_by_class_top": {
+    "cancel_inh -> hop": [
+     93,
+     100
+    ],
+    "reset_inh -> u": [
+     71,
+     72
+    ],
+    "reset_inh -> v": [
+     71,
+     72
+    ],
+    "edge_inh -> edge": [
+     60,
+     77
+    ],
+    "edge -> u": [
+     49,
+     76
+    ],
+    "u -> v": [
+     31,
+     73
+    ],
+    "u -> edge": [
+     28,
+     41
+    ],
+    "veto -> edge": [
+     27,
+     56
+    ],
+    "u -> veto": [
+     19,
+     32
+    ],
+    "u -> edge_inh": [
+     18,
+     40
+    ]
+   }
+  },
+  "2.0": {
+   "isolation_weight": 2.0,
+   "placement": {
+    "carried": 469,
+    "edges": 1144,
+    "carried_fraction": 0.41,
+    "hub_carried": 3,
+    "hub_total": 268,
+    "hard_carried": 466,
+    "hard_total": 878,
+    "neurons_placed": 604,
+    "neurons_total": 614,
+    "parasitic_to_zero": 6459,
+    "objective": -10733.77,
+    "strategy": "hub_last seed 0",
+    "order_note": "backtracks 184; 647 carried before repair, +-178 repaired; descent 4.4 s",
+    "search_seconds": 31.4
+   },
+   "exposure": {
+    "external_in_edges": 190789,
+    "external_out_edges": 188031,
+    "external_in_synapses": 1791560,
+    "external_out_synapses": 1784916,
+    "external_in_mean": 2966.2,
+    "external_out_mean": 2955.2,
+    "external_in_max": 45638,
+    "external_out_max": 32612,
+    "external_in_p90": 6647.2,
+    "external_out_p90": 6277.2
+   },
+   "host_superclasses": {
+    "cb_intrinsic": 235,
+    "vnc_intrinsic": 164,
+    "cb_sensory": 49,
+    "descending_neuron": 48,
+    "ascending_neuron": 41,
+    "vnc_sensory": 21,
+    "sensory_ascending": 21,
+    "vnc_motor": 10,
+    "visual_projection": 8,
+    "visual_centrifugal": 4,
+    "cb_motor": 3
+   },
+   "host_types": {
+    "u": {
+     "LgAG1": 6,
+     "LgLG1a": 3,
+     "INXXX466": 3,
+     "?": 2,
+     "VL2p_adPN": 2,
+     "TRN_VP3a": 2
+    },
+    "v": {
+     "LgAG1": 6,
+     "LgLG1a": 5,
+     "LgLG6": 3,
+     "ORN_VL2p": 2,
+     "GNG620": 1,
+     "ENS2": 1
+    },
+    "reset": {
+     "LAL199": 1,
+     "IN01A054": 1
+    },
+    "reset_inh": {
+     "LHAV4d5": 1,
+     "CB1545": 1
+    },
+    "reset_edge": {
+     "AN09B017c": 1,
+     "IN13B077": 1
+    },
+    "reset_relay": {
+     "SAD007": 1,
+     "PS018_a": 1,
+     "DNg04": 1,
+     "ORN_DM4": 1,
+     "DM4_adPN": 1,
+     "KCab-s": 1
+    },
+    "ready_delay": {
+     "IN07B006": 2,
+     "LAL198": 1,
+     "MBON26": 1,
+     "LAL171": 1,
+     "DNa02": 1,
+     "IN01A028": 1
+    },
+    "ready": {
+     "AN09B060": 1,
+     "AN05B104": 1
+    },
+    "or": {
+     "MN11V": 1,
+     "IN04B071": 1,
+     "LgAG1": 1,
+     "TRN_VP2": 1,
+     "SIP080": 1,
+     "LgLG1a": 1
+    },
+    "edge": {
+     "IN19B054": 2,
+     "HRN_VP1d": 2,
+     "DNg61": 2,
+     "WED004": 2,
+     "IN20A.22A053": 2,
+     "lLN2X05": 2
+    },
+    "edge_inh": {
+     "AOTU050": 6,
+     "Tr flexor MN": 3,
+     "lLN2F_b": 2,
+     "GNG080": 2,
+     "GNG240": 2,
+     "GNG149": 2
+    },
+    "hold_inh": {
+     "GNG219": 1,
+     "IN14B012": 1,
+     "IN13B035": 1,
+     "LHPV4c1_b": 1,
+     "IN14A051": 1,
+     "lLN2F_b": 1
+    },
+    "and": {
+     "LB4b": 1,
+     "IN20A.22A026": 1,
+     "IN01A083_a": 1,
+     "Sternal adductor MN": 1,
+     "SIP080": 1,
+     "aPhM1": 1
+    },
+    "d": {
+     "LgAG1": 6,
+     "GNG014": 2,
+     "IN04B034": 2,
+     "GNG120": 1,
+     "GNG236": 1,
+     "GNG018": 1
+    },
+    "veto": {
+     "LHPD4a1": 3,
+     "IN06B019": 2,
+     "lLN2R_a": 2,
+     "l2LN20": 2,
+     "IN01B054": 2,
+     "INXXX337": 2
+    },
+    "start": {
+     "CB4107": 1
+    },
+    "hop": {
+     "IN19B003": 4,
+     "INXXX468": 4,
+     "IN17A025": 3,
+     "IN17A017": 3,
+     "IN01A012": 2,
+     "IN04B001": 2
+    },
+    "cancel_inh": {
+     "AN05B044": 1
+    }
+   },
+   "image_A": {
+    "profile3_edges": 677,
+    "parasitic_zeroed": 6457,
+    "synthetic_neurons": 10,
+    "scale_max": 3.99
+   },
+   "conditions": {
+    "A": {
+     "correct": 20,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 0,
+     "profile3_edges": 677,
+     "parasitic_kept": 0,
+     "chained_correct": 20
+    },
+    "B": {
+     "correct": 0,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 20,
+     "profile3_edges": 0,
+     "parasitic_kept": 0,
+     "chained_correct": null
+    }
+   },
+   "missing_by_class_top": {
+    "cancel_inh -> hop": [
+     99,
+     100
+    ],
+    "reset_inh -> u": [
+     71,
+     72
+    ],
+    "reset_inh -> v": [
+     71,
+     72
+    ],
+    "edge -> u": [
+     64,
+     76
+    ],
+    "edge_inh -> edge": [
+     59,
+     77
+    ],
+    "v -> u": [
+     38,
+     72
+    ],
+    "u -> edge": [
+     30,
+     41
+    ],
+    "u -> v": [
+     26,
+     73
+    ],
+    "u -> edge_inh": [
+     24,
+     40
+    ],
+    "veto -> edge": [
+     21,
+     56
+    ]
+   }
+  },
+  "4.0": {
+   "isolation_weight": 4.0,
+   "placement": {
+    "carried": 460,
+    "edges": 1144,
+    "carried_fraction": 0.4021,
+    "hub_carried": 8,
+    "hub_total": 268,
+    "hard_carried": 452,
+    "hard_total": 878,
+    "neurons_placed": 607,
+    "neurons_total": 614,
+    "parasitic_to_zero": 7661,
+    "objective": -22033.18,
+    "strategy": "hub_first seed 1",
+    "order_note": "backtracks 147; 615 carried before repair, +-155 repaired; descent 4.7 s",
+    "search_seconds": 23.2
+   },
+   "exposure": {
+    "external_in_edges": 206277,
+    "external_out_edges": 194551,
+    "external_in_synapses": 1953336,
+    "external_out_synapses": 1841060,
+    "external_in_mean": 3218.0,
+    "external_out_mean": 3033.0,
+    "external_in_max": 45918,
+    "external_out_max": 27188,
+    "external_in_p90": 7604.2,
+    "external_out_p90": 6546.8
+   },
+   "host_superclasses": {
+    "cb_intrinsic": 325,
+    "vnc_intrinsic": 93,
+    "descending_neuron": 54,
+    "cb_sensory": 36,
+    "ascending_neuron": 31,
+    "vnc_sensory": 27,
+    "sensory_ascending": 21,
+    "visual_projection": 13,
+    "vnc_motor": 3,
+    "cb_sensory_tbc": 1,
+    "cb_motor": 1,
+    "ol_intrinsic": 1,
+    "visual_centrifugal": 1
+   },
+   "host_types": {
+    "u": {
+     "LgAG1": 9,
+     "LgLG1a": 4,
+     "CL210_a": 2,
+     "LgLG6": 2,
+     "PFNv": 2,
+     "BM_Taste": 2
+    },
+    "v": {
+     "LgAG1": 11,
+     "LgLG6": 5,
+     "LgLG1a": 4,
+     "IN08B077": 2,
+     "BM_Vt_PoOc": 2,
+     "PFNv": 2
+    },
+    "reset": {
+     "aPhM2a": 1,
+     "TRN_VP2": 1
+    },
+    "reset_inh": {
+     "GNG240": 1,
+     "l2LN21": 1
+    },
+    "reset_edge": {
+     "GNG460": 1,
+     "LHPV2a1_c": 1
+    },
+    "reset_relay": {
+     "TRN_VP3a": 2,
+     "aPhM2b": 1,
+     "GNG269": 1,
+     "GNG387": 1,
+     "VP1m+VP2_lvPN1": 1
+    },
+    "ready_delay": {
+     "?": 2,
+     "GNG439": 1,
+     "GNG468": 1,
+     "DNg91": 1,
+     "PS209": 1,
+     "DNa09": 1
+    },
+    "ready": {
+     "VP1d+VP4_l2PN1": 1,
+     "MNad49": 1
+    },
+    "or": {
+     "IN23B090": 1,
+     "DNpe057": 1,
+     "AN08B096": 1,
+     "PFNa": 1,
+     "AN08B112": 1,
+     "LgAG1": 1
+    },
+    "edge": {
+     "PS209": 2,
+     "LHAV1a4": 2,
+     "PFNv": 2,
+     "PS311": 2,
+     "IN01A057": 1,
+     "DNpe015": 1
+    },
+    "edge_inh": {
+     "?": 4,
+     "IN14A014": 2,
+     "GNG127": 2,
+     "DNg52": 2,
+     "OCG01a": 2,
+     "DNge046": 2
+    },
+    "hold_inh": {
+     "IN13B001": 1,
+     "PS279": 1,
+     "IN13B079": 1,
+     "IN14A020": 1,
+     "IN06A034": 1,
+     "LAL100": 1
+    },
+    "and": {
+     "AN10B037": 2,
+     "ORN_VA4": 1,
+     "GNG278": 1,
+     "ORN_VL2a": 1,
+     "IN07B075": 1,
+     "SNta29": 1
+    },
+    "d": {
+     "DNge137": 3,
+     "GNG234": 2,
+     "PhG9": 2,
+     "TRN_VP3a": 2,
+     "lLN1_bc": 2,
+     "AN07B037_b": 1
+    },
+    "veto": {
+     "ANXXX130": 2,
+     "AN06B075": 2,
+     "AVLP465": 2,
+     "CL282": 1,
+     "GNG490": 1,
+     "AVLP481": 1
+    },
+    "start": {
+     "LgLG6": 1
+    },
+    "hop": {
+     "lLN1_bc": 15,
+     "AVLP280": 2,
+     "PVLP076": 2,
+     "PVLP120": 2,
+     "PVLP061": 2,
+     "GNG120": 2
+    },
+    "cancel_inh": {
+     "GNG586": 1
+    }
+   },
+   "image_A": {
+    "profile3_edges": 686,
+    "parasitic_zeroed": 7659,
+    "synthetic_neurons": 7,
+    "scale_max": 3.99
+   },
+   "conditions": {
+    "A": {
+     "correct": 20,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 0,
+     "profile3_edges": 686,
+     "parasitic_kept": 0,
+     "chained_correct": 20
+    },
+    "B": {
+     "correct": 0,
+     "n": 20,
+     "wrong": 0,
+     "faults": 0,
+     "timeouts": 0,
+     "no_accept": 20,
+     "profile3_edges": 0,
+     "parasitic_kept": 0,
+     "chained_correct": null
+    }
+   },
+   "missing_by_class_top": {
+    "cancel_inh -> hop": [
+     99,
+     100
+    ],
+    "reset_inh -> u": [
+     72,
+     72
+    ],
+    "reset_inh -> v": [
+     69,
+     72
+    ],
+    "edge -> u": [
+     62,
+     76
+    ],
+    "edge_inh -> edge": [
+     51,
+     77
+    ],
+    "v -> u": [
+     39,
+     72
+    ],
+    "u -> edge": [
+     33,
+     41
+    ],
+    "u -> v": [
+     30,
+     73
+    ],
+    "u -> veto": [
+     28,
+     32
+    ],
+    "d -> edge": [
+     22,
+     26
+    ]
+   }
+  }
+ }
+}

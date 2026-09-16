@@ -22,8 +22,10 @@ dropped.
    chain as a real path found by depth-first search over strong cholinergic edges, a hub by
    coverage of its partners' candidates. Candidates are ranked by a lookahead (does every
    neighbouring motif keep a complete instance? plus hub edges satisfied, minus an isolation
-   cost). Assigning a motif forward-checks every unplaced hard neighbour; a candidate that
-   empties a domain is rejected while another exists. A motif with no complete instance
+   penalty: `isolation_weight` times the log of each host's anatomical input synapses, plus a
+   quarter of the log of its outputs -- the exposure the whole-brain run showed floods a host
+   chosen for coverage alone, docs/h1_placement.md). Assigning a motif forward-checks every
+   unplaced hard neighbour; a candidate that empties a domain is rejected while another exists. A motif with no complete instance
    triggers bounded chronological backtracking; if that fails it is placed from the loose
    layer (its own edges kept, its neighbours' needs dropped) or, node by node, where it
    carries the most edges, as a soft anchor that prunes nobody's domain.
@@ -68,12 +70,77 @@ class Placement:
     motifs_search: dict = field(default_factory=dict)  # kind -> how the search placed them (complete / partial fallback / skipped)
     missing_by_class: dict = field(default_factory=dict)  # (src role, dst role) -> [missing, total]
     strategy: str = ""
+    isolation_weight: float = 0.0
+    exposure: dict = field(default_factory=dict)  # the hosts' anatomical synapses from / to neurons outside the circuit (exact)
+    objective: float = 0.0  # carried - isolation_weight * sum over hosts of (log1p(in_ext) + 0.25 * log1p(out_ext)) - cap * unplaced
 
     def summary(self, net: Netlist) -> dict:
+        ex = self.exposure
         return {"neurons": net.n, "placed": len(self.mapping), "unplaced": len(self.unplaced),
                 "edges": self.edges, "synapses": net.nnz,
                 "carried": self.carried, "missing": len(self.missing), "carried_fraction": round(self.carried / max(1, self.edges), 4),
-                "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy}
+                "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy,
+                "isolation_weight": self.isolation_weight, "objective": round(self.objective, 3),
+                "external_in_edges": ex.get("in_edges", 0), "external_out_edges": ex.get("out_edges", 0),
+                "external_in_synapses": ex.get("in_total", 0), "external_out_synapses": ex.get("out_total", 0),
+                "external_in_mean": ex.get("in_mean", 0.0), "external_out_mean": ex.get("out_mean", 0.0),
+                "external_in_max": ex.get("in_max", 0), "external_out_max": ex.get("out_max", 0),
+                "external_in_p90": ex.get("in_p90", 0.0), "external_out_p90": ex.get("out_p90", 0.0)}
+
+
+OUT_EXPOSURE_WEIGHT = 0.25  # outputs into the surround count a quarter of inputs from it (inputs are what floods a host)
+
+
+def isolation_penalty(A: "_Anatomy", isolation_weight: float) -> np.ndarray:
+    """Per real neuron: isolation_weight * (log1p(input synapses) + 0.25 * log1p(output synapses)),
+    from the static anatomical totals (the circuit set is not known while the placement grows;
+    the correction for edges among hosts is small and the audit reports the exact figure). The
+    natural log makes isolation_weight = 1 mean that one carried designed edge (+1 in every
+    ranking score) is worth a factor e in a host's input synapse count."""
+    if isolation_weight == 0.0:
+        return np.zeros(A.n, np.float64)
+    return isolation_weight * (np.log1p(A.in_syn) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn))
+
+
+def penalty_cap(A: "_Anatomy", isolation_weight: float) -> float:
+    """The penalty charged for a designed neuron left unplaced: the noisiest real neuron's. The
+    weight ranks hosts; it must never make "no host" the cheapest choice (an unplaced neuron
+    becomes a synthetic one in the image, which is worse than any host), so every comparison
+    between assignments that place different nodes charges the missing ones at this cap."""
+    if isolation_weight == 0.0:
+        return 0.0
+    return isolation_weight * (np.log1p(A.in_syn.max()) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn.max()))
+
+
+def exposure_of(A: "_Anatomy", hosts: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Exact per-host (external input synapses, external output synapses, external input edges,
+    external output edges): the anatomical totals minus what lies among the hosts themselves
+    (the same count as embed_h0.isolation_cost)."""
+    hosts = np.asarray(hosts, dtype=np.int64)
+    if hosts.size == 0:
+        z = np.zeros(0, np.int64)
+        return z, z, z, z
+    sub = A.C[hosts][:, hosts]
+    in_int = np.asarray(sub.sum(axis=0)).ravel().astype(np.int64)
+    out_int = np.asarray(sub.sum(axis=1)).ravel().astype(np.int64)
+    ones = sub.copy(); ones.data[:] = 1
+    in_edges = np.diff(A.CT.indptr)[hosts] - np.asarray(ones.sum(axis=0)).ravel().astype(np.int64)
+    out_edges = np.diff(A.C.indptr)[hosts] - np.asarray(ones.sum(axis=1)).ravel().astype(np.int64)
+    return A.in_syn[hosts].astype(np.int64) - in_int, A.out_syn[hosts].astype(np.int64) - out_int, in_edges, out_edges
+
+
+def exposure_summary(in_ext: np.ndarray, out_ext: np.ndarray, in_edges: np.ndarray | None = None,
+                     out_edges: np.ndarray | None = None) -> dict:
+    if in_ext.size == 0:
+        return {"hosts": 0, "in_total": 0, "out_total": 0, "in_mean": 0.0, "out_mean": 0.0,
+                "in_max": 0, "out_max": 0, "in_p90": 0.0, "out_p90": 0.0, "in_edges": 0, "out_edges": 0}
+    return {"hosts": int(in_ext.size),
+            "in_edges": int(in_edges.sum()) if in_edges is not None else 0,  # what the whole-brain control zeroes
+            "out_edges": int(out_edges.sum()) if out_edges is not None else 0,
+            "in_total": int(in_ext.sum()), "out_total": int(out_ext.sum()),
+            "in_mean": round(float(in_ext.mean()), 1), "out_mean": round(float(out_ext.mean()), 1),
+            "in_max": int(in_ext.max()), "out_max": int(out_ext.max()),
+            "in_p90": round(float(np.percentile(in_ext, 90)), 1), "out_p90": round(float(np.percentile(out_ext, 90)), 1)}
 
 
 def role_key(role: str) -> str:
@@ -105,6 +172,9 @@ class _Anatomy:
         self._walk: dict = {}
         self._memo: dict = {}
         self.outdeg24 = np.bincount(m.pre[m.count >= 24], minlength=self.n)  # isolation cost proxy (H0: >= 24 fires alone)
+        # exposure: every neuron's anatomical in-degree and out-degree in synapses (all partners)
+        self.in_syn = np.bincount(m.post, weights=m.count, minlength=self.n).astype(np.int64)
+        self.out_syn = np.bincount(m.pre, weights=m.count, minlength=self.n).astype(np.int64)
 
     def row(self, r: int, thr: int) -> np.ndarray:
         a, b = self.C.indptr[r], self.C.indptr[r + 1]
@@ -339,8 +409,12 @@ class _Search:
 
     def __init__(self, D: _Design, A: _Anatomy, rng: np.random.Generator, hub_first: bool, cand_cap: int,
                  chain_budget: int, max_backtracks: int, backtrack_depth: int, deadline: float,
-                 mac_max: int = 0, order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0):
+                 mac_max: int = 0, order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0,
+                 isolation_weight: float = 0.0):
         self.D, self.A, self.rng = D, A, rng
+        self.iso_w = isolation_weight
+        self.iso_pen = isolation_penalty(A, isolation_weight)  # per real neuron; every ranking subtracts it
+        self.pen_unplaced = penalty_cap(A, isolation_weight)  # a node left out is charged the noisiest neuron's penalty
         self.hub_first, self.cand_cap, self.chain_budget = hub_first, cand_cap, chain_budget
         self.max_bt, self.bt_depth, self.deadline = max_backtracks, backtrack_depth, deadline
         self.mac_max = mac_max
@@ -540,8 +614,9 @@ class _Search:
 
     def score(self, assign: dict, doms: list | None = None) -> float:
         """Value ordering: +1 per unplaced neighbour motif that keeps a complete instance,
-        -KILL per one that loses it, +1 per soft (hub) edge satisfied, minus an isolation
-        tie-break (strong outgoing partners the Profile 2 image would have to zero)."""
+        -KILL per one that loses it, +1 per soft (hub) edge satisfied, minus the isolation
+        penalty of each host (isolation_weight * log-exposure) and an isolation tie-break
+        (strong outgoing partners the Profile 2 image would have to zero)."""
         D, A = self.D, self.A
         doms = self.dom if doms is None else doms
         s = 0.0
@@ -575,7 +650,7 @@ class _Search:
                     s += self.soft_w
                 elif self.real[h] >= 0 and A.count(int(self.real[h]), r) >= D.req[e]:
                     s += self.soft_w
-            s -= 1e-4 * A.outdeg24[r]
+            s -= 1e-4 * A.outdeg24[r] + self.iso_pen[r]
         by_motif: dict = {}
         for x, px in pruned.items():
             by_motif.setdefault(int(D.motif_of[x]), {})[x] = self._free(px)
@@ -591,11 +666,12 @@ class _Search:
         return [assigns[i] for i in np.argsort(-sc, kind="stable")]
 
     def _hub_order(self, x: int, dx: np.ndarray) -> np.ndarray:
-        """Candidates of x reached by a placed hub's soft edge first, then a random order
-        (so restarts explore different regions)."""
+        """Candidates of x reached by a placed hub's soft edge first, then the quietest
+        (smallest isolation penalty), then a random order (so restarts explore different
+        regions)."""
         if dx.size <= 1:
             return dx
-        pri = self.rng.random(dx.size)
+        pri = self.rng.random(dx.size) - self.iso_pen[dx]
         for e in self.D.soft_in[x]:
             h = int(self.D.src[e])
             if h in self.hub_row:
@@ -686,7 +762,7 @@ class _Search:
             else:
                 dense[doms[x]] = 1
             cover += (ArT @ dense) > 0
-        sc = cover[dh] - 1e-4 * A.outdeg24[dh]
+        sc = cover[dh] - 1e-4 * A.outdeg24[dh] - self.iso_pen[dh]
         order = np.argsort(-sc, kind="stable")[: self.cand_cap]
         return [{h: int(dh[i])} for i in order if cover[dh[i]] > 0]
 
@@ -726,6 +802,7 @@ class _Search:
                 base = base[A.walk(thr, L - 1 - i, forward)[base]]
             if base.size > 1:
                 deg = (A.outdeg(thr)[base] if forward else A.indeg(thr, 1)[base]).astype(np.float64)
+                deg -= self.iso_pen[base]
                 for e in D.soft_in[nodes[i]]:  # a placed hub's soft edge onto this hop is worth an edge
                     h = int(D.src[e])
                     if h in self.hub_row:
@@ -791,7 +868,10 @@ class _Search:
         if mo.kind == "relay":
             return self.cands_relay(mo, doms)
         if mo.kind == "chain":
-            return list(self.cands_chain(mo, doms))
+            paths = list(self.cands_chain(mo, doms))
+            if self.iso_w:  # every complete path carries the same edges: the quietest first (DFS order on ties)
+                paths.sort(key=lambda c: float(self.iso_pen[list(c.values())].sum()))
+            return paths
         if mo.kind == "hub":
             return self.cands_hub(mo, doms)
         return self.cands_single(mo, doms)
@@ -910,8 +990,8 @@ class _Search:
     # ---- relaxed placement: a node where it carries the most edges to placed neighbours ---
     def coverage_pick(self, d: int):
         """The free real neuron of d's sign carrying the most of d's edges to placed
-        neighbours (hard and soft), fewest strong outgoing partners on ties; None if no
-        neuron carries any."""
+        neighbours (hard and soft) net of its isolation penalty, fewest strong outgoing
+        partners on ties; None if no neuron carries any."""
         D, A = self.D, self.A
         votes: list = []
         for e in D.hard_out[d] + D.soft_out[d]:
@@ -929,7 +1009,9 @@ class _Search:
         cnt = np.where(sign_mask & ~self.used, cnt, 0)
         if cnt.max() == 0:
             return None
-        top = np.flatnonzero(cnt == cnt.max())
+        ok = np.flatnonzero(cnt > 0)
+        val = cnt[ok] - self.iso_pen[ok]
+        top = ok[val >= val.max() - 1e-9]
         return int(top[np.argmin(A.outdeg24[top])])
 
     def relax_motif(self, mo: Motif) -> list:
@@ -998,15 +1080,25 @@ class _Search:
                 dom = np.intersect1d(dom, A.row(int(self.real[y]), int(D.req[e])), assume_unique=True)
         return dom
 
+    def value(self, assign: dict, nodes) -> float:
+        """The repair's objective for one motif: edges `assign` carries minus its hosts' isolation
+        penalty, with every node of the motif that `assign` leaves out charged at the cap
+        (assignments placing different subsets of the motif are compared on the same footing)."""
+        pen = sum(float(self.iso_pen[int(assign[x])]) if x in assign else self.pen_unplaced for x in nodes)
+        return self.carried_by(assign) - pen
+
     def improve(self, rounds: int = 4) -> int:
         """Large-neighbourhood repair: take each motif out in turn and put it back where it
-        carries the most edges given everything else placed (a complete instance compatible
-        with all placed neighbours if one exists, else the best node-by-node fit); keep the
-        change only if it carries strictly more. Monotone; returns the edges gained."""
+        carries the most edges net of its hosts' isolation penalty, given everything else
+        placed (a complete instance compatible with all placed neighbours if one exists, else
+        the best node-by-node fit); keep the change only if that objective is strictly larger.
+        Monotone in the objective; returns the edges gained (net, so it can be negative when
+        isolation_weight > 0 and a quieter host carries one edge fewer)."""
         D = self.D
         gained = 0
         for _ in range(rounds):
             round_gain = 0
+            round_obj = 0.0
             for mi, mo in enumerate(D.motifs):
                 if time.time() > self.deadline:
                     return gained
@@ -1014,6 +1106,7 @@ class _Search:
                     continue
                 cur = {x: int(self.real[x]) for x in mo.nodes if self.real[x] >= 0}
                 cur_n = self.carried_by(cur)
+                cur_v = self.value(cur, mo.nodes)
                 for x, r in cur.items():
                     self.real[x] = -1
                     self.used[r] = False
@@ -1021,11 +1114,11 @@ class _Search:
                 for x in mo.nodes:
                     doms[x] = self.fc_domain(x, D.static_dom1[x], mo.nodes)
                 cands = self.candidates(mo, doms)
-                best, best_n = cur, cur_n
+                best, best_n, best_v = cur, cur_n, cur_v
                 for c in cands[: self.cand_cap]:
-                    n = self.carried_by(c)
-                    if n > best_n:
-                        best, best_n = c, n
+                    v = self.value(c, mo.nodes)
+                    if v > best_v + 1e-9:
+                        best, best_n, best_v = c, self.carried_by(c), v
                 if best is cur:  # node by node: the best free neuron for each node in turn
                     alt: dict = {}
                     for x in sorted(mo.nodes, key=lambda x: -len(D.hard_out[x]) - len(D.hard_in[x])):
@@ -1037,15 +1130,16 @@ class _Search:
                     for x, r in alt.items():
                         self.real[x] = -1
                         self.used[r] = False
-                    n = self.carried_by(alt)
-                    if n > best_n:
-                        best, best_n = alt, n
+                    v = self.value(alt, mo.nodes)
+                    if v > best_v + 1e-9:
+                        best, best_n, best_v = alt, self.carried_by(alt), v
                 for x, r in best.items():
                     self.real[x] = r
                     self.used[r] = True
                 round_gain += best_n - cur_n
+                round_obj += best_v - cur_v
             gained += round_gain
-            if round_gain == 0:
+            if round_obj <= 0:
                 break
         return gained
 
@@ -1077,7 +1171,7 @@ class _Search:
 # audit
 # ----------------------------------------------------------------------------------------
 def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: float, outcome: dict, strategy: str,
-          policy: Policy) -> Placement:
+          policy: Policy, isolation_weight: float = 0.0) -> Placement:
     """A designed neuron can hold the same (src, dst) synapse twice (the netlist does not merge
     duplicates); a real anatomical edge carries both at once, so the audit works on distinct
     pairs with their quanta summed (the neuron's actual input to that anatomical edge), not on
@@ -1111,7 +1205,14 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
         missing_by_class[cls][0] += 1
     placed = np.array(sorted(mapping.values()), dtype=np.int64)
     parasitic = int(A.C[placed][:, placed].nnz - carried) if placed.size else 0
-    pl = Placement(mapping, unplaced, carried, missing, parasitic, seconds, edges=len(pairs), strategy=strategy)
+    pl = Placement(mapping, unplaced, carried, missing, parasitic, seconds, edges=len(pairs), strategy=strategy,
+                   isolation_weight=isolation_weight)
+    # exposure: what the rest of the brain can deliver to the hosts and receive from them (exact:
+    # the anatomical totals less the synapses among the hosts), and the objective the search ranks by
+    in_ext, out_ext, in_edges, out_edges = exposure_of(A, placed)
+    pl.exposure = exposure_summary(in_ext, out_ext, in_edges, out_edges)
+    pl.objective = float(carried - isolation_weight * (np.log1p(in_ext) + OUT_EXPOSURE_WEIGHT * np.log1p(out_ext)).sum()
+                         - len(unplaced) * penalty_cap(A, isolation_weight))
     by_role: dict = {}
     for d in range(D.n):
         key = role_key(roles[d])
@@ -1150,7 +1251,8 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
                   hub_deg: int = 20, restarts: int = 8, cand_cap: int = 48, chain_budget: int = 20_000,
                   max_backtracks: int = 8, backtrack_depth: int = 3, repair_rounds: int = 6, seed: int = 0,
                   strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=(),
-                  order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0) -> Placement:
+                  order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0,
+                  isolation_weight: float = 0.0) -> Placement:
     """Motif-level placement with backtracking and forward checking (module docstring), then
     a large-neighbourhood repair. Runs up to `restarts` descents, cycling `strategies`, within
     `time_limit_s`; returns the placement that carries the most designed edges.
@@ -1160,7 +1262,17 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
     neighbours first). `reject_kills`: reject a candidate that empties an unplaced neighbour's
     domain when another exists. `soft_w`: weight of a satisfied soft (hub) edge in scoring.
     `mac_max`: propagate arc consistency from any domain that shrinks to at most this many
-    candidates (0: forward checking only, no propagation)."""
+    candidates (0: forward checking only, no propagation).
+    `isolation_weight`: every candidate ranking (domain order, lookahead score, hub coverage,
+    coverage_pick and the repair) subtracts isolation_weight * (log1p(input synapses) +
+    0.25 * log1p(output synapses)) per host, so that a quieter host -- one the rest of the brain
+    reaches less -- wins over a noisier one carrying up to that many fewer edges; 1 means one
+    carried edge is worth a factor e in a host's input count. The weight ranks hosts and never
+    refuses one: a designed neuron left unplaced is charged the noisiest neuron's penalty. The
+    placement returned is the restart with the largest objective (carried edges minus the exact
+    penalty of its hosts, minus that cap per unplaced neuron); at 0 (the default) this is the
+    most edges carried, as before. Placement.exposure and summary report the hosts' external
+    input / output synapses and edges (total, mean, max, p90)."""
     t0 = time.time()
     A = _Anatomy(m, policy)
     D = _Design(net, policy, hub_deg, hard_hubs)
@@ -1181,18 +1293,20 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
         run_deadline = min(deadline, time.time() + per_run) if k < restarts - 1 else deadline
         S = _Search(D, A, rng, hub_first=(strategy == "hub_first"), cand_cap=cand_cap, chain_budget=chain_budget,
                     max_backtracks=max_backtracks, backtrack_depth=backtrack_depth, deadline=run_deadline,
-                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w)
+                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w, isolation_weight=isolation_weight)
         t1 = time.time()
         S.run()
         S.relaxed()
-        before = audit(net, D, A, S.real, 0.0, S.outcome, "", policy).carried
+        pre = audit(net, D, A, S.real, 0.0, S.outcome, "", policy, isolation_weight)
+        before = pre.carried
         gained = S.improve(rounds=repair_rounds)
-        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy)
+        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy, isolation_weight)
         pl.order_note = f"backtracks {S.backtracks}; {before} carried before repair, +{gained} repaired; descent {time.time() - t1:.1f} s"
         if verbose:
             print(f"[place] restart {k} ({strategy}): carried {before} -> {pl.carried}/{net.nnz} placed {len(pl.mapping)}/{net.n} "
-                  f"backtracks {S.backtracks} in {time.time() - t1:.1f} s; motifs {pl.motifs}", flush=True)
-        if best is None or pl.carried > best.carried:
+                  f"backtracks {S.backtracks} in {time.time() - t1:.1f} s; external inputs mean {pre.exposure['in_mean']} -> {pl.exposure['in_mean']} "
+                  f"objective {pl.objective:.1f}; motifs {pl.motifs}", flush=True)
+        if best is None or pl.objective > best.objective or (pl.objective == best.objective and pl.carried > best.carried):
             best = pl
     best.seconds = time.time() - t0
     return best

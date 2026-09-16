@@ -33,15 +33,19 @@ def latch_relay_netlist():
     return net, drive, {"src": src, "u": latch.u, "v": latch.v, "edge": relay, "edge_inh": relay + 1}
 
 
-def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: int = 80, n_weak: int = 600) -> tuple[MCNS, dict]:
+def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: int = 80, n_weak: int = 600,
+                   twin_latch: bool = False, decoy_inputs: int = 50) -> tuple[MCNS, dict]:
     """A planted instance (S, E, I, U, V) with counts just above the requirements, plus random
     neurons with weak edges (all below every requirement) and a few strong decoys that do not
-    close the motif (a mutual pair with no relay, a relay with no inhibitor)."""
+    close the motif (a mutual pair with no relay, a relay with no inhibitor).
+    `twin_latch`: a second latch pair (U2, V2), edge for edge as good as (U, V) -- the same
+    counts, reached from E by the same count -- but U2 receives `decoy_inputs` extra weak edges
+    from distinct distractor neurons, so it is the noisier of two equally good hosts."""
     rng = np.random.default_rng(seed)
     req = policy.req_count
-    names = ["S", "E", "I", "U", "V", "P", "Q", "S2", "E2"]
-    nts = ["acetylcholine", "acetylcholine", "gaba", "acetylcholine", "acetylcholine",
-           "acetylcholine", "acetylcholine", "acetylcholine", "acetylcholine"]
+    names = ["S", "E", "I", "U", "V", "P", "Q", "S2", "E2"] + (["U2", "V2"] if twin_latch else [])
+    nts = ["acetylcholine"] * len(names)
+    nts[2] = "gaba"
     idx = {nm: i for i, nm in enumerate(names)}
     edges = [
         (idx["S"], idx["E"], req(drive.relay_in) + 2), (idx["S"], idx["I"], req(drive.pulse) + 1),
@@ -53,6 +57,11 @@ def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: i
     n0 = len(names)
     n = n0 + n_distractors
     nts += list(rng.choice(["acetylcholine", "gaba", "glutamate"], n_distractors))
+    if twin_latch:
+        edges += [(idx["E"], idx["U2"], req(drive.ignite) + 1),
+                  (idx["U2"], idx["V2"], req(drive.loop) + 4), (idx["V2"], idx["U2"], req(drive.loop))]
+        for a in rng.choice(np.arange(n0, n), decoy_inputs, replace=False):  # 50 distinct distractors, 2 synapses each
+            edges.append((int(a), idx["U2"], 2))
     for _ in range(n_weak):
         a, b = rng.integers(0, n, 2)
         if a != b:
@@ -115,6 +124,52 @@ def test_missing_inhibitor_is_reported_not_faked():
     for s, d, q in zip(net.src, net.dst, net.quanta):
         carried_really = counts.get((pl.mapping[s], pl.mapping[d]), 0) >= policy.req_count(q)
         assert carried_really == ((s, d) not in [(a, b) for a, b, _, _ in pl.missing]), (s, d)
+
+
+def _external_synapses(m: MCNS, hosts: set) -> tuple[int, int]:
+    """By hand: synapses into the hosts from non-hosts, and from the hosts to non-hosts."""
+    ins = outs = 0
+    for a, b, c in zip(m.pre.tolist(), m.post.tolist(), m.count.tolist()):
+        if b in hosts and a not in hosts:
+            ins += c
+        if a in hosts and b not in hosts:
+            outs += c
+    return ins, outs
+
+
+def test_isolation_weight_prefers_the_quiet_host():
+    """Two latch pairs carry the circuit's edges equally well; U2 has 50 extra decoy inputs.
+    With isolation_weight = 0 the search may take either (coverage is a tie); with
+    isolation_weight = 2 it must take the quiet pair. The summary's exposure figures must match
+    a by-hand count of the hosts' synapses from and to the rest of the synthetic connectome."""
+    net, drive, ids = latch_relay_netlist()
+    policy = Policy()
+    m, idx = synthetic_mcns(policy, drive, twin_latch=True)
+    quiet, noisy = {idx["U"], idx["V"]}, {idx["U2"], idx["V2"]}
+    picked = set()
+    for seed in range(3):
+        pl0 = place_netlist(net, m, policy, time_limit_s=20, restarts=2, seed=seed, verbose=False)
+        assert pl0.carried == net.nnz == 6, (pl0.summary(net), pl0.missing)
+        hosts = {pl0.mapping[ids["u"]], pl0.mapping[ids["v"]]}
+        assert hosts in (quiet, noisy), hosts
+        picked.add(frozenset(hosts))
+        assert pl0.summary(net)["isolation_weight"] == 0.0
+    assert picked  # either pair is a legal answer at weight 0
+    for seed in range(3):
+        pl2 = place_netlist(net, m, policy, time_limit_s=20, restarts=2, seed=seed, verbose=False, isolation_weight=2.0)
+        assert pl2.carried == net.nnz == 6, (pl2.summary(net), pl2.missing)
+        assert {pl2.mapping[ids["u"]], pl2.mapping[ids["v"]]} == quiet, pl2.mapping
+        s = pl2.summary(net)
+        ins, outs = _external_synapses(m, set(pl2.mapping.values()))
+        assert s["external_in_synapses"] == ins and s["external_out_synapses"] == outs, (s, ins, outs)
+        assert s["external_in_mean"] == round(ins / 5, 1) and s["external_out_mean"] == round(outs / 5, 1)
+        assert s["external_in_max"] <= ins and s["external_in_p90"] <= s["external_in_max"]
+        assert s["isolation_weight"] == 2.0
+        assert pl2.objective < pl2.carried  # the penalty is charged
+    # the noisy pair really is noisier: its hosts' external input count exceeds the quiet pair's
+    ins_q, _ = _external_synapses(m, (set(pl2.mapping.values()) - quiet) | quiet)
+    ins_n, _ = _external_synapses(m, (set(pl2.mapping.values()) - quiet) | noisy)
+    assert ins_n >= ins_q + 100, (ins_q, ins_n)
 
 
 def _one_edge_mcns(nt_pre: str, nt_post: str, count: int) -> MCNS:
