@@ -85,7 +85,8 @@ class TorchSim:
         self._stray_gen = None
         if self.stray_p > 0.0:
             self._stray_gen = torch.Generator(device=dev)
-            self._stray_gen.manual_seed(int(stray_seed if stray_seed is not None else 0))
+            # no seed given: a fresh one, so two unseeded runs never share a stray stream
+            self._stray_gen.manual_seed(int(stray_seed if stray_seed is not None else np.random.default_rng().integers(2**31 - 1)))
         self.step_index = 0
 
         self._events: dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = defaultdict(list)

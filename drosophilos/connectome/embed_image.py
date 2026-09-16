@@ -153,7 +153,23 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
     src_t, dst_t, q_t, dl_t = [], [], [], []
     carried_edges, scales, p3, omitted, carried_syn = [], {}, [], [], []
     carried_pairs = set()
+    # designed synapses are aggregated per (src, dst) pair before the bound check: a pair the
+    # netlist enters twice (the adder's Q.reset_inh -> Q.comp.c2_0.L.u/.v, -2716 twice) must be
+    # carried at its SUM, and the sum is what the scale bound applies to — checked per entry, the
+    # image carried both on a 47-synapse edge and the full-graph topology summed them to a
+    # weight seven times the anatomical one, past k_max (Kimi's review, 2026-09-16)
+    agg: dict = {}
     for e, (s, d, q, dl) in enumerate(zip(net.src, net.dst, net.quanta, net.delay)):
+        key = (int(s), int(d))
+        if key in agg:
+            if agg[key][1] != int(dl):
+                raise ValueError(f"designed synapses {s} -> {d} with different delays cannot share one anatomical edge")
+            agg[key][0] += int(q); agg[key][2].append(e)
+        else:
+            agg[key] = [int(q), int(dl), [e]]
+    n_pairs = len(agg)
+    for (s, d), (q, dl, rows) in agg.items():
+        e = rows[0]
         rs, rd = int(real[s]), int(real[d])
         cnt = count(rs, rd)
         req = policy.req_count(q)
@@ -221,7 +237,7 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
         omitted_by_class[e.cls] = omitted_by_class.get(e.cls, 0) + 1
     counts = {
         "neurons": n, "placed": int(len(hosts)), "synthetic_neurons": len(synthetic),
-        "designed_edges": net.nnz, "carried": len(carried_edges),
+        "designed_edges": net.nnz, "designed_pairs": n_pairs, "carried": len(carried_edges),
         "profile3_edges": len(p3), "profile3_by_class": dict(sorted(by_class.items(), key=lambda kv: -kv[1])),
         "omitted_missing_edges": len(omitted), "omitted_by_class": dict(sorted(omitted_by_class.items(), key=lambda kv: -kv[1])),
         "parasitic": len(parasitic), "parasitic_zeroed": len(parasitic) if policy.zero_parasitic else 0,

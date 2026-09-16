@@ -20,7 +20,13 @@ synapse entries but 1,144 distinct (source, target) pairs — two reset edges on
 latch are entered twice — and the audit now counts distinct pairs with their quanta summed and
 checks the host's transmitter itself. On the same mapping that gives **701 of 1,144 (61.3 %)**:
 one of the duplicated pairs needs 85 synapses when summed and its host edge carries 47. The
-tables below keep the per-entry counts they were measured with (at most 3 edges high).
+tables below keep the per-entry counts they were measured with (at most 3 edges high). The
+image builder had the same per-entry blind spot until 2026-09-16 (Kimi's review): it carried
+both entries of a duplicated pair on the same anatomical edge, so the whole-brain topologies of
+the sections below held that one edge at twice the designed and about seven times the
+anatomical weight — one edge of 25.6 million, and a reset edge at that, so no measured result
+turns on it; `build_image` now aggregates per pair before the bound check and that pair is a
+Profile 3 edge.
 
 
 | | greedy (first tool) | motif search, best of 8 restarts |

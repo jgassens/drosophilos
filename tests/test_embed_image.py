@@ -209,7 +209,7 @@ def test_placed_adder_condition_A_computes_on_mcns():
     else:
         pl = place_netlist(ch.net, m, time_limit_s=120, restarts=1)
     img = build_image(ch.net, m, pl, Policy(), profile3=all_missing)
-    assert img.counts["carried"] + img.counts["profile3_edges"] == ch.net.nnz and img.counts["omitted_missing_edges"] == 0
+    assert img.counts["carried"] + img.counts["profile3_edges"] == img.counts["designed_pairs"] and img.counts["omitted_missing_edges"] == 0  # per distinct (src, dst) pair: the adder has 1,146 entries, 1,144 pairs
     assert img.counts["carried"] >= 600, img.counts  # the H1 placement: 704 of 1,146
     cases, words, expected = adder_cases(4, 5, seed=0)
     res = simulate_channel(ch, img, words, expected, params, fresh_each=False)
