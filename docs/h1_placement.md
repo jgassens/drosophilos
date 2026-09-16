@@ -765,3 +765,38 @@ edits, and every edge of the chain but one Profile 2 — a circuit that could al
 places two proxied flip-flops joined by an edge relay from p into the second's three-pulse set
 chain, 15 of 15 edges, on a synthetic connectome with a planted triple). What it costs is a
 noisier host set than the pair alone, which is the next thing to trade off.
+
+## The adder on flip-flops, placed and simulated (2026-09-16)
+
+Tool: `bench/h1_ffadder.py` (`docs/h1_ffadder.json`, mapping `docs/h1_ffadder_mapping.json`). The
+ordered 4-bit adder with its output register's ten rails on proxied flip-flops
+(`build_adder_channel(storage="flipflop")`: the sum relays fire each rail's four-pulse set chain,
+readers use p; the operand register stays a latch register because the harness loads it with one
+pulse per rail), beside the latch-register adder, both placed on real MCNS at `k_max = 4` (four
+restarts, seed 0, ~30 s each) and run through the H1 harness — condition A (every designed edge,
+the missing ones added as Profile 3, parasitic zeroed) and B (carried edges only), fifty random
+additions each, fresh and chained.
+
+| adder | neurons | carried / designed pairs | unplaced | flip-flop motifs | hosts' external inputs mean / p90 | A: sums correct (chained) | accept / cycle ms | B |
+|---|---|---|---|---|---|---|---|---|
+| output register on latches | 614 | 705 / 1,144 (61.6 %) | 2 | — | 5,576 / 10,527 | **50 / 50** (50 / 50) | 330–384 / 508–562 | 0 / 50, no ACCEPT |
+| output register on flip-flops | 664 | 762 / 1,214 (62.8 %) | 3 | 6 of 10 triples complete, 4 partial; 19 of 20 pair hosts driven; 18 of 20 proxy readout edges carried | 5,775 / 11,227 | **50 / 50** (50 / 50) | 342–399 / 522–579 | 0 / 50, no ACCEPT |
+
+So the first circuit with flip-flop storage that both places and computes is in: on its image
+with every designed edge present it adds fifty words fresh and fifty chained without a fault, at
+the netlist's own timing (+12 ms of accept latency for the set chains); its placement carries a
+point more of its edges than the latch adder's and lands its ten pairs on driven inhibitory
+pairs, at the same host exposure (the output register is 70 of 664 neurons; the arithmetic's
+latches and relays set the mean). The 452 Profile 3 edges are the same classes as the latch
+adder's 439 (`cancel_inh -> hop` 99, `reset_inh -> u/v` 131, `edge -> u` 31,
+`edge_inh -> edge` 25): the broadcast and reset wiring, not the flip-flops. Condition B fails
+as before — carried edges alone never reach ACCEPT — which the placement note's answer already
+covers.
+
+One harness fault found on the way: `simulate_channel` hands the channel's harness a made
+simulator, and `run_transactions` injects a flip-flop channel's power-on pulse only on a
+simulator it makes itself, so the flip-flop adder's first image run faulted on all fifty words
+with all ten rails lit (both members of every pair firing from their bias, no pulse to break
+the tie). The image harness now injects the pulse by designed index
+(`tests/test_embed_image.py::test_simulate_channel_powers_on_a_flipflop_channel`); the latch
+results above are unchanged by it.

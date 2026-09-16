@@ -403,3 +403,16 @@ def test_full_graph_topology_builds_on_mcns():
     k = lo + np.searchsorted(fg.topology.dst[lo:hi], fg.index_map[d])
     dup = sum(qq for ss, dd, qq, _ in img.carried_syn if (ss, dd) == (s, d))
     assert fg.topology.dst[k] == fg.index_map[d] and fg.topology.quanta[k] == dup
+
+
+def test_simulate_channel_powers_on_a_flipflop_channel():
+    """simulate_channel hands the harness a made simulator, so run_transactions skips its own
+    power-on injection; the image harness must inject the flip-flop pulse itself (the flip-flop
+    adder's condition A faulted on every word until it did, docs/h1_placement.md)."""
+    from types import SimpleNamespace
+    from drosophilos.connectome.embed_image import simulate_channel
+    from drosophilos.protocol.handshake import build_channel
+    ch = build_channel(Params(), 2, storage="flipflop", watchdog_hops=40)
+    image = SimpleNamespace(topology=ch.net.topology())  # the netlist itself as the "image"
+    res = simulate_channel(ch, image, [1, 2, 3], [1, 2, 3], fresh_each=False, max_steps_per_tx=8000)
+    assert res["correct"] == 3 and res["faults"] == 0, {k: v for k, v in res.items() if k != "records"}

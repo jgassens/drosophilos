@@ -908,8 +908,12 @@ u first fires on the train's last pulse; a four-pulse SET train instead of three
 mix-B lockstep rate from 0.1–0.5 % of SETs to 0 in 16,000, with the contract unchanged. The
 register's campaign re-run on the four-pulse train (Juno 408918, the same 10,000 mix-B
 transfers): **0 fail-stops and 0 wrong values** (upper 95 % limit 3 × 10⁻⁴ each) — the
-flip-flop register now matches the latch register's channel on this campaign. Not yet done: an
-adder on flip-flops placed and simulated.
+flip-flop register now matches the latch register's channel on this campaign. The 4-bit adder
+with its output register on flip-flops (664 neurons) is placed on MCNS at 62.8 % of its edges
+carried (the latch adder: 61.6 %), its ten pairs on driven inhibitory pairs, and on its image
+with every designed edge present adds 50 / 50 words fresh and chained with no fault, 12 ms
+slower to accept than the latch adder (`docs/h1_placement.md`, "The adder on flip-flops";
+`bench/h1_ffadder.py`). Carried edges alone still do not compute (condition B).
 
 **The first perturbation campaigns on kernels (2026-09-16, Juno H200, 100 copies × 8 tokens,
 mix B).** With no perturbation every copy of every block is correct. Under mix B the render

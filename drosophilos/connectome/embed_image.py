@@ -692,6 +692,10 @@ def simulate_channel(ch, image: Image, words: list[int], expected: list[int], pa
     batches = [([w], [x]) for w, x in zip(words, expected)] if fresh_each else [(list(words), list(expected))]
     for ws, xs in batches:
         sim = circuit_sim(topology, params, index_map)
+        # the harness is handed a made simulator and so skips its own power-on injection
+        # (protocol.run.run_transactions): a flip-flop channel needs its pulse here, by designed index
+        for st_, neuron, q in ch.power_on_events(0):
+            sim.add_events(0, [st_], [neuron], [q])
         rs, re, st = run_words(ch, sim, ws, xs, params, max_steps_per_tx)
         recs += rs
         reached += re

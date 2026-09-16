@@ -51,3 +51,21 @@ def test_ordered_adder_1bit_exhaustive_and_4bit_corners():
     assert [r.decoded for r in recs] == [a + b + c for a, b, c in cases], [(r.word, r.decoded, r.status) for r in recs]
     assert all(r.fault_spikes == 0 and r.timeout_spikes == 0 for r in recs)
     print("ordered 4-bit adder:", ch.net.n, "neurons; accept ms", [round(a) for a in st["accept_latency_ms"]])
+
+
+def test_ripple_adder_4bit_on_flipflop_output_register():
+    """The same 4-bit adder with its output register on flip-flops (docs/a1_flipflop.md): the sum
+    relays fire each rail's four-pulse set chain, readers use the proxies. Power-on pulses come
+    from run_transactions on the fresh simulator."""
+    rng = np.random.default_rng(12)
+    ch = build_adder_channel(PARAMS, 4, storage="flipflop")
+    cases = [(int(rng.integers(0, 16)), int(rng.integers(0, 16)), int(rng.integers(0, 2))) for _ in range(6)]
+    cases[0] = (15, 15, 1)
+    words = [operand_word(a, b, c, 4) for a, b, c in cases]
+    expected = [a + b + c for a, b, c in cases]
+    recs, sim, st = run_transactions(ch, PARAMS, words, expected=expected, max_steps_per_tx=20000)
+    assert st["completed"] == len(cases), [(r.word, r.decoded, r.status) for r in recs]
+    assert [r.decoded for r in recs] == expected, [(r.word, r.decoded, r.status) for r in recs]
+    assert all(r.fault_spikes == 0 for r in recs)
+    print("4-bit adder on flip-flops:", ch.net.n, "neurons", {k: v for k, v in st.items() if k != "accept_latency_ms"},
+          "accept ms", [round(a) for a in st["accept_latency_ms"]])

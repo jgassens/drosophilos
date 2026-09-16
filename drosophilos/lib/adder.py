@@ -29,13 +29,16 @@ def operand_word(a: int, b: int, cin: int, width: int) -> int:
 
 
 def build_adder_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                        watchdog_hops: int = 80, ordered: bool = False) -> Channel:
+                        watchdog_hops: int = 80, ordered: bool = False, storage: str = "latch") -> Channel:
     """`ordered=True`: the veto-relay adder (operand gate on A driven by the carry-in rails,
-    B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder."""
+    B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder.
+    `storage` is the output register's rail storage ("latch" or "flipflop", see add_register;
+    the sum relays then fire each rail's set chain through `Q.rail_inputs`). The operand
+    register stays a latch register: the harness loads it with one pulse per rail."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     P = add_register(net, drive, "P", 2 * width + 1, with_completion=False)
-    Q = add_register(net, drive, "Q", width + 1, with_completion=True)
+    Q = add_register(net, drive, "Q", width + 1, with_completion=True, storage=storage)
     A = [Rail2(P.rails[i][0], P.rails[i][1]) for i in range(width)]
     B = [Rail2(P.rails[width + i][0], P.rails[width + i][1]) for i in range(width)]
     Cin = Rail2(P.rails[2 * width][0], P.rails[2 * width][1])
@@ -51,7 +54,7 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     for i, s in enumerate(outputs):
         for r, latch in enumerate(s.latches):
             relay = add_edge_relay(net, drive, f"out.b{i}r{r}", latch.u)
-            net.synapse(relay, Q.rails[i][r].u, drive.ignite)
+            net.synapse(relay, Q.rail_inputs[i][r], drive.ignite)  # a latch's u; a flip-flop's set-chain trigger
     extend_reset(net, drive, Q, G.latches, G.gates)
     connect_trigger(net, drive, Q.completion.u, P.reset_trigger, P.reset_edge)  # ACCEPT
     connect_trigger(net, drive, P.ready, Q.reset_trigger, Q.reset_edge)  # CLEARED

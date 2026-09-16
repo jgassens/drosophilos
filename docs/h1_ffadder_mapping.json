@@ -1,0 +1,6064 @@
+{
+ "storage": "flipflop",
+ "k_max": 4.0,
+ "restarts": 4,
+ "summary": {
+  "neurons": 664,
+  "placed": 661,
+  "unplaced": 3,
+  "edges": 1214,
+  "synapses": 1216,
+  "carried": 762,
+  "missing": 452,
+  "carried_fraction": 0.6277,
+  "parasitic_to_zero": 17536,
+  "seconds": 29.9,
+  "strategy": "hub_first seed 1",
+  "isolation_weight": 0.0,
+  "objective": 762.0,
+  "external_in_edges": 368994,
+  "external_out_edges": 345007,
+  "external_in_synapses": 3817408,
+  "external_out_synapses": 2981455,
+  "external_in_mean": 5775.2,
+  "external_out_mean": 4510.5,
+  "external_in_max": 45674,
+  "external_out_max": 46284,
+  "external_in_p90": 11227.0,
+  "external_out_p90": 8139.0,
+  "ffpair_hosts": 20,
+  "ffpair_hosts_with_driver": 19,
+  "proxies": 10,
+  "proxies_placed": 10,
+  "proxy_readout_edges": 20,
+  "proxy_readout_carried": 18
+ },
+ "strategy": "hub_first seed 1",
+ "order_note": "backtracks 177; 743 carried before repair, +19 repaired; descent 5.3 s",
+ "mapping": {
+  "P.b0r0.u": {
+   "designed": 0,
+   "neuron_index": 541,
+   "bodyId": 10580
+  },
+  "P.b0r0.v": {
+   "designed": 1,
+   "neuron_index": 917,
+   "bodyId": 10992
+  },
+  "P.b0r1.u": {
+   "designed": 2,
+   "neuron_index": 3585,
+   "bodyId": 13844
+  },
+  "P.b0r1.v": {
+   "designed": 3,
+   "neuron_index": 202,
+   "bodyId": 10221
+  },
+  "P.b1r0.u": {
+   "designed": 4,
+   "neuron_index": 795,
+   "bodyId": 10857
+  },
+  "P.b1r0.v": {
+   "designed": 5,
+   "neuron_index": 1157,
+   "bodyId": 11248
+  },
+  "P.b1r1.u": {
+   "designed": 6,
+   "neuron_index": 5779,
+   "bodyId": 16298
+  },
+  "P.b1r1.v": {
+   "designed": 7,
+   "neuron_index": 4912,
+   "bodyId": 15320
+  },
+  "P.b2r0.u": {
+   "designed": 8,
+   "neuron_index": 787,
+   "bodyId": 10849
+  },
+  "P.b2r0.v": {
+   "designed": 9,
+   "neuron_index": 1638,
+   "bodyId": 11755
+  },
+  "P.b2r1.u": {
+   "designed": 10,
+   "neuron_index": 654,
+   "bodyId": 10703
+  },
+  "P.b2r1.v": {
+   "designed": 11,
+   "neuron_index": 131218,
+   "bodyId": 521415
+  },
+  "P.b3r0.u": {
+   "designed": 12,
+   "neuron_index": 130424,
+   "bodyId": 519896
+  },
+  "P.b3r0.v": {
+   "designed": 13,
+   "neuron_index": 173,
+   "bodyId": 10192
+  },
+  "P.b3r1.u": {
+   "designed": 14,
+   "neuron_index": 131171,
+   "bodyId": 521305
+  },
+  "P.b3r1.v": {
+   "designed": 15,
+   "neuron_index": 6764,
+   "bodyId": 17395
+  },
+  "P.b4r0.u": {
+   "designed": 16,
+   "neuron_index": 126496,
+   "bodyId": 513169
+  },
+  "P.b4r0.v": {
+   "designed": 17,
+   "neuron_index": 126186,
+   "bodyId": 512555
+  },
+  "P.b4r1.u": {
+   "designed": 18,
+   "neuron_index": 56,
+   "bodyId": 10069
+  },
+  "P.b4r1.v": {
+   "designed": 19,
+   "neuron_index": 232,
+   "bodyId": 10253
+  },
+  "P.b5r0.u": {
+   "designed": 20,
+   "neuron_index": 1216,
+   "bodyId": 11308
+  },
+  "P.b5r0.v": {
+   "designed": 21,
+   "neuron_index": 3089,
+   "bodyId": 13300
+  },
+  "P.b5r1.u": {
+   "designed": 22,
+   "neuron_index": 148911,
+   "bodyId": 805930
+  },
+  "P.b5r1.v": {
+   "designed": 23,
+   "neuron_index": 148621,
+   "bodyId": 805571
+  },
+  "P.b6r0.u": {
+   "designed": 24,
+   "neuron_index": 1143,
+   "bodyId": 11234
+  },
+  "P.b6r0.v": {
+   "designed": 25,
+   "neuron_index": 1957,
+   "bodyId": 12092
+  },
+  "P.b6r1.u": {
+   "designed": 26,
+   "neuron_index": 134494,
+   "bodyId": 530449
+  },
+  "P.b6r1.v": {
+   "designed": 27,
+   "neuron_index": 7699,
+   "bodyId": 18437
+  },
+  "P.b7r0.u": {
+   "designed": 28,
+   "neuron_index": 1628,
+   "bodyId": 11744
+  },
+  "P.b7r0.v": {
+   "designed": 29,
+   "neuron_index": 1795,
+   "bodyId": 11922
+  },
+  "P.b7r1.u": {
+   "designed": 30,
+   "neuron_index": 1294,
+   "bodyId": 11390
+  },
+  "P.b7r1.v": {
+   "designed": 31,
+   "neuron_index": 1283,
+   "bodyId": 11379
+  },
+  "P.b8r0.u": {
+   "designed": 32,
+   "neuron_index": 145425,
+   "bodyId": 801482
+  },
+  "P.b8r0.v": {
+   "designed": 33,
+   "neuron_index": 145308,
+   "bodyId": 801323
+  },
+  "P.b8r1.u": {
+   "designed": 34,
+   "neuron_index": 92,
+   "bodyId": 10106
+  },
+  "P.b8r1.v": {
+   "designed": 35,
+   "neuron_index": 6,
+   "bodyId": 10010
+  },
+  "P.reset": {
+   "designed": 36,
+   "neuron_index": 23496,
+   "bodyId": 36216
+  },
+  "P.reset_inh": {
+   "designed": 37,
+   "neuron_index": 5848,
+   "bodyId": 16374
+  },
+  "P.reset_edge": {
+   "designed": 38,
+   "neuron_index": 1783,
+   "bodyId": 11909
+  },
+  "P.reset_relay1": {
+   "designed": 39,
+   "neuron_index": 126278,
+   "bodyId": 512730
+  },
+  "P.reset_relay2": {
+   "designed": 40,
+   "neuron_index": 1939,
+   "bodyId": 12073
+  },
+  "P.reset_relay3": {
+   "designed": 41,
+   "neuron_index": 132295,
+   "bodyId": 524406
+  },
+  "P.ready_delay0": {
+   "designed": 42,
+   "neuron_index": 131761,
+   "bodyId": 523040
+  },
+  "P.ready_delay1": {
+   "designed": 43,
+   "neuron_index": 128212,
+   "bodyId": 516135
+  },
+  "P.ready_delay2": {
+   "designed": 44,
+   "neuron_index": 747,
+   "bodyId": 10806
+  },
+  "P.ready_delay3": {
+   "designed": 45,
+   "neuron_index": 718,
+   "bodyId": 10775
+  },
+  "P.ready_delay4": {
+   "designed": 46,
+   "neuron_index": 1937,
+   "bodyId": 12071
+  },
+  "P.ready_delay5": {
+   "designed": 47,
+   "neuron_index": 1194,
+   "bodyId": 11286
+  },
+  "P.ready_delay6": {
+   "designed": 48,
+   "neuron_index": 1678,
+   "bodyId": 11798
+  },
+  "P.ready_delay7": {
+   "designed": 49,
+   "neuron_index": 130327,
+   "bodyId": 519724
+  },
+  "P.ready_delay8": {
+   "designed": 50,
+   "neuron_index": 131114,
+   "bodyId": 521190
+  },
+  "P.ready_delay9": {
+   "designed": 51,
+   "neuron_index": 130282,
+   "bodyId": 519624
+  },
+  "P.ready_delay10": {
+   "designed": 52,
+   "neuron_index": 130186,
+   "bodyId": 519461
+  },
+  "P.ready_delay11": {
+   "designed": 53,
+   "neuron_index": 122339,
+   "bodyId": 230783
+  },
+  "P.ready_delay12": {
+   "designed": 54,
+   "neuron_index": 160,
+   "bodyId": 10177
+  },
+  "P.ready_delay13": {
+   "designed": 55,
+   "neuron_index": 46,
+   "bodyId": 10056
+  },
+  "P.ready_delay14": {
+   "designed": 56,
+   "neuron_index": 144335,
+   "bodyId": 800003
+  },
+  "P.ready": {
+   "designed": 57,
+   "neuron_index": 144414,
+   "bodyId": 800124
+  },
+  "Q.b0r0.u": {
+   "designed": 58,
+   "neuron_index": 50211,
+   "bodyId": 67398
+  },
+  "Q.b0r0.v": {
+   "designed": 59,
+   "neuron_index": 282,
+   "bodyId": 10305
+  },
+  "Q.b0r0.p": {
+   "designed": 60,
+   "neuron_index": 1898,
+   "bodyId": 12031
+  },
+  "Q.b0r1.u": {
+   "designed": 61,
+   "neuron_index": 162045,
+   "bodyId": 906622
+  },
+  "Q.b0r1.v": {
+   "designed": 62,
+   "neuron_index": 144772,
+   "bodyId": 800602
+  },
+  "Q.b0r1.p": {
+   "designed": 63,
+   "neuron_index": 122497,
+   "bodyId": 233434
+  },
+  "Q.b1r0.u": {
+   "designed": 64,
+   "neuron_index": 145122,
+   "bodyId": 801091
+  },
+  "Q.b1r0.v": {
+   "designed": 65,
+   "neuron_index": 144510,
+   "bodyId": 800259
+  },
+  "Q.b1r0.p": {
+   "designed": 66,
+   "neuron_index": 102263,
+   "bodyId": 141122
+  },
+  "Q.b1r1.u": {
+   "designed": 67,
+   "neuron_index": 1780,
+   "bodyId": 11906
+  },
+  "Q.b1r1.v": {
+   "designed": 68,
+   "neuron_index": 2788,
+   "bodyId": 12978
+  },
+  "Q.b1r1.p": {
+   "designed": 69,
+   "neuron_index": 98144,
+   "bodyId": 133385
+  },
+  "Q.b2r0.u": {
+   "designed": 70,
+   "neuron_index": 1612,
+   "bodyId": 11726
+  },
+  "Q.b2r0.v": {
+   "designed": 71,
+   "neuron_index": 1074,
+   "bodyId": 11163
+  },
+  "Q.b2r0.p": {
+   "designed": 72,
+   "neuron_index": 132155,
+   "bodyId": 524159
+  },
+  "Q.b2r1.u": {
+   "designed": 73,
+   "neuron_index": 11053,
+   "bodyId": 22185
+  },
+  "Q.b2r1.v": {
+   "designed": 74,
+   "neuron_index": 2062,
+   "bodyId": 12206
+  },
+  "Q.b2r1.p": {
+   "designed": 75,
+   "neuron_index": 1214,
+   "bodyId": 11306
+  },
+  "Q.b3r0.u": {
+   "designed": 76,
+   "neuron_index": 1290,
+   "bodyId": 11386
+  },
+  "Q.b3r0.v": {
+   "designed": 77,
+   "neuron_index": 903,
+   "bodyId": 10976
+  },
+  "Q.b3r0.p": {
+   "designed": 78,
+   "neuron_index": 2222,
+   "bodyId": 12378
+  },
+  "Q.b3r1.u": {
+   "designed": 79,
+   "neuron_index": 144847,
+   "bodyId": 800707
+  },
+  "Q.b3r1.v": {
+   "designed": 80,
+   "neuron_index": 161377,
+   "bodyId": 904685
+  },
+  "Q.b3r1.p": {
+   "designed": 81,
+   "neuron_index": 144911,
+   "bodyId": 800796
+  },
+  "Q.b4r0.u": {
+   "designed": 82,
+   "neuron_index": 757,
+   "bodyId": 10816
+  },
+  "Q.b4r0.v": {
+   "designed": 83,
+   "neuron_index": 144154,
+   "bodyId": 581239
+  },
+  "Q.b4r0.p": {
+   "designed": 84,
+   "neuron_index": 165737,
+   "bodyId": 666697242
+  },
+  "Q.b4r1.u": {
+   "designed": 85,
+   "neuron_index": 190,
+   "bodyId": 10209
+  },
+  "Q.b4r1.v": {
+   "designed": 86,
+   "neuron_index": 8981,
+   "bodyId": 19873
+  },
+  "Q.b4r1.p": {
+   "designed": 87,
+   "neuron_index": 130753,
+   "bodyId": 520466
+  },
+  "Q.b0r0.set": {
+   "designed": 88,
+   "neuron_index": 999,
+   "bodyId": 11080
+  },
+  "Q.b0r0.set_relay1": {
+   "designed": 89,
+   "neuron_index": 1011,
+   "bodyId": 11092
+  },
+  "Q.b0r0.set_relay2": {
+   "designed": 90,
+   "neuron_index": 62815,
+   "bodyId": 83089
+  },
+  "Q.b0r0.set_relay3": {
+   "designed": 91,
+   "neuron_index": 241,
+   "bodyId": 10262
+  },
+  "Q.b0r1.set": {
+   "designed": 92,
+   "neuron_index": 145917,
+   "bodyId": 802140
+  },
+  "Q.b0r1.set_relay1": {
+   "designed": 93,
+   "neuron_index": 160994,
+   "bodyId": 903492
+  },
+  "Q.b0r1.set_relay2": {
+   "designed": 94,
+   "neuron_index": 144418,
+   "bodyId": 800130
+  },
+  "Q.b0r1.set_relay3": {
+   "designed": 95,
+   "neuron_index": 145869,
+   "bodyId": 802071
+  },
+  "Q.b1r0.set": {
+   "designed": 96,
+   "neuron_index": 146284,
+   "bodyId": 802637
+  },
+  "Q.b1r0.set_relay1": {
+   "designed": 97,
+   "neuron_index": 162593,
+   "bodyId": 908657
+  },
+  "Q.b1r0.set_relay2": {
+   "designed": 98,
+   "neuron_index": 161133,
+   "bodyId": 903855
+  },
+  "Q.b1r0.set_relay3": {
+   "designed": 99,
+   "neuron_index": 147452,
+   "bodyId": 804133
+  },
+  "Q.b1r1.set": {
+   "designed": 100,
+   "neuron_index": 128854,
+   "bodyId": 517201
+  },
+  "Q.b1r1.set_relay1": {
+   "designed": 101,
+   "neuron_index": 2825,
+   "bodyId": 13017
+  },
+  "Q.b1r1.set_relay2": {
+   "designed": 102,
+   "neuron_index": 11243,
+   "bodyId": 22393
+  },
+  "Q.b1r1.set_relay3": {
+   "designed": 103,
+   "neuron_index": 48995,
+   "bodyId": 65912
+  },
+  "Q.b2r0.set": {
+   "designed": 104,
+   "neuron_index": 127422,
+   "bodyId": 514764
+  },
+  "Q.b2r0.set_relay1": {
+   "designed": 105,
+   "neuron_index": 1512,
+   "bodyId": 11622
+  },
+  "Q.b2r0.set_relay2": {
+   "designed": 106,
+   "neuron_index": 2045,
+   "bodyId": 12187
+  },
+  "Q.b2r0.set_relay3": {
+   "designed": 107,
+   "neuron_index": 130415,
+   "bodyId": 519877
+  },
+  "Q.b2r1.set": {
+   "designed": 108,
+   "neuron_index": 130420,
+   "bodyId": 519890
+  },
+  "Q.b2r1.set_relay1": {
+   "designed": 109,
+   "neuron_index": 129136,
+   "bodyId": 517723
+  },
+  "Q.b2r1.set_relay2": {
+   "designed": 110,
+   "neuron_index": 47653,
+   "bodyId": 64301
+  },
+  "Q.b2r1.set_relay3": {
+   "designed": 111,
+   "neuron_index": 8002,
+   "bodyId": 18777
+  },
+  "Q.b3r0.set": {
+   "designed": 112,
+   "neuron_index": 126493,
+   "bodyId": 513162
+  },
+  "Q.b3r0.set_relay1": {
+   "designed": 113,
+   "neuron_index": 2210,
+   "bodyId": 12364
+  },
+  "Q.b3r0.set_relay2": {
+   "designed": 114,
+   "neuron_index": 2246,
+   "bodyId": 12402
+  },
+  "Q.b3r0.set_relay3": {
+   "designed": 115,
+   "neuron_index": 5787,
+   "bodyId": 16307
+  },
+  "Q.b3r1.set": {
+   "designed": 116,
+   "neuron_index": 145105,
+   "bodyId": 801067
+  },
+  "Q.b3r1.set_relay1": {
+   "designed": 117,
+   "neuron_index": 164688,
+   "bodyId": 940081
+  },
+  "Q.b3r1.set_relay2": {
+   "designed": 118,
+   "neuron_index": 148052,
+   "bodyId": 804876
+  },
+  "Q.b3r1.set_relay3": {
+   "designed": 119,
+   "neuron_index": 147615,
+   "bodyId": 804338
+  },
+  "Q.b4r0.set": {
+   "designed": 120,
+   "neuron_index": 1232,
+   "bodyId": 11324
+  },
+  "Q.b4r0.set_relay1": {
+   "designed": 121,
+   "neuron_index": 134019,
+   "bodyId": 529519
+  },
+  "Q.b4r0.set_relay2": {
+   "designed": 122,
+   "neuron_index": 2795,
+   "bodyId": 12985
+  },
+  "Q.b4r0.set_relay3": {
+   "designed": 123,
+   "neuron_index": 558,
+   "bodyId": 10599
+  },
+  "Q.b4r1.set": {
+   "designed": 124,
+   "neuron_index": 10781,
+   "bodyId": 21889
+  },
+  "Q.b4r1.set_relay1": {
+   "designed": 125,
+   "neuron_index": 121055,
+   "bodyId": 215707
+  },
+  "Q.b4r1.set_relay2": {
+   "designed": 126,
+   "neuron_index": 2601,
+   "bodyId": 12782
+  },
+  "Q.b4r1.set_relay3": {
+   "designed": 127,
+   "neuron_index": 18351,
+   "bodyId": 30375
+  },
+  "Q.valid0.or": {
+   "designed": 128,
+   "neuron_index": 2741,
+   "bodyId": 12929
+  },
+  "Q.valid0.L.u": {
+   "designed": 129,
+   "neuron_index": 1486,
+   "bodyId": 11594
+  },
+  "Q.valid0.L.v": {
+   "designed": 130,
+   "neuron_index": 135641,
+   "bodyId": 532768
+  },
+  "Q.valid0.ign.edge": {
+   "designed": 131,
+   "neuron_index": 1824,
+   "bodyId": 11952
+  },
+  "Q.valid0.ign.edge_inh": {
+   "designed": 132,
+   "neuron_index": 119,
+   "bodyId": 10133
+  },
+  "Q.valid0.ign.hold_inh": {
+   "designed": 133,
+   "neuron_index": 5206,
+   "bodyId": 15662
+  },
+  "Q.fault0.and": {
+   "designed": 134,
+   "neuron_index": 132158,
+   "bodyId": 524164
+  },
+  "Q.valid1.or": {
+   "designed": 135,
+   "neuron_index": 8472,
+   "bodyId": 19305
+  },
+  "Q.valid1.L.u": {
+   "designed": 136,
+   "neuron_index": 130926,
+   "bodyId": 520787
+  },
+  "Q.valid1.L.v": {
+   "designed": 137,
+   "neuron_index": 2541,
+   "bodyId": 12717
+  },
+  "Q.valid1.ign.edge": {
+   "designed": 138,
+   "neuron_index": 3210,
+   "bodyId": 13431
+  },
+  "Q.valid1.ign.edge_inh": {
+   "designed": 139,
+   "neuron_index": 348,
+   "bodyId": 10376
+  },
+  "Q.valid1.ign.hold_inh": {
+   "designed": 140,
+   "neuron_index": 9643,
+   "bodyId": 20620
+  },
+  "Q.fault1.and": {
+   "designed": 141,
+   "neuron_index": 132670,
+   "bodyId": 525140
+  },
+  "Q.valid2.or": {
+   "designed": 142,
+   "neuron_index": 37001,
+   "bodyId": 51658
+  },
+  "Q.valid2.L.u": {
+   "designed": 143,
+   "neuron_index": 434,
+   "bodyId": 10470
+  },
+  "Q.valid2.L.v": {
+   "designed": 144,
+   "neuron_index": 57569,
+   "bodyId": 76504
+  },
+  "Q.valid2.ign.edge": {
+   "designed": 145,
+   "neuron_index": 130147,
+   "bodyId": 519400
+  },
+  "Q.valid2.ign.edge_inh": {
+   "designed": 146,
+   "neuron_index": 184,
+   "bodyId": 10203
+  },
+  "Q.valid2.ign.hold_inh": {
+   "designed": 147,
+   "neuron_index": 4128,
+   "bodyId": 14458
+  },
+  "Q.fault2.and": {
+   "designed": 148,
+   "neuron_index": 40176,
+   "bodyId": 55361
+  },
+  "Q.valid3.or": {
+   "designed": 149,
+   "neuron_index": 165399,
+   "bodyId": 340841530
+  },
+  "Q.valid3.L.u": {
+   "designed": 150,
+   "neuron_index": 135574,
+   "bodyId": 532655
+  },
+  "Q.valid3.L.v": {
+   "designed": 151,
+   "neuron_index": 749,
+   "bodyId": 10808
+  },
+  "Q.valid3.ign.edge": {
+   "designed": 152,
+   "neuron_index": 112,
+   "bodyId": 10126
+  },
+  "Q.valid3.ign.edge_inh": {
+   "designed": 153,
+   "neuron_index": 9607,
+   "bodyId": 20581
+  },
+  "Q.valid3.ign.hold_inh": {
+   "designed": 154,
+   "neuron_index": 9025,
+   "bodyId": 19921
+  },
+  "Q.fault3.and": {
+   "designed": 155,
+   "neuron_index": 145116,
+   "bodyId": 801084
+  },
+  "Q.valid4.or": {
+   "designed": 156,
+   "neuron_index": 1250,
+   "bodyId": 11342
+  },
+  "Q.valid4.L.u": {
+   "designed": 157,
+   "neuron_index": 921,
+   "bodyId": 10996
+  },
+  "Q.valid4.L.v": {
+   "designed": 158,
+   "neuron_index": 126813,
+   "bodyId": 513746
+  },
+  "Q.valid4.ign.edge": {
+   "designed": 159,
+   "neuron_index": 1864,
+   "bodyId": 11993
+  },
+  "Q.valid4.ign.edge_inh": {
+   "designed": 160,
+   "neuron_index": 5898,
+   "bodyId": 16434
+  },
+  "Q.valid4.ign.hold_inh": {
+   "designed": 161,
+   "neuron_index": 28213,
+   "bodyId": 41551
+  },
+  "Q.fault4.and": {
+   "designed": 162,
+   "neuron_index": 3379,
+   "bodyId": 13621
+  },
+  "Q.comp.c0_0.and": {
+   "designed": 163,
+   "neuron_index": 3942,
+   "bodyId": 14243
+  },
+  "Q.comp.c0_0.L.u": {
+   "designed": 164,
+   "neuron_index": 133626,
+   "bodyId": 527470
+  },
+  "Q.comp.c0_0.L.v": {
+   "designed": 165,
+   "neuron_index": 1633,
+   "bodyId": 11749
+  },
+  "Q.comp.c0_0.ign.edge": {
+   "designed": 166,
+   "neuron_index": 189,
+   "bodyId": 10208
+  },
+  "Q.comp.c0_0.ign.edge_inh": {
+   "designed": 167,
+   "neuron_index": 16611,
+   "bodyId": 28406
+  },
+  "Q.comp.c0_0.ign.hold_inh": {
+   "designed": 168,
+   "neuron_index": 131853,
+   "bodyId": 523544
+  },
+  "Q.comp.c0_1.and": {
+   "designed": 169,
+   "neuron_index": 142408,
+   "bodyId": 555318
+  },
+  "Q.comp.c0_1.L.u": {
+   "designed": 170,
+   "neuron_index": 366,
+   "bodyId": 10397
+  },
+  "Q.comp.c0_1.L.v": {
+   "designed": 171,
+   "neuron_index": 1862,
+   "bodyId": 11991
+  },
+  "Q.comp.c0_1.ign.edge": {
+   "designed": 172,
+   "neuron_index": 683,
+   "bodyId": 10736
+  },
+  "Q.comp.c0_1.ign.edge_inh": {
+   "designed": 173,
+   "neuron_index": 6057,
+   "bodyId": 16601
+  },
+  "Q.comp.c0_1.ign.hold_inh": {
+   "designed": 174,
+   "neuron_index": 7454,
+   "bodyId": 18165
+  },
+  "Q.comp.c1_0.and": {
+   "designed": 175,
+   "neuron_index": 1607,
+   "bodyId": 11721
+  },
+  "Q.comp.c1_0.L.u": {
+   "designed": 176,
+   "neuron_index": 12206,
+   "bodyId": 23477
+  },
+  "Q.comp.c1_0.L.v": {
+   "designed": 177,
+   "neuron_index": 1715,
+   "bodyId": 11837
+  },
+  "Q.comp.c1_0.ign.edge": {
+   "designed": 178,
+   "neuron_index": 1416,
+   "bodyId": 11517
+  },
+  "Q.comp.c1_0.ign.edge_inh": {
+   "designed": 179,
+   "neuron_index": 9447,
+   "bodyId": 20402
+  },
+  "Q.comp.c1_0.ign.hold_inh": {
+   "designed": 180,
+   "neuron_index": 7959,
+   "bodyId": 18730
+  },
+  "Q.comp.c2_0.and": {
+   "designed": 181,
+   "neuron_index": 122387,
+   "bodyId": 231412
+  },
+  "Q.comp.c2_0.L.u": {
+   "designed": 182,
+   "neuron_index": 161066,
+   "bodyId": 903653
+  },
+  "Q.comp.c2_0.L.v": {
+   "designed": 183,
+   "neuron_index": 144375,
+   "bodyId": 800072
+  },
+  "Q.comp.c2_0.ign.edge": {
+   "designed": 184,
+   "neuron_index": 5922,
+   "bodyId": 16460
+  },
+  "Q.comp.c2_0.ign.hold_inh": {
+   "designed": 186,
+   "neuron_index": 3104,
+   "bodyId": 13315
+  },
+  "Q.reset": {
+   "designed": 187,
+   "neuron_index": 145100,
+   "bodyId": 801059
+  },
+  "Q.reset_inh": {
+   "designed": 188,
+   "neuron_index": 145434,
+   "bodyId": 801493
+  },
+  "Q.reset_edge": {
+   "designed": 189,
+   "neuron_index": 144427,
+   "bodyId": 800141
+  },
+  "Q.reset_relay1": {
+   "designed": 190,
+   "neuron_index": 145095,
+   "bodyId": 801054
+  },
+  "Q.reset_relay2": {
+   "designed": 191,
+   "neuron_index": 145597,
+   "bodyId": 801706
+  },
+  "Q.reset_relay3": {
+   "designed": 192,
+   "neuron_index": 146216,
+   "bodyId": 802548
+  },
+  "Q.ready_delay0": {
+   "designed": 193,
+   "neuron_index": 144682,
+   "bodyId": 800492
+  },
+  "Q.ready_delay1": {
+   "designed": 194,
+   "neuron_index": 144338,
+   "bodyId": 800009
+  },
+  "Q.ready_delay2": {
+   "designed": 195,
+   "neuron_index": 144713,
+   "bodyId": 800531
+  },
+  "Q.ready_delay3": {
+   "designed": 196,
+   "neuron_index": 144444,
+   "bodyId": 800159
+  },
+  "Q.ready_delay4": {
+   "designed": 197,
+   "neuron_index": 164304,
+   "bodyId": 929612
+  },
+  "Q.ready_delay5": {
+   "designed": 198,
+   "neuron_index": 144752,
+   "bodyId": 800576
+  },
+  "Q.ready_delay6": {
+   "designed": 199,
+   "neuron_index": 144362,
+   "bodyId": 800051
+  },
+  "Q.ready_delay7": {
+   "designed": 200,
+   "neuron_index": 145073,
+   "bodyId": 801022
+  },
+  "Q.ready_delay8": {
+   "designed": 201,
+   "neuron_index": 108276,
+   "bodyId": 154893
+  },
+  "Q.ready_delay9": {
+   "designed": 202,
+   "neuron_index": 144426,
+   "bodyId": 800140
+  },
+  "Q.ready_delay10": {
+   "designed": 203,
+   "neuron_index": 144474,
+   "bodyId": 800211
+  },
+  "Q.ready_delay11": {
+   "designed": 204,
+   "neuron_index": 158517,
+   "bodyId": 818556
+  },
+  "Q.ready_delay12": {
+   "designed": 205,
+   "neuron_index": 144364,
+   "bodyId": 800053
+  },
+  "Q.ready_delay13": {
+   "designed": 206,
+   "neuron_index": 161267,
+   "bodyId": 904236
+  },
+  "Q.ready_delay14": {
+   "designed": 207,
+   "neuron_index": 10306,
+   "bodyId": 21360
+  },
+  "Q.ready": {
+   "designed": 208,
+   "neuron_index": 144692,
+   "bodyId": 800504
+  },
+  "add.active.or": {
+   "designed": 209,
+   "neuron_index": 136216,
+   "bodyId": 533975
+  },
+  "add.active.L.u": {
+   "designed": 210,
+   "neuron_index": 24285,
+   "bodyId": 37111
+  },
+  "add.active.L.v": {
+   "designed": 211,
+   "neuron_index": 800,
+   "bodyId": 10864
+  },
+  "add.active.ign.edge": {
+   "designed": 212,
+   "neuron_index": 3134,
+   "bodyId": 13351
+  },
+  "add.active.ign.edge_inh": {
+   "designed": 213,
+   "neuron_index": 3235,
+   "bodyId": 13460
+  },
+  "add.active.ign.hold_inh": {
+   "designed": 214,
+   "neuron_index": 2112,
+   "bodyId": 12258
+  },
+  "add.actd.d0": {
+   "designed": 215,
+   "neuron_index": 605,
+   "bodyId": 10651
+  },
+  "add.actd.d1": {
+   "designed": 216,
+   "neuron_index": 131990,
+   "bodyId": 523836
+  },
+  "add.actd.d2": {
+   "designed": 217,
+   "neuron_index": 4382,
+   "bodyId": 14736
+  },
+  "add.actd.d3": {
+   "designed": 218,
+   "neuron_index": 4264,
+   "bodyId": 14611
+  },
+  "add.actd.d4": {
+   "designed": 219,
+   "neuron_index": 142639,
+   "bodyId": 556838
+  },
+  "add.actd.d5": {
+   "designed": 220,
+   "neuron_index": 20175,
+   "bodyId": 32461
+  },
+  "add.actd.d6": {
+   "designed": 221,
+   "neuron_index": 1538,
+   "bodyId": 11650
+  },
+  "add.actd.d7": {
+   "designed": 222,
+   "neuron_index": 2905,
+   "bodyId": 13103
+  },
+  "add.actd.d8": {
+   "designed": 223,
+   "neuron_index": 126953,
+   "bodyId": 513992
+  },
+  "add.actd.d9": {
+   "designed": 224,
+   "neuron_index": 36301,
+   "bodyId": 50835
+  },
+  "add.actd.d10": {
+   "designed": 225,
+   "neuron_index": 142400,
+   "bodyId": 555296
+  },
+  "add.a0r0.u": {
+   "designed": 226,
+   "neuron_index": 521,
+   "bodyId": 10559
+  },
+  "add.a0r0.v": {
+   "designed": 227,
+   "neuron_index": 126068,
+   "bodyId": 512357
+  },
+  "add.a0r1.u": {
+   "designed": 228,
+   "neuron_index": 99,
+   "bodyId": 10113
+  },
+  "add.a0r1.v": {
+   "designed": 229,
+   "neuron_index": 1798,
+   "bodyId": 11925
+  },
+  "add.a0r0.g.edge": {
+   "designed": 230,
+   "neuron_index": 1043,
+   "bodyId": 11127
+  },
+  "add.a0r0.g.edge_inh": {
+   "designed": 231,
+   "neuron_index": 132404,
+   "bodyId": 524604
+  },
+  "add.a0r0.g.veto": {
+   "designed": 232,
+   "neuron_index": 13437,
+   "bodyId": 24857
+  },
+  "add.a0r1.g.edge": {
+   "designed": 233,
+   "neuron_index": 597,
+   "bodyId": 10643
+  },
+  "add.a0r1.g.edge_inh": {
+   "designed": 234,
+   "neuron_index": 131760,
+   "bodyId": 523039
+  },
+  "add.a0r1.g.veto": {
+   "designed": 235,
+   "neuron_index": 5109,
+   "bodyId": 15550
+  },
+  "add.a1r0.u": {
+   "designed": 236,
+   "neuron_index": 2359,
+   "bodyId": 12521
+  },
+  "add.a1r0.v": {
+   "designed": 237,
+   "neuron_index": 7744,
+   "bodyId": 18491
+  },
+  "add.a1r1.u": {
+   "designed": 238,
+   "neuron_index": 4144,
+   "bodyId": 14477
+  },
+  "add.a1r1.v": {
+   "designed": 239,
+   "neuron_index": 2047,
+   "bodyId": 12189
+  },
+  "add.a1r0.g.edge": {
+   "designed": 240,
+   "neuron_index": 17212,
+   "bodyId": 29086
+  },
+  "add.a1r0.g.edge_inh": {
+   "designed": 241,
+   "neuron_index": 4388,
+   "bodyId": 14745
+  },
+  "add.a1r0.g.veto": {
+   "designed": 242,
+   "neuron_index": 9070,
+   "bodyId": 19973
+  },
+  "add.a1r1.g.edge": {
+   "designed": 243,
+   "neuron_index": 127142,
+   "bodyId": 514297
+  },
+  "add.a1r1.g.edge_inh": {
+   "designed": 244,
+   "neuron_index": 526,
+   "bodyId": 10565
+  },
+  "add.a1r1.g.veto": {
+   "designed": 245,
+   "neuron_index": 136215,
+   "bodyId": 533971
+  },
+  "add.a2r0.u": {
+   "designed": 246,
+   "neuron_index": 3524,
+   "bodyId": 13780
+  },
+  "add.a2r0.v": {
+   "designed": 247,
+   "neuron_index": 15,
+   "bodyId": 10020
+  },
+  "add.a2r1.u": {
+   "designed": 248,
+   "neuron_index": 4874,
+   "bodyId": 15279
+  },
+  "add.a2r1.v": {
+   "designed": 249,
+   "neuron_index": 13662,
+   "bodyId": 25106
+  },
+  "add.a2r0.g.edge": {
+   "designed": 250,
+   "neuron_index": 142399,
+   "bodyId": 555295
+  },
+  "add.a2r0.g.edge_inh": {
+   "designed": 251,
+   "neuron_index": 18070,
+   "bodyId": 30042
+  },
+  "add.a2r0.g.veto": {
+   "designed": 252,
+   "neuron_index": 2490,
+   "bodyId": 12664
+  },
+  "add.a2r1.g.edge": {
+   "designed": 253,
+   "neuron_index": 135759,
+   "bodyId": 533044
+  },
+  "add.a2r1.g.edge_inh": {
+   "designed": 254,
+   "neuron_index": 129511,
+   "bodyId": 518345
+  },
+  "add.a2r1.g.veto": {
+   "designed": 255,
+   "neuron_index": 142384,
+   "bodyId": 555256
+  },
+  "add.a3r0.u": {
+   "designed": 256,
+   "neuron_index": 182,
+   "bodyId": 10201
+  },
+  "add.a3r0.v": {
+   "designed": 257,
+   "neuron_index": 2746,
+   "bodyId": 12934
+  },
+  "add.a3r1.u": {
+   "designed": 258,
+   "neuron_index": 123139,
+   "bodyId": 247232
+  },
+  "add.a3r1.v": {
+   "designed": 259,
+   "neuron_index": 132183,
+   "bodyId": 524208
+  },
+  "add.a3r0.g.edge": {
+   "designed": 260,
+   "neuron_index": 1178,
+   "bodyId": 11269
+  },
+  "add.a3r0.g.edge_inh": {
+   "designed": 261,
+   "neuron_index": 4895,
+   "bodyId": 15302
+  },
+  "add.a3r0.g.veto": {
+   "designed": 262,
+   "neuron_index": 17524,
+   "bodyId": 29445
+  },
+  "add.a3r1.g.edge": {
+   "designed": 263,
+   "neuron_index": 1297,
+   "bodyId": 11393
+  },
+  "add.a3r1.g.edge_inh": {
+   "designed": 264,
+   "neuron_index": 5435,
+   "bodyId": 15912
+  },
+  "add.a3r1.g.veto": {
+   "designed": 265,
+   "neuron_index": 33018,
+   "bodyId": 47035
+  },
+  "add.b0r0.d0": {
+   "designed": 266,
+   "neuron_index": 126752,
+   "bodyId": 513636
+  },
+  "add.b0r0.d1": {
+   "designed": 267,
+   "neuron_index": 89,
+   "bodyId": 10103
+  },
+  "add.b0r0.d2": {
+   "designed": 268,
+   "neuron_index": 130055,
+   "bodyId": 519228
+  },
+  "add.b0r0.d3": {
+   "designed": 269,
+   "neuron_index": 2386,
+   "bodyId": 12550
+  },
+  "add.b0r0.d4": {
+   "designed": 270,
+   "neuron_index": 144528,
+   "bodyId": 800286
+  },
+  "add.b0r0.d5": {
+   "designed": 271,
+   "neuron_index": 144453,
+   "bodyId": 800174
+  },
+  "add.b0r1.d0": {
+   "designed": 272,
+   "neuron_index": 132300,
+   "bodyId": 524415
+  },
+  "add.b0r1.d1": {
+   "designed": 273,
+   "neuron_index": 142492,
+   "bodyId": 555855
+  },
+  "add.b0r1.d2": {
+   "designed": 274,
+   "neuron_index": 5336,
+   "bodyId": 15798
+  },
+  "add.b0r1.d3": {
+   "designed": 275,
+   "neuron_index": 21889,
+   "bodyId": 34402
+  },
+  "add.b0r1.d4": {
+   "designed": 276,
+   "neuron_index": 3222,
+   "bodyId": 13444
+  },
+  "add.b0r1.d5": {
+   "designed": 277,
+   "neuron_index": 850,
+   "bodyId": 10920
+  },
+  "add.b1r0.d0": {
+   "designed": 278,
+   "neuron_index": 261,
+   "bodyId": 10283
+  },
+  "add.b1r0.d1": {
+   "designed": 279,
+   "neuron_index": 783,
+   "bodyId": 10844
+  },
+  "add.b1r0.d2": {
+   "designed": 280,
+   "neuron_index": 779,
+   "bodyId": 10840
+  },
+  "add.b1r0.d3": {
+   "designed": 281,
+   "neuron_index": 1545,
+   "bodyId": 11657
+  },
+  "add.b1r0.d4": {
+   "designed": 282,
+   "neuron_index": 1832,
+   "bodyId": 11960
+  },
+  "add.b1r0.d5": {
+   "designed": 283,
+   "neuron_index": 144948,
+   "bodyId": 800845
+  },
+  "add.b1r1.d0": {
+   "designed": 284,
+   "neuron_index": 150200,
+   "bodyId": 807462
+  },
+  "add.b1r1.d1": {
+   "designed": 285,
+   "neuron_index": 145905,
+   "bodyId": 802126
+  },
+  "add.b1r1.d2": {
+   "designed": 286,
+   "neuron_index": 147549,
+   "bodyId": 804251
+  },
+  "add.b1r1.d3": {
+   "designed": 287,
+   "neuron_index": 144879,
+   "bodyId": 800752
+  },
+  "add.b1r1.d4": {
+   "designed": 288,
+   "neuron_index": 144383,
+   "bodyId": 800084
+  },
+  "add.b1r1.d5": {
+   "designed": 289,
+   "neuron_index": 146617,
+   "bodyId": 803074
+  },
+  "add.b2r0.d0": {
+   "designed": 290,
+   "neuron_index": 2452,
+   "bodyId": 12622
+  },
+  "add.b2r0.d1": {
+   "designed": 291,
+   "neuron_index": 23786,
+   "bodyId": 36541
+  },
+  "add.b2r0.d2": {
+   "designed": 292,
+   "neuron_index": 131195,
+   "bodyId": 521358
+  },
+  "add.b2r0.d3": {
+   "designed": 293,
+   "neuron_index": 498,
+   "bodyId": 10536
+  },
+  "add.b2r0.d4": {
+   "designed": 294,
+   "neuron_index": 1822,
+   "bodyId": 11950
+  },
+  "add.b2r0.d5": {
+   "designed": 295,
+   "neuron_index": 142843,
+   "bodyId": 558778
+  },
+  "add.b2r1.d0": {
+   "designed": 296,
+   "neuron_index": 1645,
+   "bodyId": 11762
+  },
+  "add.b2r1.d1": {
+   "designed": 297,
+   "neuron_index": 1133,
+   "bodyId": 11224
+  },
+  "add.b2r1.d2": {
+   "designed": 298,
+   "neuron_index": 142417,
+   "bodyId": 555384
+  },
+  "add.b2r1.d3": {
+   "designed": 299,
+   "neuron_index": 142416,
+   "bodyId": 555383
+  },
+  "add.b2r1.d4": {
+   "designed": 300,
+   "neuron_index": 567,
+   "bodyId": 10609
+  },
+  "add.b2r1.d5": {
+   "designed": 301,
+   "neuron_index": 1271,
+   "bodyId": 11367
+  },
+  "add.b3r0.d0": {
+   "designed": 302,
+   "neuron_index": 133666,
+   "bodyId": 527577
+  },
+  "add.b3r0.d1": {
+   "designed": 303,
+   "neuron_index": 1401,
+   "bodyId": 11501
+  },
+  "add.b3r0.d2": {
+   "designed": 304,
+   "neuron_index": 360,
+   "bodyId": 10390
+  },
+  "add.b3r0.d3": {
+   "designed": 305,
+   "neuron_index": 859,
+   "bodyId": 10929
+  },
+  "add.b3r0.d4": {
+   "designed": 306,
+   "neuron_index": 159,
+   "bodyId": 10176
+  },
+  "add.b3r0.d5": {
+   "designed": 307,
+   "neuron_index": 604,
+   "bodyId": 10650
+  },
+  "add.b3r1.d0": {
+   "designed": 308,
+   "neuron_index": 2200,
+   "bodyId": 12354
+  },
+  "add.b3r1.d1": {
+   "designed": 309,
+   "neuron_index": 30,
+   "bodyId": 10039
+  },
+  "add.b3r1.d2": {
+   "designed": 310,
+   "neuron_index": 130496,
+   "bodyId": 520002
+  },
+  "add.b3r1.d3": {
+   "designed": 311,
+   "neuron_index": 484,
+   "bodyId": 10522
+  },
+  "add.b3r1.d4": {
+   "designed": 312,
+   "neuron_index": 1381,
+   "bodyId": 11478
+  },
+  "add.b3r1.d5": {
+   "designed": 313,
+   "neuron_index": 390,
+   "bodyId": 10423
+  },
+  "add.fa0.x.y1.u": {
+   "designed": 314,
+   "neuron_index": 144434,
+   "bodyId": 800148
+  },
+  "add.fa0.x.y1.v": {
+   "designed": 315,
+   "neuron_index": 146064,
+   "bodyId": 802354
+  },
+  "add.fa0.x.y0.u": {
+   "designed": 316,
+   "neuron_index": 144515,
+   "bodyId": 800267
+  },
+  "add.fa0.x.y0.v": {
+   "designed": 317,
+   "neuron_index": 147797,
+   "bodyId": 804557
+  },
+  "add.fa0.x.y1.a.edge": {
+   "designed": 318,
+   "neuron_index": 17597,
+   "bodyId": 29526
+  },
+  "add.fa0.x.y1.a.edge_inh": {
+   "designed": 319,
+   "neuron_index": 144010,
+   "bodyId": 580736
+  },
+  "add.fa0.x.y1.a.veto": {
+   "designed": 320,
+   "neuron_index": 149759,
+   "bodyId": 806932
+  },
+  "add.fa0.x.y1.b.edge": {
+   "designed": 321,
+   "neuron_index": 34694,
+   "bodyId": 48969
+  },
+  "add.fa0.x.y1.b.edge_inh": {
+   "designed": 322,
+   "neuron_index": 5468,
+   "bodyId": 15950
+  },
+  "add.fa0.x.y1.b.veto": {
+   "designed": 323,
+   "neuron_index": 1469,
+   "bodyId": 11577
+  },
+  "add.fa0.x.y0.a.edge": {
+   "designed": 324,
+   "neuron_index": 1400,
+   "bodyId": 11500
+  },
+  "add.fa0.x.y0.a.edge_inh": {
+   "designed": 325,
+   "neuron_index": 142589,
+   "bodyId": 556591
+  },
+  "add.fa0.x.y0.a.veto": {
+   "designed": 326,
+   "neuron_index": 149125,
+   "bodyId": 806188
+  },
+  "add.fa0.x.y0.b.edge": {
+   "designed": 327,
+   "neuron_index": 1361,
+   "bodyId": 11458
+  },
+  "add.fa0.x.y0.b.edge_inh": {
+   "designed": 328,
+   "neuron_index": 130460,
+   "bodyId": 519946
+  },
+  "add.fa0.x.y0.b.veto": {
+   "designed": 329,
+   "neuron_index": 7667,
+   "bodyId": 18404
+  },
+  "add.fa1.x.y1.u": {
+   "designed": 330,
+   "neuron_index": 144405,
+   "bodyId": 800114
+  },
+  "add.fa1.x.y1.v": {
+   "designed": 331,
+   "neuron_index": 160686,
+   "bodyId": 902520
+  },
+  "add.fa1.x.y0.u": {
+   "designed": 332,
+   "neuron_index": 188,
+   "bodyId": 10207
+  },
+  "add.fa1.x.y0.v": {
+   "designed": 333,
+   "neuron_index": 132050,
+   "bodyId": 523945
+  },
+  "add.fa1.x.y1.a.edge": {
+   "designed": 334,
+   "neuron_index": 147704,
+   "bodyId": 804444
+  },
+  "add.fa1.x.y1.a.edge_inh": {
+   "designed": 335,
+   "neuron_index": 146572,
+   "bodyId": 803020
+  },
+  "add.fa1.x.y1.a.veto": {
+   "designed": 336,
+   "neuron_index": 161643,
+   "bodyId": 905353
+  },
+  "add.fa1.x.y1.b.edge": {
+   "designed": 337,
+   "neuron_index": 36,
+   "bodyId": 10045
+  },
+  "add.fa1.x.y1.b.edge_inh": {
+   "designed": 338,
+   "neuron_index": 128615,
+   "bodyId": 516820
+  },
+  "add.fa1.x.y1.b.veto": {
+   "designed": 339,
+   "neuron_index": 1630,
+   "bodyId": 11746
+  },
+  "add.fa1.x.y0.a.edge": {
+   "designed": 340,
+   "neuron_index": 135987,
+   "bodyId": 533529
+  },
+  "add.fa1.x.y0.a.edge_inh": {
+   "designed": 341,
+   "neuron_index": 418,
+   "bodyId": 10454
+  },
+  "add.fa1.x.y0.a.veto": {
+   "designed": 342,
+   "neuron_index": 87551,
+   "bodyId": 116799
+  },
+  "add.fa1.x.y0.b.edge": {
+   "designed": 343,
+   "neuron_index": 142376,
+   "bodyId": 555176
+  },
+  "add.fa1.x.y0.b.edge_inh": {
+   "designed": 344,
+   "neuron_index": 26765,
+   "bodyId": 39912
+  },
+  "add.fa1.x.y0.b.veto": {
+   "designed": 345,
+   "neuron_index": 3194,
+   "bodyId": 13414
+  },
+  "add.fa2.x.y1.u": {
+   "designed": 346,
+   "neuron_index": 37839,
+   "bodyId": 52641
+  },
+  "add.fa2.x.y1.v": {
+   "designed": 347,
+   "neuron_index": 4994,
+   "bodyId": 15421
+  },
+  "add.fa2.x.y0.u": {
+   "designed": 348,
+   "neuron_index": 2140,
+   "bodyId": 12289
+  },
+  "add.fa2.x.y0.v": {
+   "designed": 349,
+   "neuron_index": 2209,
+   "bodyId": 12363
+  },
+  "add.fa2.x.y1.a.edge": {
+   "designed": 350,
+   "neuron_index": 676,
+   "bodyId": 10728
+  },
+  "add.fa2.x.y1.a.edge_inh": {
+   "designed": 351,
+   "neuron_index": 1010,
+   "bodyId": 11091
+  },
+  "add.fa2.x.y1.a.veto": {
+   "designed": 352,
+   "neuron_index": 114,
+   "bodyId": 10128
+  },
+  "add.fa2.x.y1.b.edge": {
+   "designed": 353,
+   "neuron_index": 6077,
+   "bodyId": 16624
+  },
+  "add.fa2.x.y1.b.edge_inh": {
+   "designed": 354,
+   "neuron_index": 12962,
+   "bodyId": 24313
+  },
+  "add.fa2.x.y1.b.veto": {
+   "designed": 355,
+   "neuron_index": 14836,
+   "bodyId": 26420
+  },
+  "add.fa2.x.y0.a.edge": {
+   "designed": 356,
+   "neuron_index": 3684,
+   "bodyId": 13953
+  },
+  "add.fa2.x.y0.a.edge_inh": {
+   "designed": 357,
+   "neuron_index": 5389,
+   "bodyId": 15856
+  },
+  "add.fa2.x.y0.a.veto": {
+   "designed": 358,
+   "neuron_index": 49060,
+   "bodyId": 65991
+  },
+  "add.fa2.x.y0.b.edge": {
+   "designed": 359,
+   "neuron_index": 1886,
+   "bodyId": 12018
+  },
+  "add.fa2.x.y0.b.edge_inh": {
+   "designed": 360,
+   "neuron_index": 6477,
+   "bodyId": 17075
+  },
+  "add.fa2.x.y0.b.veto": {
+   "designed": 361,
+   "neuron_index": 1221,
+   "bodyId": 11313
+  },
+  "add.fa3.x.y1.u": {
+   "designed": 362,
+   "neuron_index": 1863,
+   "bodyId": 11992
+  },
+  "add.fa3.x.y1.v": {
+   "designed": 363,
+   "neuron_index": 132201,
+   "bodyId": 524238
+  },
+  "add.fa3.x.y0.u": {
+   "designed": 364,
+   "neuron_index": 2167,
+   "bodyId": 12320
+  },
+  "add.fa3.x.y0.v": {
+   "designed": 365,
+   "neuron_index": 3564,
+   "bodyId": 13821
+  },
+  "add.fa3.x.y1.a.edge": {
+   "designed": 366,
+   "neuron_index": 530,
+   "bodyId": 10569
+  },
+  "add.fa3.x.y1.a.edge_inh": {
+   "designed": 367,
+   "neuron_index": 141783,
+   "bodyId": 551294
+  },
+  "add.fa3.x.y1.a.veto": {
+   "designed": 368,
+   "neuron_index": 3676,
+   "bodyId": 13944
+  },
+  "add.fa3.x.y1.b.edge": {
+   "designed": 369,
+   "neuron_index": 117708,
+   "bodyId": 192978
+  },
+  "add.fa3.x.y1.b.edge_inh": {
+   "designed": 370,
+   "neuron_index": 437,
+   "bodyId": 10473
+  },
+  "add.fa3.x.y1.b.veto": {
+   "designed": 371,
+   "neuron_index": 45698,
+   "bodyId": 61941
+  },
+  "add.fa3.x.y0.a.edge": {
+   "designed": 372,
+   "neuron_index": 131093,
+   "bodyId": 521158
+  },
+  "add.fa3.x.y0.a.veto": {
+   "designed": 374,
+   "neuron_index": 143265,
+   "bodyId": 564824
+  },
+  "add.fa3.x.y0.b.edge": {
+   "designed": 375,
+   "neuron_index": 871,
+   "bodyId": 10942
+  },
+  "add.fa3.x.y0.b.edge_inh": {
+   "designed": 376,
+   "neuron_index": 478,
+   "bodyId": 10515
+  },
+  "add.fa3.x.y0.b.veto": {
+   "designed": 377,
+   "neuron_index": 164024,
+   "bodyId": 918582
+  },
+  "add.fa0.c1.u": {
+   "designed": 378,
+   "neuron_index": 157264,
+   "bodyId": 816396
+  },
+  "add.fa0.c1.v": {
+   "designed": 379,
+   "neuron_index": 156908,
+   "bodyId": 815872
+  },
+  "add.fa0.c0.u": {
+   "designed": 380,
+   "neuron_index": 96236,
+   "bodyId": 130228
+  },
+  "add.fa0.c0.v": {
+   "designed": 381,
+   "neuron_index": 92231,
+   "bodyId": 123771
+  },
+  "add.fa0.g.edge": {
+   "designed": 382,
+   "neuron_index": 4479,
+   "bodyId": 14846
+  },
+  "add.fa0.g.edge_inh": {
+   "designed": 383,
+   "neuron_index": 5727,
+   "bodyId": 16244
+  },
+  "add.fa0.g.veto": {
+   "designed": 384,
+   "neuron_index": 144883,
+   "bodyId": 800759
+  },
+  "add.fa0.k.edge": {
+   "designed": 385,
+   "neuron_index": 5624,
+   "bodyId": 16129
+  },
+  "add.fa0.k.edge_inh": {
+   "designed": 386,
+   "neuron_index": 1892,
+   "bodyId": 12025
+  },
+  "add.fa0.k.veto": {
+   "designed": 387,
+   "neuron_index": 8402,
+   "bodyId": 19220
+  },
+  "add.fa0.p1.edge": {
+   "designed": 388,
+   "neuron_index": 145910,
+   "bodyId": 802132
+  },
+  "add.fa0.p1.edge_inh": {
+   "designed": 389,
+   "neuron_index": 164408,
+   "bodyId": 933157
+  },
+  "add.fa0.p1.veto": {
+   "designed": 390,
+   "neuron_index": 145133,
+   "bodyId": 801105
+  },
+  "add.fa0.p0.edge": {
+   "designed": 391,
+   "neuron_index": 144393,
+   "bodyId": 800095
+  },
+  "add.fa0.p0.edge_inh": {
+   "designed": 392,
+   "neuron_index": 161048,
+   "bodyId": 903604
+  },
+  "add.fa0.p0.veto": {
+   "designed": 393,
+   "neuron_index": 259,
+   "bodyId": 10281
+  },
+  "add.fa0.s.y1.u": {
+   "designed": 394,
+   "neuron_index": 160600,
+   "bodyId": 902304
+  },
+  "add.fa0.s.y1.v": {
+   "designed": 395,
+   "neuron_index": 146994,
+   "bodyId": 803563
+  },
+  "add.fa0.s.y0.u": {
+   "designed": 396,
+   "neuron_index": 129665,
+   "bodyId": 518604
+  },
+  "add.fa0.s.y0.v": {
+   "designed": 397,
+   "neuron_index": 97172,
+   "bodyId": 131748
+  },
+  "add.fa0.s.y1.a.edge": {
+   "designed": 398,
+   "neuron_index": 144512,
+   "bodyId": 800263
+  },
+  "add.fa0.s.y1.a.edge_inh": {
+   "designed": 399,
+   "neuron_index": 144499,
+   "bodyId": 800245
+  },
+  "add.fa0.s.y1.a.veto": {
+   "designed": 400,
+   "neuron_index": 145228,
+   "bodyId": 801229
+  },
+  "add.fa0.s.y1.b.edge": {
+   "designed": 401,
+   "neuron_index": 144707,
+   "bodyId": 800525
+  },
+  "add.fa0.s.y1.b.edge_inh": {
+   "designed": 402,
+   "neuron_index": 144754,
+   "bodyId": 800578
+  },
+  "add.fa0.s.y1.b.veto": {
+   "designed": 403,
+   "neuron_index": 6049,
+   "bodyId": 16593
+  },
+  "add.fa0.s.y0.a.edge": {
+   "designed": 404,
+   "neuron_index": 149086,
+   "bodyId": 806137
+  },
+  "add.fa0.s.y0.a.edge_inh": {
+   "designed": 405,
+   "neuron_index": 148129,
+   "bodyId": 804973
+  },
+  "add.fa0.s.y0.a.veto": {
+   "designed": 406,
+   "neuron_index": 144785,
+   "bodyId": 800622
+  },
+  "add.fa0.s.y0.b.edge": {
+   "designed": 407,
+   "neuron_index": 146056,
+   "bodyId": 802337
+  },
+  "add.fa0.s.y0.b.edge_inh": {
+   "designed": 408,
+   "neuron_index": 144402,
+   "bodyId": 800111
+  },
+  "add.fa0.s.y0.b.veto": {
+   "designed": 409,
+   "neuron_index": 145533,
+   "bodyId": 801621
+  },
+  "add.fa1.c1.u": {
+   "designed": 410,
+   "neuron_index": 132299,
+   "bodyId": 524412
+  },
+  "add.fa1.c1.v": {
+   "designed": 411,
+   "neuron_index": 332,
+   "bodyId": 10360
+  },
+  "add.fa1.c0.u": {
+   "designed": 412,
+   "neuron_index": 144423,
+   "bodyId": 800135
+  },
+  "add.fa1.c0.v": {
+   "designed": 413,
+   "neuron_index": 161115,
+   "bodyId": 903819
+  },
+  "add.fa1.g.edge": {
+   "designed": 414,
+   "neuron_index": 3837,
+   "bodyId": 14123
+  },
+  "add.fa1.g.edge_inh": {
+   "designed": 415,
+   "neuron_index": 3140,
+   "bodyId": 13357
+  },
+  "add.fa1.g.veto": {
+   "designed": 416,
+   "neuron_index": 623,
+   "bodyId": 10671
+  },
+  "add.fa1.k.edge": {
+   "designed": 417,
+   "neuron_index": 160654,
+   "bodyId": 902445
+  },
+  "add.fa1.k.edge_inh": {
+   "designed": 418,
+   "neuron_index": 144571,
+   "bodyId": 800342
+  },
+  "add.fa1.k.veto": {
+   "designed": 419,
+   "neuron_index": 16363,
+   "bodyId": 28131
+  },
+  "add.fa1.cinr0.d0": {
+   "designed": 420,
+   "neuron_index": 4746,
+   "bodyId": 15141
+  },
+  "add.fa1.cinr0.d1": {
+   "designed": 421,
+   "neuron_index": 132346,
+   "bodyId": 524521
+  },
+  "add.fa1.cinr0.d2": {
+   "designed": 422,
+   "neuron_index": 2926,
+   "bodyId": 13125
+  },
+  "add.fa1.cinr0.d3": {
+   "designed": 423,
+   "neuron_index": 304,
+   "bodyId": 10329
+  },
+  "add.fa1.cinr0.d4": {
+   "designed": 424,
+   "neuron_index": 1137,
+   "bodyId": 11228
+  },
+  "add.fa1.cinr1.d0": {
+   "designed": 425,
+   "neuron_index": 5585,
+   "bodyId": 16084
+  },
+  "add.fa1.cinr1.d1": {
+   "designed": 426,
+   "neuron_index": 4336,
+   "bodyId": 14687
+  },
+  "add.fa1.cinr1.d2": {
+   "designed": 427,
+   "neuron_index": 374,
+   "bodyId": 10406
+  },
+  "add.fa1.cinr1.d3": {
+   "designed": 428,
+   "neuron_index": 29,
+   "bodyId": 10038
+  },
+  "add.fa1.cinr1.d4": {
+   "designed": 429,
+   "neuron_index": 4106,
+   "bodyId": 14429
+  },
+  "add.fa1.p1.edge": {
+   "designed": 430,
+   "neuron_index": 130641,
+   "bodyId": 520300
+  },
+  "add.fa1.p1.edge_inh": {
+   "designed": 431,
+   "neuron_index": 1395,
+   "bodyId": 11495
+  },
+  "add.fa1.p1.veto": {
+   "designed": 432,
+   "neuron_index": 86070,
+   "bodyId": 114607
+  },
+  "add.fa1.p0.edge": {
+   "designed": 433,
+   "neuron_index": 123430,
+   "bodyId": 256420
+  },
+  "add.fa1.p0.edge_inh": {
+   "designed": 434,
+   "neuron_index": 4380,
+   "bodyId": 14734
+  },
+  "add.fa1.p0.veto": {
+   "designed": 435,
+   "neuron_index": 29390,
+   "bodyId": 42890
+  },
+  "add.fa1.s.y1.u": {
+   "designed": 436,
+   "neuron_index": 3730,
+   "bodyId": 14004
+  },
+  "add.fa1.s.y1.v": {
+   "designed": 437,
+   "neuron_index": 14422,
+   "bodyId": 25959
+  },
+  "add.fa1.s.y0.u": {
+   "designed": 438,
+   "neuron_index": 58249,
+   "bodyId": 77336
+  },
+  "add.fa1.s.y0.v": {
+   "designed": 439,
+   "neuron_index": 62360,
+   "bodyId": 82516
+  },
+  "add.fa1.s.y1.a.edge": {
+   "designed": 440,
+   "neuron_index": 3217,
+   "bodyId": 13439
+  },
+  "add.fa1.s.y1.a.edge_inh": {
+   "designed": 441,
+   "neuron_index": 132210,
+   "bodyId": 524251
+  },
+  "add.fa1.s.y1.a.veto": {
+   "designed": 442,
+   "neuron_index": 4537,
+   "bodyId": 14909
+  },
+  "add.fa1.s.y1.b.edge": {
+   "designed": 443,
+   "neuron_index": 2143,
+   "bodyId": 12292
+  },
+  "add.fa1.s.y1.b.edge_inh": {
+   "designed": 444,
+   "neuron_index": 1055,
+   "bodyId": 11142
+  },
+  "add.fa1.s.y1.b.veto": {
+   "designed": 445,
+   "neuron_index": 154970,
+   "bodyId": 813320
+  },
+  "add.fa1.s.y0.a.edge": {
+   "designed": 446,
+   "neuron_index": 126962,
+   "bodyId": 514021
+  },
+  "add.fa1.s.y0.a.edge_inh": {
+   "designed": 447,
+   "neuron_index": 87,
+   "bodyId": 10101
+  },
+  "add.fa1.s.y0.a.veto": {
+   "designed": 448,
+   "neuron_index": 22082,
+   "bodyId": 34624
+  },
+  "add.fa1.s.y0.b.edge": {
+   "designed": 449,
+   "neuron_index": 278,
+   "bodyId": 10301
+  },
+  "add.fa1.s.y0.b.edge_inh": {
+   "designed": 450,
+   "neuron_index": 16408,
+   "bodyId": 28181
+  },
+  "add.fa1.s.y0.b.veto": {
+   "designed": 451,
+   "neuron_index": 162839,
+   "bodyId": 909219
+  },
+  "add.fa2.c1.u": {
+   "designed": 452,
+   "neuron_index": 7816,
+   "bodyId": 18575
+  },
+  "add.fa2.c1.v": {
+   "designed": 453,
+   "neuron_index": 17557,
+   "bodyId": 29484
+  },
+  "add.fa2.c0.u": {
+   "designed": 454,
+   "neuron_index": 145183,
+   "bodyId": 801168
+  },
+  "add.fa2.c0.v": {
+   "designed": 455,
+   "neuron_index": 147196,
+   "bodyId": 803818
+  },
+  "add.fa2.g.edge": {
+   "designed": 456,
+   "neuron_index": 1569,
+   "bodyId": 11681
+  },
+  "add.fa2.g.edge_inh": {
+   "designed": 457,
+   "neuron_index": 26287,
+   "bodyId": 39382
+  },
+  "add.fa2.g.veto": {
+   "designed": 458,
+   "neuron_index": 130930,
+   "bodyId": 520792
+  },
+  "add.fa2.k.edge": {
+   "designed": 459,
+   "neuron_index": 9760,
+   "bodyId": 20748
+  },
+  "add.fa2.k.edge_inh": {
+   "designed": 460,
+   "neuron_index": 1311,
+   "bodyId": 11407
+  },
+  "add.fa2.k.veto": {
+   "designed": 461,
+   "neuron_index": 3094,
+   "bodyId": 13305
+  },
+  "add.fa2.cinr0.d0": {
+   "designed": 462,
+   "neuron_index": 10934,
+   "bodyId": 22058
+  },
+  "add.fa2.cinr0.d1": {
+   "designed": 463,
+   "neuron_index": 773,
+   "bodyId": 10834
+  },
+  "add.fa2.cinr0.d2": {
+   "designed": 464,
+   "neuron_index": 126705,
+   "bodyId": 513537
+  },
+  "add.fa2.cinr0.d3": {
+   "designed": 465,
+   "neuron_index": 3377,
+   "bodyId": 13618
+  },
+  "add.fa2.cinr0.d4": {
+   "designed": 466,
+   "neuron_index": 3384,
+   "bodyId": 13626
+  },
+  "add.fa2.cinr1.d0": {
+   "designed": 467,
+   "neuron_index": 45,
+   "bodyId": 10054
+  },
+  "add.fa2.cinr1.d1": {
+   "designed": 468,
+   "neuron_index": 3716,
+   "bodyId": 13989
+  },
+  "add.fa2.cinr1.d2": {
+   "designed": 469,
+   "neuron_index": 5215,
+   "bodyId": 15671
+  },
+  "add.fa2.cinr1.d3": {
+   "designed": 470,
+   "neuron_index": 2348,
+   "bodyId": 12510
+  },
+  "add.fa2.cinr1.d4": {
+   "designed": 471,
+   "neuron_index": 143766,
+   "bodyId": 578394
+  },
+  "add.fa2.p1.edge": {
+   "designed": 472,
+   "neuron_index": 4359,
+   "bodyId": 14712
+  },
+  "add.fa2.p1.edge_inh": {
+   "designed": 473,
+   "neuron_index": 4291,
+   "bodyId": 14640
+  },
+  "add.fa2.p1.veto": {
+   "designed": 474,
+   "neuron_index": 4944,
+   "bodyId": 15360
+  },
+  "add.fa2.p0.edge": {
+   "designed": 475,
+   "neuron_index": 108,
+   "bodyId": 10122
+  },
+  "add.fa2.p0.edge_inh": {
+   "designed": 476,
+   "neuron_index": 4466,
+   "bodyId": 14831
+  },
+  "add.fa2.p0.veto": {
+   "designed": 477,
+   "neuron_index": 3012,
+   "bodyId": 13221
+  },
+  "add.fa2.s.y1.u": {
+   "designed": 478,
+   "neuron_index": 125846,
+   "bodyId": 511956
+  },
+  "add.fa2.s.y1.v": {
+   "designed": 479,
+   "neuron_index": 864,
+   "bodyId": 10934
+  },
+  "add.fa2.s.y0.u": {
+   "designed": 480,
+   "neuron_index": 4000,
+   "bodyId": 14309
+  },
+  "add.fa2.s.y0.v": {
+   "designed": 481,
+   "neuron_index": 2407,
+   "bodyId": 12573
+  },
+  "add.fa2.s.y1.a.edge": {
+   "designed": 482,
+   "neuron_index": 3656,
+   "bodyId": 13924
+  },
+  "add.fa2.s.y1.a.edge_inh": {
+   "designed": 483,
+   "neuron_index": 2395,
+   "bodyId": 12561
+  },
+  "add.fa2.s.y1.a.veto": {
+   "designed": 484,
+   "neuron_index": 3519,
+   "bodyId": 13774
+  },
+  "add.fa2.s.y1.b.edge": {
+   "designed": 485,
+   "neuron_index": 575,
+   "bodyId": 10617
+  },
+  "add.fa2.s.y1.b.edge_inh": {
+   "designed": 486,
+   "neuron_index": 2413,
+   "bodyId": 12580
+  },
+  "add.fa2.s.y1.b.veto": {
+   "designed": 487,
+   "neuron_index": 1345,
+   "bodyId": 11441
+  },
+  "add.fa2.s.y0.a.edge": {
+   "designed": 488,
+   "neuron_index": 4861,
+   "bodyId": 15266
+  },
+  "add.fa2.s.y0.a.edge_inh": {
+   "designed": 489,
+   "neuron_index": 2473,
+   "bodyId": 12645
+  },
+  "add.fa2.s.y0.a.veto": {
+   "designed": 490,
+   "neuron_index": 2555,
+   "bodyId": 12731
+  },
+  "add.fa2.s.y0.b.edge": {
+   "designed": 491,
+   "neuron_index": 132793,
+   "bodyId": 525350
+  },
+  "add.fa2.s.y0.b.edge_inh": {
+   "designed": 492,
+   "neuron_index": 7419,
+   "bodyId": 18124
+  },
+  "add.fa2.s.y0.b.veto": {
+   "designed": 493,
+   "neuron_index": 361,
+   "bodyId": 10392
+  },
+  "add.fa3.c1.u": {
+   "designed": 494,
+   "neuron_index": 1420,
+   "bodyId": 11521
+  },
+  "add.fa3.c1.v": {
+   "designed": 495,
+   "neuron_index": 1189,
+   "bodyId": 11281
+  },
+  "add.fa3.c0.u": {
+   "designed": 496,
+   "neuron_index": 71,
+   "bodyId": 10084
+  },
+  "add.fa3.c0.v": {
+   "designed": 497,
+   "neuron_index": 126,
+   "bodyId": 10140
+  },
+  "add.fa3.g.edge": {
+   "designed": 498,
+   "neuron_index": 1787,
+   "bodyId": 11914
+  },
+  "add.fa3.g.veto": {
+   "designed": 500,
+   "neuron_index": 8941,
+   "bodyId": 19828
+  },
+  "add.fa3.k.edge": {
+   "designed": 501,
+   "neuron_index": 134656,
+   "bodyId": 530777
+  },
+  "add.fa3.k.edge_inh": {
+   "designed": 502,
+   "neuron_index": 153,
+   "bodyId": 10169
+  },
+  "add.fa3.k.veto": {
+   "designed": 503,
+   "neuron_index": 1495,
+   "bodyId": 11603
+  },
+  "add.fa3.cinr0.d0": {
+   "designed": 504,
+   "neuron_index": 9759,
+   "bodyId": 20747
+  },
+  "add.fa3.cinr0.d1": {
+   "designed": 505,
+   "neuron_index": 130445,
+   "bodyId": 519926
+  },
+  "add.fa3.cinr0.d2": {
+   "designed": 506,
+   "neuron_index": 134082,
+   "bodyId": 529641
+  },
+  "add.fa3.cinr0.d3": {
+   "designed": 507,
+   "neuron_index": 3548,
+   "bodyId": 13805
+  },
+  "add.fa3.cinr0.d4": {
+   "designed": 508,
+   "neuron_index": 144591,
+   "bodyId": 800375
+  },
+  "add.fa3.cinr1.d0": {
+   "designed": 509,
+   "neuron_index": 7597,
+   "bodyId": 18325
+  },
+  "add.fa3.cinr1.d1": {
+   "designed": 510,
+   "neuron_index": 8380,
+   "bodyId": 19197
+  },
+  "add.fa3.cinr1.d2": {
+   "designed": 511,
+   "neuron_index": 144666,
+   "bodyId": 800472
+  },
+  "add.fa3.cinr1.d3": {
+   "designed": 512,
+   "neuron_index": 145983,
+   "bodyId": 802233
+  },
+  "add.fa3.cinr1.d4": {
+   "designed": 513,
+   "neuron_index": 144527,
+   "bodyId": 800283
+  },
+  "add.fa3.p1.edge": {
+   "designed": 514,
+   "neuron_index": 5106,
+   "bodyId": 15547
+  },
+  "add.fa3.p1.edge_inh": {
+   "designed": 515,
+   "neuron_index": 147428,
+   "bodyId": 804100
+  },
+  "add.fa3.p1.veto": {
+   "designed": 516,
+   "neuron_index": 131871,
+   "bodyId": 523591
+  },
+  "add.fa3.p0.edge": {
+   "designed": 517,
+   "neuron_index": 144530,
+   "bodyId": 800288
+  },
+  "add.fa3.p0.edge_inh": {
+   "designed": 518,
+   "neuron_index": 144619,
+   "bodyId": 800411
+  },
+  "add.fa3.p0.veto": {
+   "designed": 519,
+   "neuron_index": 161965,
+   "bodyId": 906393
+  },
+  "add.fa3.s.y1.u": {
+   "designed": 520,
+   "neuron_index": 161499,
+   "bodyId": 905025
+  },
+  "add.fa3.s.y1.v": {
+   "designed": 521,
+   "neuron_index": 144660,
+   "bodyId": 800464
+  },
+  "add.fa3.s.y0.u": {
+   "designed": 522,
+   "neuron_index": 149039,
+   "bodyId": 806081
+  },
+  "add.fa3.s.y0.v": {
+   "designed": 523,
+   "neuron_index": 150306,
+   "bodyId": 807588
+  },
+  "add.fa3.s.y1.a.edge": {
+   "designed": 524,
+   "neuron_index": 148896,
+   "bodyId": 805908
+  },
+  "add.fa3.s.y1.a.edge_inh": {
+   "designed": 525,
+   "neuron_index": 161994,
+   "bodyId": 906476
+  },
+  "add.fa3.s.y1.a.veto": {
+   "designed": 526,
+   "neuron_index": 10224,
+   "bodyId": 21267
+  },
+  "add.fa3.s.y1.b.edge": {
+   "designed": 527,
+   "neuron_index": 145242,
+   "bodyId": 801248
+  },
+  "add.fa3.s.y1.b.edge_inh": {
+   "designed": 528,
+   "neuron_index": 152718,
+   "bodyId": 810485
+  },
+  "add.fa3.s.y1.b.veto": {
+   "designed": 529,
+   "neuron_index": 161686,
+   "bodyId": 905514
+  },
+  "add.fa3.s.y0.a.edge": {
+   "designed": 530,
+   "neuron_index": 146606,
+   "bodyId": 803061
+  },
+  "add.fa3.s.y0.a.edge_inh": {
+   "designed": 531,
+   "neuron_index": 147067,
+   "bodyId": 803652
+  },
+  "add.fa3.s.y0.a.veto": {
+   "designed": 532,
+   "neuron_index": 147928,
+   "bodyId": 804722
+  },
+  "add.fa3.s.y0.b.edge": {
+   "designed": 533,
+   "neuron_index": 29869,
+   "bodyId": 43436
+  },
+  "add.fa3.s.y0.b.edge_inh": {
+   "designed": 534,
+   "neuron_index": 145690,
+   "bodyId": 801824
+  },
+  "add.fa3.s.y0.b.veto": {
+   "designed": 535,
+   "neuron_index": 1823,
+   "bodyId": 11951
+  },
+  "out.b0r0.edge": {
+   "designed": 536,
+   "neuron_index": 125215,
+   "bodyId": 424866
+  },
+  "out.b0r0.edge_inh": {
+   "designed": 537,
+   "neuron_index": 126500,
+   "bodyId": 513174
+  },
+  "out.b0r1.edge": {
+   "designed": 538,
+   "neuron_index": 161222,
+   "bodyId": 904121
+  },
+  "out.b0r1.edge_inh": {
+   "designed": 539,
+   "neuron_index": 146151,
+   "bodyId": 802461
+  },
+  "out.b1r0.edge": {
+   "designed": 540,
+   "neuron_index": 145613,
+   "bodyId": 801728
+  },
+  "out.b1r0.edge_inh": {
+   "designed": 541,
+   "neuron_index": 160863,
+   "bodyId": 903139
+  },
+  "out.b1r1.edge": {
+   "designed": 542,
+   "neuron_index": 131148,
+   "bodyId": 521262
+  },
+  "out.b1r1.edge_inh": {
+   "designed": 543,
+   "neuron_index": 1470,
+   "bodyId": 11578
+  },
+  "out.b2r0.edge": {
+   "designed": 544,
+   "neuron_index": 139,
+   "bodyId": 10155
+  },
+  "out.b2r0.edge_inh": {
+   "designed": 545,
+   "neuron_index": 69,
+   "bodyId": 10082
+  },
+  "out.b2r1.edge": {
+   "designed": 546,
+   "neuron_index": 130839,
+   "bodyId": 520590
+  },
+  "out.b2r1.edge_inh": {
+   "designed": 547,
+   "neuron_index": 295,
+   "bodyId": 10319
+  },
+  "out.b3r0.edge": {
+   "designed": 548,
+   "neuron_index": 15144,
+   "bodyId": 26764
+  },
+  "out.b3r0.edge_inh": {
+   "designed": 549,
+   "neuron_index": 3912,
+   "bodyId": 14210
+  },
+  "out.b3r1.edge": {
+   "designed": 550,
+   "neuron_index": 144459,
+   "bodyId": 800182
+  },
+  "out.b3r1.edge_inh": {
+   "designed": 551,
+   "neuron_index": 144343,
+   "bodyId": 800020
+  },
+  "out.b4r0.edge": {
+   "designed": 552,
+   "neuron_index": 126283,
+   "bodyId": 512745
+  },
+  "out.b4r0.edge_inh": {
+   "designed": 553,
+   "neuron_index": 4525,
+   "bodyId": 14897
+  },
+  "out.b4r1.edge": {
+   "designed": 554,
+   "neuron_index": 5540,
+   "bodyId": 16029
+  },
+  "out.b4r1.edge_inh": {
+   "designed": 555,
+   "neuron_index": 35532,
+   "bodyId": 49945
+  },
+  "Q.faultL.u": {
+   "designed": 556,
+   "neuron_index": 58651,
+   "bodyId": 77868
+  },
+  "Q.faultL.v": {
+   "designed": 557,
+   "neuron_index": 166036,
+   "bodyId": 919015263
+  },
+  "P.wd.start": {
+   "designed": 558,
+   "neuron_index": 1066,
+   "bodyId": 11155
+  },
+  "P.wd.start.edge": {
+   "designed": 559,
+   "neuron_index": 122477,
+   "bodyId": 233071
+  },
+  "P.wd.start.edge_inh": {
+   "designed": 560,
+   "neuron_index": 127543,
+   "bodyId": 514988
+  },
+  "P.wd.hop0": {
+   "designed": 561,
+   "neuron_index": 130185,
+   "bodyId": 519460
+  },
+  "P.wd.hop1": {
+   "designed": 562,
+   "neuron_index": 161655,
+   "bodyId": 905415
+  },
+  "P.wd.hop2": {
+   "designed": 563,
+   "neuron_index": 145483,
+   "bodyId": 801550
+  },
+  "P.wd.hop3": {
+   "designed": 564,
+   "neuron_index": 7427,
+   "bodyId": 18134
+  },
+  "P.wd.hop4": {
+   "designed": 565,
+   "neuron_index": 820,
+   "bodyId": 10885
+  },
+  "P.wd.hop5": {
+   "designed": 566,
+   "neuron_index": 4184,
+   "bodyId": 14521
+  },
+  "P.wd.hop6": {
+   "designed": 567,
+   "neuron_index": 443,
+   "bodyId": 10479
+  },
+  "P.wd.hop7": {
+   "designed": 568,
+   "neuron_index": 131959,
+   "bodyId": 523772
+  },
+  "P.wd.hop8": {
+   "designed": 569,
+   "neuron_index": 406,
+   "bodyId": 10442
+  },
+  "P.wd.hop9": {
+   "designed": 570,
+   "neuron_index": 144736,
+   "bodyId": 800557
+  },
+  "P.wd.hop10": {
+   "designed": 571,
+   "neuron_index": 145462,
+   "bodyId": 801524
+  },
+  "P.wd.hop11": {
+   "designed": 572,
+   "neuron_index": 144658,
+   "bodyId": 800459
+  },
+  "P.wd.hop12": {
+   "designed": 573,
+   "neuron_index": 148443,
+   "bodyId": 805362
+  },
+  "P.wd.hop13": {
+   "designed": 574,
+   "neuron_index": 1169,
+   "bodyId": 11260
+  },
+  "P.wd.hop14": {
+   "designed": 575,
+   "neuron_index": 634,
+   "bodyId": 10682
+  },
+  "P.wd.hop15": {
+   "designed": 576,
+   "neuron_index": 2478,
+   "bodyId": 12650
+  },
+  "P.wd.hop16": {
+   "designed": 577,
+   "neuron_index": 3515,
+   "bodyId": 13770
+  },
+  "P.wd.hop17": {
+   "designed": 578,
+   "neuron_index": 664,
+   "bodyId": 10713
+  },
+  "P.wd.hop18": {
+   "designed": 579,
+   "neuron_index": 145247,
+   "bodyId": 801253
+  },
+  "P.wd.hop19": {
+   "designed": 580,
+   "neuron_index": 144794,
+   "bodyId": 800640
+  },
+  "P.wd.hop20": {
+   "designed": 581,
+   "neuron_index": 144697,
+   "bodyId": 800510
+  },
+  "P.wd.hop21": {
+   "designed": 582,
+   "neuron_index": 161028,
+   "bodyId": 903564
+  },
+  "P.wd.hop22": {
+   "designed": 583,
+   "neuron_index": 4495,
+   "bodyId": 14863
+  },
+  "P.wd.hop23": {
+   "designed": 584,
+   "neuron_index": 1032,
+   "bodyId": 11116
+  },
+  "P.wd.hop24": {
+   "designed": 585,
+   "neuron_index": 144558,
+   "bodyId": 800323
+  },
+  "P.wd.hop25": {
+   "designed": 586,
+   "neuron_index": 144561,
+   "bodyId": 800329
+  },
+  "P.wd.hop26": {
+   "designed": 587,
+   "neuron_index": 144918,
+   "bodyId": 800804
+  },
+  "P.wd.hop27": {
+   "designed": 588,
+   "neuron_index": 144549,
+   "bodyId": 800313
+  },
+  "P.wd.hop28": {
+   "designed": 589,
+   "neuron_index": 146766,
+   "bodyId": 803256
+  },
+  "P.wd.hop29": {
+   "designed": 590,
+   "neuron_index": 108210,
+   "bodyId": 154726
+  },
+  "P.wd.hop30": {
+   "designed": 591,
+   "neuron_index": 146950,
+   "bodyId": 803501
+  },
+  "P.wd.hop31": {
+   "designed": 592,
+   "neuron_index": 144675,
+   "bodyId": 800483
+  },
+  "P.wd.hop32": {
+   "designed": 593,
+   "neuron_index": 146251,
+   "bodyId": 802594
+  },
+  "P.wd.hop33": {
+   "designed": 594,
+   "neuron_index": 160810,
+   "bodyId": 902982
+  },
+  "P.wd.hop34": {
+   "designed": 595,
+   "neuron_index": 3410,
+   "bodyId": 13656
+  },
+  "P.wd.hop35": {
+   "designed": 596,
+   "neuron_index": 1782,
+   "bodyId": 11908
+  },
+  "P.wd.hop36": {
+   "designed": 597,
+   "neuron_index": 3763,
+   "bodyId": 14040
+  },
+  "P.wd.hop37": {
+   "designed": 598,
+   "neuron_index": 3090,
+   "bodyId": 13301
+  },
+  "P.wd.hop38": {
+   "designed": 599,
+   "neuron_index": 132551,
+   "bodyId": 524893
+  },
+  "P.wd.hop39": {
+   "designed": 600,
+   "neuron_index": 1086,
+   "bodyId": 11176
+  },
+  "P.wd.hop40": {
+   "designed": 601,
+   "neuron_index": 4465,
+   "bodyId": 14830
+  },
+  "P.wd.hop41": {
+   "designed": 602,
+   "neuron_index": 125741,
+   "bodyId": 508595
+  },
+  "P.wd.hop42": {
+   "designed": 603,
+   "neuron_index": 129999,
+   "bodyId": 519132
+  },
+  "P.wd.hop43": {
+   "designed": 604,
+   "neuron_index": 45917,
+   "bodyId": 62207
+  },
+  "P.wd.hop44": {
+   "designed": 605,
+   "neuron_index": 142454,
+   "bodyId": 555726
+  },
+  "P.wd.hop45": {
+   "designed": 606,
+   "neuron_index": 144800,
+   "bodyId": 800646
+  },
+  "P.wd.hop46": {
+   "designed": 607,
+   "neuron_index": 7051,
+   "bodyId": 17713
+  },
+  "P.wd.hop47": {
+   "designed": 608,
+   "neuron_index": 144355,
+   "bodyId": 800037
+  },
+  "P.wd.hop48": {
+   "designed": 609,
+   "neuron_index": 145029,
+   "bodyId": 800961
+  },
+  "P.wd.hop49": {
+   "designed": 610,
+   "neuron_index": 144365,
+   "bodyId": 800054
+  },
+  "P.wd.hop50": {
+   "designed": 611,
+   "neuron_index": 8749,
+   "bodyId": 19612
+  },
+  "P.wd.hop51": {
+   "designed": 612,
+   "neuron_index": 126847,
+   "bodyId": 513811
+  },
+  "P.wd.hop52": {
+   "designed": 613,
+   "neuron_index": 126848,
+   "bodyId": 513812
+  },
+  "P.wd.hop53": {
+   "designed": 614,
+   "neuron_index": 37,
+   "bodyId": 10046
+  },
+  "P.wd.hop54": {
+   "designed": 615,
+   "neuron_index": 330,
+   "bodyId": 10358
+  },
+  "P.wd.hop55": {
+   "designed": 616,
+   "neuron_index": 160512,
+   "bodyId": 900035
+  },
+  "P.wd.hop56": {
+   "designed": 617,
+   "neuron_index": 1466,
+   "bodyId": 11573
+  },
+  "P.wd.hop57": {
+   "designed": 618,
+   "neuron_index": 132154,
+   "bodyId": 524156
+  },
+  "P.wd.hop58": {
+   "designed": 619,
+   "neuron_index": 199,
+   "bodyId": 10218
+  },
+  "P.wd.hop59": {
+   "designed": 620,
+   "neuron_index": 145240,
+   "bodyId": 801246
+  },
+  "P.wd.hop60": {
+   "designed": 621,
+   "neuron_index": 145600,
+   "bodyId": 801710
+  },
+  "P.wd.hop61": {
+   "designed": 622,
+   "neuron_index": 144483,
+   "bodyId": 800221
+  },
+  "P.wd.hop62": {
+   "designed": 623,
+   "neuron_index": 60037,
+   "bodyId": 79634
+  },
+  "P.wd.hop63": {
+   "designed": 624,
+   "neuron_index": 160666,
+   "bodyId": 902476
+  },
+  "P.wd.hop64": {
+   "designed": 625,
+   "neuron_index": 160750,
+   "bodyId": 902760
+  },
+  "P.wd.hop65": {
+   "designed": 626,
+   "neuron_index": 144415,
+   "bodyId": 800125
+  },
+  "P.wd.hop66": {
+   "designed": 627,
+   "neuron_index": 31170,
+   "bodyId": 44917
+  },
+  "P.wd.hop67": {
+   "designed": 628,
+   "neuron_index": 161414,
+   "bodyId": 904800
+  },
+  "P.wd.hop68": {
+   "designed": 629,
+   "neuron_index": 160854,
+   "bodyId": 903118
+  },
+  "P.wd.hop69": {
+   "designed": 630,
+   "neuron_index": 6848,
+   "bodyId": 17490
+  },
+  "P.wd.hop70": {
+   "designed": 631,
+   "neuron_index": 4790,
+   "bodyId": 15188
+  },
+  "P.wd.hop71": {
+   "designed": 632,
+   "neuron_index": 144964,
+   "bodyId": 800868
+  },
+  "P.wd.hop72": {
+   "designed": 633,
+   "neuron_index": 1533,
+   "bodyId": 11645
+  },
+  "P.wd.hop73": {
+   "designed": 634,
+   "neuron_index": 506,
+   "bodyId": 10544
+  },
+  "P.wd.hop74": {
+   "designed": 635,
+   "neuron_index": 166275,
+   "bodyId": 1050379364
+  },
+  "P.wd.hop75": {
+   "designed": 636,
+   "neuron_index": 2837,
+   "bodyId": 13030
+  },
+  "P.wd.hop76": {
+   "designed": 637,
+   "neuron_index": 2105,
+   "bodyId": 12251
+  },
+  "P.wd.hop77": {
+   "designed": 638,
+   "neuron_index": 239,
+   "bodyId": 10260
+  },
+  "P.wd.hop78": {
+   "designed": 639,
+   "neuron_index": 415,
+   "bodyId": 10451
+  },
+  "P.wd.hop79": {
+   "designed": 640,
+   "neuron_index": 4720,
+   "bodyId": 15110
+  },
+  "P.wd.hop80": {
+   "designed": 641,
+   "neuron_index": 143651,
+   "bodyId": 575082
+  },
+  "P.wd.hop81": {
+   "designed": 642,
+   "neuron_index": 8399,
+   "bodyId": 19217
+  },
+  "P.wd.hop82": {
+   "designed": 643,
+   "neuron_index": 404,
+   "bodyId": 10440
+  },
+  "P.wd.hop83": {
+   "designed": 644,
+   "neuron_index": 2524,
+   "bodyId": 12700
+  },
+  "P.wd.hop84": {
+   "designed": 645,
+   "neuron_index": 1753,
+   "bodyId": 11877
+  },
+  "P.wd.hop85": {
+   "designed": 646,
+   "neuron_index": 23120,
+   "bodyId": 35790
+  },
+  "P.wd.hop86": {
+   "designed": 647,
+   "neuron_index": 2887,
+   "bodyId": 13084
+  },
+  "P.wd.hop87": {
+   "designed": 648,
+   "neuron_index": 902,
+   "bodyId": 10975
+  },
+  "P.wd.hop88": {
+   "designed": 649,
+   "neuron_index": 505,
+   "bodyId": 10543
+  },
+  "P.wd.hop89": {
+   "designed": 650,
+   "neuron_index": 144435,
+   "bodyId": 800149
+  },
+  "P.wd.hop90": {
+   "designed": 651,
+   "neuron_index": 146951,
+   "bodyId": 803502
+  },
+  "P.wd.hop91": {
+   "designed": 652,
+   "neuron_index": 8036,
+   "bodyId": 18811
+  },
+  "P.wd.hop92": {
+   "designed": 653,
+   "neuron_index": 1142,
+   "bodyId": 11233
+  },
+  "P.wd.hop93": {
+   "designed": 654,
+   "neuron_index": 146049,
+   "bodyId": 802328
+  },
+  "P.wd.hop94": {
+   "designed": 655,
+   "neuron_index": 145387,
+   "bodyId": 801429
+  },
+  "P.wd.hop95": {
+   "designed": 656,
+   "neuron_index": 146139,
+   "bodyId": 802443
+  },
+  "P.wd.hop96": {
+   "designed": 657,
+   "neuron_index": 146487,
+   "bodyId": 802910
+  },
+  "P.wd.hop97": {
+   "designed": 658,
+   "neuron_index": 150174,
+   "bodyId": 807432
+  },
+  "P.wd.hop98": {
+   "designed": 659,
+   "neuron_index": 144762,
+   "bodyId": 800588
+  },
+  "P.wd.hop99": {
+   "designed": 660,
+   "neuron_index": 24124,
+   "bodyId": 36930
+  },
+  "P.wd.timeout.u": {
+   "designed": 661,
+   "neuron_index": 6793,
+   "bodyId": 17428
+  },
+  "P.wd.timeout.v": {
+   "designed": 662,
+   "neuron_index": 1842,
+   "bodyId": 11970
+  },
+  "P.wd.cancel_inh": {
+   "designed": 663,
+   "neuron_index": 126211,
+   "bodyId": 512613
+  }
+ },
+ "unplaced": [
+  "Q.comp.c2_0.ign.edge_inh",
+  "add.fa3.x.y0.a.edge_inh",
+  "add.fa3.g.edge_inh"
+ ],
+ "missing": [
+  {
+   "src": "P.reset_relay1",
+   "dst": "P.reset_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_relay1",
+   "dst": "P.reset_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_relay2",
+   "dst": "P.reset_relay3",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b0r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b0r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b0r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b0r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b1r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b1r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b1r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b1r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b2r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b2r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b2r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b2r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b3r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b3r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b3r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b3r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b4r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b4r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b4r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b4r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b5r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b5r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b5r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b5r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b6r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b6r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b6r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b6r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b7r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b7r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b7r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b7r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b8r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b8r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b8r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.b8r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b0r1.v",
+   "dst": "Q.b0r1.p",
+   "quanta": -3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r0.v",
+   "dst": "Q.b1r0.p",
+   "quanta": -3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r1.v",
+   "dst": "Q.b1r1.p",
+   "quanta": -3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b4r0.u",
+   "dst": "Q.b4r0.v",
+   "quanta": -3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b4r0.v",
+   "dst": "Q.b4r0.p",
+   "quanta": -3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b0r0.set_relay2",
+   "dst": "Q.b0r0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b0r0.set_relay2",
+   "dst": "Q.b0r0.set_relay3",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b0r1.set_relay1",
+   "dst": "Q.b0r1.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r0.set",
+   "dst": "Q.b1r0.set_relay1",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r0.set_relay1",
+   "dst": "Q.b1r0.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r0.set_relay2",
+   "dst": "Q.b1r0.set_relay3",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r1.set",
+   "dst": "Q.b1r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r1.set_relay2",
+   "dst": "Q.b1r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b1r1.set_relay2",
+   "dst": "Q.b1r1.set_relay3",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b2r0.set",
+   "dst": "Q.b2r0.set_relay1",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b2r0.set_relay1",
+   "dst": "Q.b2r0.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b2r1.set",
+   "dst": "Q.b2r1.set_relay1",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b2r1.set_relay1",
+   "dst": "Q.b2r1.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b3r0.set_relay1",
+   "dst": "Q.b3r0.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b3r1.set_relay1",
+   "dst": "Q.b3r1.set_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b3r1.set_relay2",
+   "dst": "Q.b3r1.set_relay3",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b4r0.set_relay3",
+   "dst": "Q.b4r0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b4r1.set",
+   "dst": "Q.b4r1.set_relay1",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b4r1.set_relay1",
+   "dst": "Q.b4r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid2.L.u",
+   "dst": "Q.valid2.L.v",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid2.L.u",
+   "dst": "Q.valid2.ign.hold_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid2.ign.edge",
+   "dst": "Q.valid2.L.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b3r0.p",
+   "dst": "Q.valid3.or",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.b3r1.p",
+   "dst": "Q.valid3.or",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid3.or",
+   "dst": "Q.valid3.ign.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid4.ign.edge_inh",
+   "dst": "Q.valid4.ign.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.valid4.ign.hold_inh",
+   "dst": "Q.valid4.ign.edge",
+   "quanta": -905,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.L.v",
+   "dst": "Q.comp.c2_0.L.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.and",
+   "dst": "Q.comp.c2_0.ign.edge_inh",
+   "quanta": 3621,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "Q.comp.c2_0.ign.edge_inh",
+   "dst": "Q.comp.c2_0.ign.edge",
+   "quanta": -7966,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "Q.comp.c2_0.L.u",
+   "dst": "Q.comp.c2_0.ign.hold_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.ign.edge",
+   "dst": "Q.comp.c2_0.L.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_relay1",
+   "dst": "Q.reset_relay2",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid0.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid0.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid1.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid1.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid2.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid2.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid3.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid3.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid4.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid4.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_0.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_0.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_1.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_1.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c1_0.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c1_0.L.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c2_0.L.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid0.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid1.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid2.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid3.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.valid4.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_0.and",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c0_1.and",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c1_0.and",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.comp.c2_0.and",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b0r0.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b0r1.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b1r1.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b2r0.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b2r1.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b3r0.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b3r1.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b4r0.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.b4r1.u",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b8r0.u",
+   "dst": "add.active.or",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b8r1.u",
+   "dst": "add.active.or",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "add.active.L.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "add.active.or",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.v",
+   "dst": "add.a1r0.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.v",
+   "dst": "add.a1r1.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b1r1.u",
+   "dst": "add.a1r0.g.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.g.edge",
+   "dst": "add.a1r0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.g.edge",
+   "dst": "add.a1r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.v",
+   "dst": "add.a2r0.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.v",
+   "dst": "add.a2r1.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.g.edge_inh",
+   "dst": "add.a2r0.g.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.g.edge",
+   "dst": "add.a2r0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.g.edge_inh",
+   "dst": "add.a2r1.g.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.g.edge",
+   "dst": "add.a2r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r0.g.veto",
+   "dst": "add.a3r0.g.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r0.g.edge",
+   "dst": "add.a3r0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r1.g.veto",
+   "dst": "add.a3r1.g.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r1.g.edge",
+   "dst": "add.a3r1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.b1r1.d4",
+   "dst": "add.b1r1.d5",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b6r1.u",
+   "dst": "add.b2r1.d0",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.a.edge_inh",
+   "dst": "add.fa0.x.y1.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.a.veto",
+   "dst": "add.fa0.x.y1.a.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.a.edge",
+   "dst": "add.fa0.x.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.b.edge_inh",
+   "dst": "add.fa0.x.y1.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.b.veto",
+   "dst": "add.fa0.x.y1.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y1.b.edge",
+   "dst": "add.fa0.x.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.a.edge_inh",
+   "dst": "add.fa0.x.y0.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.a.veto",
+   "dst": "add.fa0.x.y0.a.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.a.edge",
+   "dst": "add.fa0.x.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.b.edge_inh",
+   "dst": "add.fa0.x.y0.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.b.veto",
+   "dst": "add.fa0.x.y0.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.x.y0.b.edge",
+   "dst": "add.fa0.x.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.u",
+   "dst": "add.fa1.x.y1.a.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.u",
+   "dst": "add.fa1.x.y1.a.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.b1r0.d5",
+   "dst": "add.fa1.x.y1.a.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.u",
+   "dst": "add.fa1.x.y1.b.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.u",
+   "dst": "add.fa1.x.y1.b.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.b1r1.d5",
+   "dst": "add.fa1.x.y1.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.u",
+   "dst": "add.fa1.x.y0.a.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r1.u",
+   "dst": "add.fa1.x.y0.a.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.b1r0.d5",
+   "dst": "add.fa1.x.y0.a.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.b1r1.d5",
+   "dst": "add.fa1.x.y0.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.x.y1.a.edge",
+   "dst": "add.fa2.x.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.u",
+   "dst": "add.fa2.x.y1.b.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.u",
+   "dst": "add.fa2.x.y1.b.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.x.y1.b.edge",
+   "dst": "add.fa2.x.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.u",
+   "dst": "add.fa2.x.y0.b.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.u",
+   "dst": "add.fa2.x.y0.b.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y1.b.edge_inh",
+   "dst": "add.fa3.x.y1.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y1.b.veto",
+   "dst": "add.fa3.x.y1.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r1.u",
+   "dst": "add.fa3.x.y0.a.edge_inh",
+   "quanta": 3621,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "add.fa3.x.y0.a.edge_inh",
+   "dst": "add.fa3.x.y0.a.edge",
+   "quanta": -7966,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "add.b3r0.d5",
+   "dst": "add.fa3.x.y0.a.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a0r1.u",
+   "dst": "add.fa0.g.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.g.veto",
+   "dst": "add.fa0.g.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.g.edge",
+   "dst": "add.fa0.c1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a0r0.u",
+   "dst": "add.fa0.k.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.k.veto",
+   "dst": "add.fa0.k.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.k.edge",
+   "dst": "add.fa0.c0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.p1.edge",
+   "dst": "add.fa0.c1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.p0.edge",
+   "dst": "add.fa0.c0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y1.a.edge",
+   "dst": "add.fa0.s.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y1.b.edge_inh",
+   "dst": "add.fa0.s.y1.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y1.b.edge",
+   "dst": "add.fa0.s.y1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.a.edge_inh",
+   "dst": "add.fa0.s.y0.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.a.veto",
+   "dst": "add.fa0.s.y0.a.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.a.edge",
+   "dst": "add.fa0.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.b.veto",
+   "dst": "add.fa0.s.y0.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.b.edge",
+   "dst": "add.fa0.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.u",
+   "dst": "add.fa1.k.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a1r0.u",
+   "dst": "add.fa1.k.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.c0.u",
+   "dst": "add.fa1.cinr0.d0",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.c1.u",
+   "dst": "add.fa1.cinr1.d0",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.p0.edge_inh",
+   "dst": "add.fa1.p0.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.p0.veto",
+   "dst": "add.fa1.p0.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y1.u",
+   "dst": "add.fa1.s.y1.v",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.cinr0.d4",
+   "dst": "add.fa1.s.y1.a.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y1.a.edge_inh",
+   "dst": "add.fa1.s.y1.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y1.a.veto",
+   "dst": "add.fa1.s.y1.a.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y1.b.veto",
+   "dst": "add.fa1.s.y1.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.x.y0.u",
+   "dst": "add.fa1.s.y0.a.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.a.edge",
+   "dst": "add.fa1.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.b.edge_inh",
+   "dst": "add.fa1.s.y0.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.b.veto",
+   "dst": "add.fa1.s.y0.b.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.b.edge",
+   "dst": "add.fa1.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.u",
+   "dst": "add.fa2.g.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r1.u",
+   "dst": "add.fa2.g.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.g.edge",
+   "dst": "add.fa2.c1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.u",
+   "dst": "add.fa2.k.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a2r0.u",
+   "dst": "add.fa2.k.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.k.edge",
+   "dst": "add.fa2.c0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr0.d3",
+   "dst": "add.fa2.cinr0.d4",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr1.d3",
+   "dst": "add.fa2.cinr1.d4",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.p1.edge",
+   "dst": "add.fa2.c1.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr0.d4",
+   "dst": "add.fa2.p0.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr0.d4",
+   "dst": "add.fa2.p0.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.p0.edge",
+   "dst": "add.fa2.c0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr1.d4",
+   "dst": "add.fa2.s.y1.b.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr1.d4",
+   "dst": "add.fa2.s.y1.b.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.x.y1.u",
+   "dst": "add.fa2.s.y1.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr1.d4",
+   "dst": "add.fa2.s.y0.a.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.cinr1.d4",
+   "dst": "add.fa2.s.y0.a.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.s.y0.b.edge_inh",
+   "dst": "add.fa2.s.y0.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.x.y1.u",
+   "dst": "add.fa2.s.y0.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.a3r1.u",
+   "dst": "add.fa3.g.edge_inh",
+   "quanta": 3621,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "add.fa3.g.edge_inh",
+   "dst": "add.fa3.g.edge",
+   "quanta": -7966,
+   "reason": "endpoint unplaced"
+  },
+  {
+   "src": "add.fa2.c0.u",
+   "dst": "add.fa3.cinr0.d0",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.c1.u",
+   "dst": "add.fa3.cinr1.d0",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.cinr1.d4",
+   "dst": "add.fa3.p1.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.p1.edge_inh",
+   "dst": "add.fa3.p1.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.p1.veto",
+   "dst": "add.fa3.p1.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y0.u",
+   "dst": "add.fa3.p0.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.p0.edge",
+   "dst": "add.fa3.c0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.cinr0.d4",
+   "dst": "add.fa3.s.y1.a.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y1.a.edge_inh",
+   "dst": "add.fa3.s.y1.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y1.a.veto",
+   "dst": "add.fa3.s.y1.a.edge",
+   "quanta": -1810,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y1.b.edge_inh",
+   "dst": "add.fa3.s.y1.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y1.u",
+   "dst": "add.fa3.s.y1.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.a.edge_inh",
+   "dst": "add.fa3.s.y0.a.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y0.u",
+   "dst": "add.fa3.s.y0.a.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.a.edge",
+   "dst": "add.fa3.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.b.edge_inh",
+   "dst": "add.fa3.s.y0.b.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.x.y1.u",
+   "dst": "add.fa3.s.y0.b.veto",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.b.edge",
+   "dst": "add.fa3.s.y0.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa0.s.y0.u",
+   "dst": "out.b0r0.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b0r0.edge_inh",
+   "dst": "out.b0r0.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.u",
+   "dst": "out.b1r0.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y0.u",
+   "dst": "out.b1r0.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa1.s.y1.u",
+   "dst": "out.b1r1.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b1r1.edge",
+   "dst": "Q.b1r1.set",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa2.s.y1.u",
+   "dst": "out.b2r1.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b2r1.edge",
+   "dst": "Q.b2r1.set",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.u",
+   "dst": "out.b3r0.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "add.fa3.s.y0.u",
+   "dst": "out.b3r0.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b3r1.edge_inh",
+   "dst": "out.b3r1.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b3r1.edge",
+   "dst": "Q.b3r1.set",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "out.b4r1.edge_inh",
+   "dst": "out.b4r1.edge",
+   "quanta": -7966,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a0r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a0r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a0r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a0r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a1r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a1r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a1r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a1r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a2r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a2r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a2r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a2r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a3r0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a3r0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a3r1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.a3r1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.x.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.x.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.x.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.x.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.x.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.x.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.x.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.x.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.x.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.x.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.x.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.x.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.x.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.x.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.x.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.x.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.c1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.c1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.c0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.c0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.s.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.s.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.s.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa0.s.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.c1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.c1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.c0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.c0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.s.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.s.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.s.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa1.s.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.c1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.c1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.c0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.c0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.s.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.s.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.s.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa2.s.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.c1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.c1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.c0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.c0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.s.y1.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.s.y1.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.s.y0.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "add.fa3.s.y0.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.L.u",
+   "dst": "P.reset",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.L.u",
+   "dst": "P.reset_edge",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.fault0.and",
+   "dst": "Q.faultL.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.fault1.and",
+   "dst": "Q.faultL.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.fault2.and",
+   "dst": "Q.faultL.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.fault3.and",
+   "dst": "Q.faultL.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.fault4.and",
+   "dst": "Q.faultL.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "Q.comp.c2_0.L.u",
+   "quanta": -5432,
+   "reason": "wrong sign (mixed-sign designed neuron)"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "Q.comp.c2_0.L.v",
+   "quanta": -5432,
+   "reason": "wrong sign (mixed-sign designed neuron)"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "Q.comp.c2_0.and",
+   "quanta": -5432,
+   "reason": "wrong sign (mixed-sign designed neuron)"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "Q.comp.c2_0.ign.edge",
+   "quanta": -5432,
+   "reason": "wrong sign (mixed-sign designed neuron)"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "P.reset",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "P.reset_edge",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.faultL.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.reset_inh",
+   "dst": "Q.faultL.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b0r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b0r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b1r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b1r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b2r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b4r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b4r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b5r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b5r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b6r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b7r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b7r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b8r0.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.b8r1.u",
+   "dst": "P.wd.start",
+   "quanta": 766,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.start",
+   "dst": "P.wd.start.edge",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.start",
+   "dst": "P.wd.start.edge_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.timeout.v",
+   "dst": "P.wd.timeout.u",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.hop99",
+   "dst": "P.wd.timeout.u",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.comp.c2_0.L.u",
+   "dst": "P.wd.cancel_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "Q.faultL.u",
+   "dst": "P.wd.cancel_inh",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop0",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop1",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop2",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop3",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop4",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop5",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop6",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop7",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop8",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop9",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop10",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop11",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop12",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop13",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop14",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop15",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop16",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop17",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop18",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop19",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop20",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop21",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop22",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop23",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop24",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop25",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop26",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop27",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop28",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop29",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop30",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop31",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop32",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop33",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop34",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop35",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop36",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop37",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop38",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop39",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop40",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop41",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop42",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop43",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop44",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop45",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop46",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop47",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop48",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop49",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop50",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop51",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop52",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop53",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop54",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop55",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop56",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop57",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop59",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop60",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop61",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop62",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop63",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop64",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop65",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop66",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop67",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop68",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop69",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop70",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop71",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop72",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop73",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop74",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop75",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop76",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop77",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop78",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop79",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop80",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop81",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop82",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop83",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop84",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop85",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop86",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop87",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop88",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop89",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop90",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop91",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop92",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop93",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop94",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop95",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop96",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop97",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop98",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.cancel_inh",
+   "dst": "P.wd.hop99",
+   "quanta": -5432,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.timeout.u",
+   "dst": "P.reset",
+   "quanta": 4655,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.wd.timeout.u",
+   "dst": "P.reset_edge",
+   "quanta": 3621,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.wd.timeout.u",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  },
+  {
+   "src": "P.reset_inh",
+   "dst": "P.wd.timeout.v",
+   "quanta": -2716,
+   "reason": "no anatomical edge strong enough"
+  }
+ ]
+}
