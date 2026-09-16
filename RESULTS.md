@@ -926,6 +926,16 @@ stalled copies under noise and was reverted; the perspective duplicate stays ope
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 
+**And with textures, under neural pacing (2026-09-16):** `examples/doom2.c` — the same engine
+with an 8 × 8 brick texture read by hit position and row — rendered two 40 × 25 frames on the
+H200 (8 copies of 686,351 neurons) with the frame's phase order kept by the substrate's own
+phase gates and no host barrier: all 2,000 pixels equal to the reference, no fault, 1,982 s
+of neural time, 7 h 53 min of wall time (`docs/img/doom2_40_0_neural.png`). The frame loop's
+ordering label for this run is *neural*; the token dealing stays hybrid. Its cost is visible:
+about 7 s of neural time per token against 3 s under host pacing, because the compiler's
+wrapping counter is a three-cell feedback loop every token waits for — a one-hot ring
+counter advanced by done pulses is being built to replace it.
+
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
 then chases the player one step per tick with collision (`examples/doom4.c`), validated by

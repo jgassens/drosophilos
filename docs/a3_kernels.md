@@ -451,7 +451,12 @@ statistical confirmation; the campaign runner can now retain the relevant eviden
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
 (`ubuf[col] = ((hx >> 1) + (hy >> 1)) & 7`), and the pixel pass reads the texture row by a
 reciprocal table and a multiply (`v = ((prow - top) * recip2[h]) >> 8`) from an 8 × 8 brick
-texture with a bright and a dark bank (beyond two cells). `doom3.c` adds one *thing* in Doom's
+texture with a bright and a dark bank (beyond two cells). Measured neurally on Juno's H200
+under **neural pacing** (8 copies × 686,351 neurons, 40 × 25, two frames with the player moved
+between them): 2,000 / 2,000 pixels equal to the reference, no fault or timeout, 1,982 s of
+neural time in 7 h 53 min of wall time (`docs/img/doom2_40_0_neural.png`, `_1_`;
+`docs/a2/doom2_40_h200.json`). The neural time is ~7 s per token, against ~3 s for `doom1.c`
+under host pacing: the pacing counter's cost, §11. `doom3.c` adds one *thing* in Doom's
 sense, a billboard sprite at a fixed level position: the tick kernel projects it into camera
 space once per frame with the trig tables (depth and side offset, then the screen column,
 half-width and height by the reciprocal table), a fourth kernel — a sprite pass over the 160
