@@ -1,0 +1,214 @@
+{
+ "k_max": 4.0,
+ "restarts": 2,
+ "time_limit_s": 300.0,
+ "seeds": [
+  0,
+  1
+ ],
+ "real": {
+  "label": "real MCNS",
+  "latch_capacity": {
+   "threshold": 57,
+   "mutual_pairs": 1223,
+   "max_disjoint_pairs": 343,
+   "strong_core": 3197
+  },
+  "placement": {
+   "carried": 683,
+   "edges": 1144,
+   "carried_fraction": 0.597,
+   "hard": {
+    "carried": 648,
+    "total": 884
+   },
+   "hub": {
+    "carried": 35,
+    "total": 256
+   },
+   "neurons_placed": 606,
+   "neurons_total": 614,
+   "seconds": 15.3
+  }
+ },
+ "controls": [
+  {
+   "label": "configuration seed 0",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 24,
+    "max_disjoint_pairs": 24,
+    "strong_core": 6348
+   },
+   "placement": {
+    "carried": 570,
+    "edges": 1144,
+    "carried_fraction": 0.4983,
+    "hard": {
+     "carried": 565,
+     "total": 884
+    },
+    "hub": {
+     "carried": 5,
+     "total": 256
+    },
+    "neurons_placed": 595,
+    "neurons_total": 614,
+    "seconds": 17.1
+   },
+   "mode": "configuration",
+   "seed": 0,
+   "degree_drift": {
+    "self_loops_dropped": 0,
+    "multi_edges_merged": 90008,
+    "out_synapse_l1_drift": 0.0,
+    "in_synapse_l1_drift": 0.0,
+    "neurons_with_out_drift": 0,
+    "neurons_with_in_drift": 0
+   }
+  },
+  {
+   "label": "configuration seed 1",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 24,
+    "max_disjoint_pairs": 22,
+    "strong_core": 6353
+   },
+   "placement": {
+    "carried": 579,
+    "edges": 1144,
+    "carried_fraction": 0.5061,
+    "hard": {
+     "carried": 538,
+     "total": 884
+    },
+    "hub": {
+     "carried": 41,
+     "total": 256
+    },
+    "neurons_placed": 602,
+    "neurons_total": 614,
+    "seconds": 14.3
+   },
+   "mode": "configuration",
+   "seed": 1,
+   "degree_drift": {
+    "self_loops_dropped": 0,
+    "multi_edges_merged": 89135,
+    "out_synapse_l1_drift": 0.0,
+    "in_synapse_l1_drift": 0.0,
+    "neurons_with_out_drift": 0,
+    "neurons_with_in_drift": 0
+   }
+  },
+  {
+   "label": "weights seed 0",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 62,
+    "max_disjoint_pairs": 62,
+    "strong_core": 1386
+   },
+   "placement": {
+    "carried": 510,
+    "edges": 1144,
+    "carried_fraction": 0.4458,
+    "hard": {
+     "carried": 508,
+     "total": 884
+    },
+    "hub": {
+     "carried": 2,
+     "total": 256
+    },
+    "neurons_placed": 538,
+    "neurons_total": 614,
+    "seconds": 13.4
+   },
+   "mode": "weights",
+   "seed": 0
+  },
+  {
+   "label": "weights seed 1",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 62,
+    "max_disjoint_pairs": 62,
+    "strong_core": 1515
+   },
+   "placement": {
+    "carried": 506,
+    "edges": 1144,
+    "carried_fraction": 0.4423,
+    "hard": {
+     "carried": 487,
+     "total": 884
+    },
+    "hub": {
+     "carried": 19,
+     "total": 256
+    },
+    "neurons_placed": 541,
+    "neurons_total": 614,
+    "seconds": 12.1
+   },
+   "mode": "weights",
+   "seed": 1
+  },
+  {
+   "label": "transmitter seed 0",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 2888,
+    "max_disjoint_pairs": 715,
+    "strong_core": 6973
+   },
+   "placement": {
+    "carried": 745,
+    "edges": 1144,
+    "carried_fraction": 0.6512,
+    "hard": {
+     "carried": 721,
+     "total": 884
+    },
+    "hub": {
+     "carried": 24,
+     "total": 256
+    },
+    "neurons_placed": 613,
+    "neurons_total": 614,
+    "seconds": 33.4
+   },
+   "mode": "transmitter",
+   "seed": 0
+  },
+  {
+   "label": "transmitter seed 1",
+   "latch_capacity": {
+    "threshold": 57,
+    "mutual_pairs": 2482,
+    "max_disjoint_pairs": 698,
+    "strong_core": 6331
+   },
+   "placement": {
+    "carried": 760,
+    "edges": 1144,
+    "carried_fraction": 0.6643,
+    "hard": {
+     "carried": 725,
+     "total": 884
+    },
+    "hub": {
+     "carried": 35,
+     "total": 256
+    },
+    "neurons_placed": 614,
+    "neurons_total": 614,
+    "seconds": 19.5
+   },
+   "mode": "transmitter",
+   "seed": 1
+  }
+ ]
+}
