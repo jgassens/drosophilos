@@ -217,7 +217,9 @@ proxy_readout:
       q into the OR against a 2,586 q single need. Only the same stray into BOTH proxies of a bit at once
       makes a false valid on that bit, from 1.8x (four OR-input spikes); a false completion would need
       that on every bit (measured: 1.8x into all eight proxies at once completes). tests/test_ffregister.py::test_stray_into_proxy_while_clear_gives_no_false_completion'
-  campaign: mix_B_10000_transfers (2026-09-16, laptop, TorchSim float64, proxy readout) - non_ok 37 /
+  campaign_4pulse: mix_B_10000_transfers (2026-09-16, Juno CPU 408918, TorchSim float64, proxy readout, four-pulse
+    SET train) - non_ok 0 / 10000, wrong_value 0, non_ok_upper_95 3.0e-4, silent_wrong_upper_95 3.0e-4
+  campaign_3pulse: mix_B_10000_transfers (2026-09-16, laptop, TorchSim float64, proxy readout, three-pulse SET) - non_ok 37 /
     10000 (timeout 21, no_accept 10, no_cleared 1, no_ready 3, wrong_value_after_failstop 2), fresh wrong_value
     0, non_ok_upper_95 0.0049, silent_wrong_upper_95 0.0006 (fresh 0.0003), accept_latency_ms mean 171.2
     p99 194.8 max 440.0
@@ -248,8 +250,9 @@ proxy_readout:
     all times, so an idle register costs 8 x 213 Hz'
   - lib/contracts.measure_contract classes a role 'Q.b*.p' as control, not latch (its rule is '.u'/'.v'),
     so the by-class split moves the proxies' spikes (8 x 213 Hz while SET) from latch to control
-  - 'status: measured 2026-09-16, not frozen; mix-B campaign: 0.37 % fail-stop, 0 fresh wrong, 2 wrong
-    after a fail-stop in 10,000 (u readout: 0.48 %, 0 wrong; the latch channel: ~1e-5)'
+  - 'status: measured 2026-09-16, not frozen; mix-B campaign on the four-pulse SET train: 0 non-ok and 0 wrong
+    in 10,000 (upper 95 % 3.0e-4 each); three-pulse train: 0.37 % fail-stop, 0 fresh wrong, 2 wrong after a
+    fail-stop (u readout: 0.48 %, 0 wrong; the latch channel: ~1e-5)'
   reset_latency:
     clear_ms_mean: 4.9
     clear_ms_max: 6.2
@@ -295,7 +298,9 @@ proxy_readout:
       decoded_errors: 0
       upper_95: 0.014867039231272054
       test: tests/test_ffregister.py::test_flipflop_register_200_random_transfers
-    mix_B_10000: '0.0037 non-ok in 10,000 (21 timeouts, 10 no ACCEPT, 1 no CLEARED, 3 no READY: fail-stop;
+    mix_B_10000_four_pulse_set: '0 non-ok, 0 wrong in 10,000 (upper 95 % 3.0e-4); Juno 408918, 2026-09-16, after the
+      lockstep fix (docs/a1_flipflop.md, Lockstep); tests/test_ffregister.py::test_mix_b_10000_transfers'
+    mix_B_10000_three_pulse_set: '0.0037 non-ok in 10,000 (21 timeouts, 10 no ACCEPT, 1 no CLEARED, 3 no READY: fail-stop;
       and 2 wrong values, both the transfer right after a timeout in the same node, loaded by the fixed-period
       harness before that transfer''s READY), 0 wrong values on a clean transfer (upper 95 % 3.0e-4; 6.3e-4
       counting the two); u readout: 0.0048, 0 wrong. Every non-ok traced in chunk 0 (30 of 4,000, four

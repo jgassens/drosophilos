@@ -413,7 +413,10 @@ turns into two wrong words in 10,000 (one of them from the proxy's 12 ms). The f
 upstream of the readout — keep a perturbed pair out of lockstep on SET (done: the four-pulse
 train, §Lockstep; ±4 % weights and ±0.2 mV bias were enough to get there at some phases with
 three) and lengthen the reset trigger's re-arm past the proxy's lag — and neither is a proxy
-change.
+change. **Re-run on the four-pulse train (Juno 408918, the same 10,000 mix-B transfers, seed 0):
+0 non-ok and 0 wrong** — no timeout, no missing ACCEPT, CLEARED or READY, no cascade (upper
+95 % limit 3.0 × 10⁻⁴ on each). Every one of the 37 fail-stops was the lockstep entry, and the
+reset trigger's re-arm was never reached without one. The contract keeps both figures.
 
 `lib/contracts.measure_contract` classes a `Q.b*.p` role as control, not latch (its rule is
 `.u`/`.v`), so the by-class spike split in the contract moves the proxies' spikes from latch to

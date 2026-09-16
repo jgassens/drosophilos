@@ -298,7 +298,8 @@ def test_mix_b_10000_transfers():
     print(s)
     assert s["transactions"] == 10000
     assert s["counts"]["wrong_value"] == 0, s["counts"]  # a clean transfer is never misread
-    # measured 2026-09-16, u readout (first build): 48 non-ok in 10,000 — 43 timeouts, 4 no ACCEPT,
+    # measured 2026-09-16 on the four-pulse SET train (Juno 408918): 0 non-ok, 0 wrong in 10,000.
+    # Before the lockstep fix — u readout (first build): 48 non-ok in 10,000 — 43 timeouts, 4 no ACCEPT,
     # 1 no READY, all fail-stop, 0 wrong values; proxy readout (this build): 37 non-ok — 21
     # timeouts, 10 no ACCEPT, 1 no CLEARED, 3 no READY, and 2 wrong values, both the transfer
     # after a timeout in the same node, loaded by the fixed-period harness before that
