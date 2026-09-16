@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from test_embed_netlist import latch_relay_netlist, synthetic_mcns
+from test_embed_netlist import latch_relay_netlist, synthetic_ff_mcns, synthetic_mcns, two_flipflop_netlist
 
 from drosophilos.connectome.embed_h0 import Policy
 from drosophilos.connectome.embed_image import (all_missing, build_image, from_sources, none_missing, of_class,
                                                 simulate_channel)
 from drosophilos.connectome.embed_netlist import Placement, place_netlist
 from drosophilos.connectome.mcns_download import DEFAULT_DIR, path_of
+from drosophilos.protocol.flipflop import BIAS_213HZ_MV
 from drosophilos.sim.model import QUANTA_PER_SYNAPSE, Params
 from drosophilos.sim.ref64 import RefSim
 
@@ -111,6 +112,53 @@ def test_latch_ignites_through_relay_and_holds_on_the_image():
     periods = np.diff(np.sort(np.concatenate([u, v])))
     assert 0.5 * drive.loop_period_steps <= np.median(periods) <= drive.loop_period_steps
     assert len(tr.neuron_steps(ids["src"])) == 1
+
+
+def test_image_carries_the_flipflop_biases():
+    """Two flip-flops joined by an edge relay, placed on the synthetic connectome: the image's
+    topology carries the designed biases at the image indices, the manifest lists one "bias"
+    parameter edit per biased host (counted as `biases`), and full_graph_topology puts each bias
+    on the host's full-graph index (a synthetic neuron keeps its bias after the m.n real ones)."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, drive, ids = two_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_ff_mcns(policy, drive)
+    pl = place_netlist(net, m, policy, time_limit_s=20, restarts=2, verbose=False)
+    assert pl.carried == 6 and not pl.unplaced
+    img = build_image(net, m, pl, policy)
+    members = [ids["u0"], ids["v0"], ids["u1"], ids["v1"]]
+    assert img.topology.bias is not None and img.topology.bias.shape == (net.n,)
+    assert all(img.topology.bias[d] == BIAS_213HZ_MV for d in members) and img.topology.bias[ids["edge"]] == 0.0
+    assert sorted(img.topology.biased_neurons().tolist()) == sorted(members)
+    assert img.counts["biases"] == 4 and img.counts["biases_synthetic"] == 0 and len(img.biases) == 4
+    edits = [e for e in img.manifest["parameter_edits"] if e["kind"] == "bias"]
+    assert len(edits) == 4 and {e["post"] for e in edits} == {int(img.bodies[d]) for d in members}
+    assert all(e["pre"] is None and e["anatomical"] == 0.0 and e["new"] == BIAS_213HZ_MV for e in edits)
+    assert len(img.manifest["parameter_edits"]) == 6 + 4 + len(img.parasitic)
+    # the two wrong-sign readout edges are Profile 3 here (added), so the image is Profile 3; without them, Profile 2 with the biases
+    assert img.profile == 3 and len(img.profile3) == 2 and all("wrong sign" in e.reason for e in img.profile3)
+    img2 = build_image(net, m, pl, policy, profile3=none_missing)
+    assert img2.profile == 2 and img2.manifest["profile"] == 2 and img2.counts["biases"] == 4 and img2.topology.bias is not None
+    # the whole graph: biases at the hosts' indices, nowhere else
+    params = Params()
+    base = m.topology(params)
+    assert base.bias is None
+    fg = full_graph_topology(m, params, img2, base=base)
+    assert fg.topology.bias is not None and fg.counts["biases"] == 4 and fg.counts["biases_synthetic"] == 0
+    assert sorted(fg.topology.biased_neurons().tolist()) == sorted(pl.mapping[d] for d in members)
+    assert all(fg.topology.bias[pl.mapping[d]] == BIAS_213HZ_MV for d in members)
+    # one member unplaced: a synthetic neuron after the m.n real ones, its bias with it
+    pl3 = Placement({k: v for k, v in pl.mapping.items() if k != ids["v1"]}, [ids["v1"]], 0, [], 0, 0.0)
+    img3 = build_image(net, m, pl3, policy, profile3=all_missing)
+    assert img3.counts["biases"] == 3 and img3.counts["biases_synthetic"] == 1 and len(img3.biases) == 3
+    fg3 = full_graph_topology(m, params, img3, base=base)
+    assert fg3.topology.n == m.n + 1 and fg3.topology.bias[m.n] == BIAS_213HZ_MV and fg3.counts == {**fg3.counts, "biases": 3, "biases_synthetic": 1}
+    # a netlist without biases leaves every topology's bias None, as before
+    net_l, _, ids_l, policy_l, m_l, _, pl_l = _placed_latch_relay()
+    img_l = build_image(net_l, m_l, pl_l, policy_l)
+    assert img_l.topology.bias is None and img_l.counts["biases"] == 0 and not img_l.biases
+    assert full_graph_topology(m_l, params, img_l).topology.bias is None
 
 
 @pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")

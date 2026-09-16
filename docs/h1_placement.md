@@ -639,3 +639,62 @@ two-neuron excitatory latch cannot use. So the measured statement is: the fly's 
 motifs are real and specific (fifty times a random graph's), they are what carries the register
 logic, and about a third of them are of the wrong sign for an excitatory latch — which is one more
 reason an inhibition-based latch design would fit this substrate better than the current one.
+
+## Placing flip-flops
+
+Tool: `place_netlist` now reads a third pair motif off the netlist, `ffpair` — two neurons with a
+non-zero `bias` that inhibit each other (`protocol.flipflop.add_flipflop`; the loop is 1.0× loop
+quanta, ≥ 57 synapses at `k_max = 4`) — and places it as a unit on a real **mutual inhibitory pair**
+(GABA or glutamate both ways at ≥ the loop threshold) whose members each have at least one
+excitatory input ≥ that threshold from outside the pair: the driven pool `bench/h1_inhpairs.py`
+counted (358 disjoint pairs at `k_max = 4`; `ff_driver=False` opens every mutual inhibitory pair).
+The driver is not needed anatomically — the bias is a Profile 2 parameter edit — so the audit only
+reports how many chosen hosts have one (`Placement.ffpair_drivers`). A flip-flop member is
+inhibitory whatever else it drives: an edge relay reading `.u` puts two *excitatory* edges on a
+GABA-designed neuron, and those are of the wrong sign for any host under Dale's law
+("wrong sign (mixed-sign designed neuron)" in the audit), on this or any connectome. The image
+(`build_image`) carries each designed bias onto its host as a `ParameterEdit("bias", 0 → mV)`,
+counted as `biases` in the manifest (a synthetic neuron keeps its bias as part of its own
+definition: `biases_synthetic`), and into the image topology's `bias`; `full_graph_topology` puts
+each bias on the host's full-graph index. The excitatory latch motif is unchanged
+(`tests/test_embed_netlist.py`, `tests/test_embed_image.py`).
+
+**The toy.** 32 flip-flops in a line, each joined to the next by one edge relay read off the
+previous pair's `u` and igniting the next pair's `u` (`chain_toy_netlist` in
+`tests/test_embed_netlist.py`; 126 neurons, 188 edges), against 32 excitatory latches wired the
+same way. Placement only — nothing here is simulated, and the flip-flop toy is not a working
+circuit (a single ignite pulse never sets a flip-flop; the sign of its readout is the point below).
+Real MCNS, `k_max = 4`, two restarts, seed 0, ~28 s each:
+
+| netlist | objective | carried / carriable / designed | pairs complete | relays complete | hosts' external input synapses: mean / p90 / max | pair members: mean / median | hosts with a driver |
+|---|---|---|---|---|---|---|---|
+| 32 flip-flops | coverage (w = 0) | **126 / 126** / 188 (67 %) | **32 / 32** | 31 / 31 (E, I singles: `edge_inh -> edge` and `edge -> u` all carried) | 3,686 / 7,038 / 14,541 | 3,815 / 2,653 | 64 / 64 |
+| 32 latches | coverage (w = 0) | 162 / 188 / 188 (86 %) | 30 / 32 (2 partial) | 24 / 31 (7 partial) | 6,678 / 13,259 / 49,211 | 5,922 / 5,044 | — |
+| 32 flip-flops | quiet hosts (w = 2) | 102 / 126 / 188 | 20 / 32 (12 partial) | 31 / 31 | 2,017 / 3,607 / 13,004 | 1,374 / 1,232 | 60 / 64 |
+| 32 latches | quiet hosts (w = 2) | 107 / 188 / 188 | 16 / 32 (16 partial) | 15 / 31 | 2,508 / 5,937 / 50,431 | 1,675 / 674 | — |
+
+The 62 edges the flip-flop toy cannot carry are exactly the 31 × 2 readout edges `u -> edge`,
+`u -> edge_inh` (wrong sign); every carriable edge is carried, in one descent with one backtrack
+and no repair. The latch toy loses 26 edges to the strong-edge supply itself (10 `edge -> u`, 6
+`edge_inh -> edge`, 2 loops, 1 neuron unplaced), after 95 backtracks and a 9-edge repair. So on
+the fly's wiring the flip-flop's loop is the *easier* motif to place — 32 driven inhibitory pairs
+under 31 relay targets, all complete — and its hosts take **42 % fewer input synapses from the
+rest of the brain** than the latches' (3,686 against 6,678 per host; the pair members 3,815
+against 5,922: nerve-cord interneurons and central-brain GABAergic cells instead of the latches'
+`PFNv` and antennal-lobe `lLN` hubs), with a third of the parasitic edges to zero (327 against
+1,042). Under the quiet-host objective both toys give up loops for quieter hosts (the repair
+breaks 12 of the 32 flip-flop loops, and 4 members land on neurons with no driver at all) and
+the flip-flops stay ahead: 2,017 against 2,508 mean, and a p90 of 3,607 against 5,937. These
+are placement numbers only; the driven disjoint pool's own mean is 6,677 input synapses per member
+(`docs/h1_inhpairs.json`, `k_max = 4`; `docs/capacity_doom.md` §5 quotes "66" for the same
+figure, which does not match the JSON), so at w = 0 the search already lands on the quieter
+half of that pool.
+
+**What it says.** The flip-flop is placeable today as a *rail* — 32 of 32 pairs on real driven
+inhibitory pairs, biases carried as parameter edits, Profile 2 without the readout edges — but
+not as a *source*: the fly's inhibitory pair can only ever inhibit its readers, so the edge relay
+that reads `.u` as an excitatory train (the primitive every consumer in the protocol uses) has no
+host. The next design step is the inhibitory readout the capacity note asked for: a biased
+excitatory neuron that `u` silences (fires while CLEAR, stops on SET) or a target `u` holds down
+directly, and a relay reading *that* — then the 62 impossible edges become carriable ones, and the
+comparison above can be rerun on a circuit that could also be simulated.

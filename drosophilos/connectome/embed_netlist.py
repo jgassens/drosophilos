@@ -7,18 +7,20 @@ Motif search (`place_netlist`), a maximum-coverage search: every designed edge c
 point, and a motif that cannot be placed whole is placed as well as it can be rather than
 dropped.
 
-1. Motifs are read off the netlist's structure: latches (mutual excitatory pairs), relays
+1. Motifs are read off the netlist's structure: latches (mutual excitatory pairs), flip-flop
+   pairs (mutual inhibitory pairs whose members carry a tonic bias, protocol.flipflop), relays
    (an excitatory relay plus the inhibitory interneuron(s) that share its source and hold it
    down), delay chains (maximal paths of in-degree-one excitatory neurons), hubs (neurons
    whose out-degree or in-degree exceeds `hub_deg` in that direction; their many edges are
    soft: scored, not enforced, since no single real neuron carries them) and singles.
 2. Every designed neuron gets two candidate sets of real neurons. The loose layer: the right
    transmitter, enough strong partners, and membership in a real instance of its own motif
-   (a mutual pair, a relay with an inhibitor, a walk long enough for its chain). The strict
+   (a mutual pair -- for a flip-flop a mutual inhibitory pair whose members each have an
+   excitatory driver -- a relay with an inhibitor, a walk long enough for its chain). The strict
    layer adds the context (a source of k relays needs k real relays; a chain's predecessor a
    walk one edge longer) and arc consistency over the hard edges.
 3. Depth-first search over motifs, most constrained first (fewest strict candidates), each
-   motif assigned as a unit: a latch as a real mutual pair, a relay as a real (E, I) pair, a
+   motif assigned as a unit: a latch or flip-flop as a real mutual pair, a relay as a real (E, I) pair, a
    chain as a real path found by depth-first search over strong cholinergic edges, a hub by
    coverage of its partners' candidates. Candidates are ranked by a lookahead (does every
    neighbouring motif keep a complete instance? plus hub edges satisfied, minus an isolation
@@ -73,6 +75,7 @@ class Placement:
     isolation_weight: float = 0.0
     exposure: dict = field(default_factory=dict)  # the hosts' anatomical synapses from / to neurons outside the circuit (exact)
     objective: float = 0.0  # carried - isolation_weight * sum over hosts of (log1p(in_ext) + 0.25 * log1p(out_ext)) - cap * unplaced
+    ffpair_drivers: dict = field(default_factory=dict)  # flip-flop hosts: {"hosts": placed members, "with_driver": those with an excitatory input >= the loop threshold}
 
     def summary(self, net: Netlist) -> dict:
         ex = self.exposure
@@ -85,7 +88,8 @@ class Placement:
                 "external_in_synapses": ex.get("in_total", 0), "external_out_synapses": ex.get("out_total", 0),
                 "external_in_mean": ex.get("in_mean", 0.0), "external_out_mean": ex.get("out_mean", 0.0),
                 "external_in_max": ex.get("in_max", 0), "external_out_max": ex.get("out_max", 0),
-                "external_in_p90": ex.get("in_p90", 0.0), "external_out_p90": ex.get("out_p90", 0.0)}
+                "external_in_p90": ex.get("in_p90", 0.0), "external_out_p90": ex.get("out_p90", 0.0),
+                "ffpair_hosts": self.ffpair_drivers.get("hosts", 0), "ffpair_hosts_with_driver": self.ffpair_drivers.get("with_driver", 0)}
 
 
 OUT_EXPOSURE_WEIGHT = 0.25  # outputs into the surround count a quarter of inputs from it (inputs are what floods a host)
@@ -228,6 +232,24 @@ class _Anatomy:
             self._memo[("mutual", thr)] = (mask, np.stack([M.row, M.col], 1).astype(np.int32))
         return self._memo[("mutual", thr)]
 
+    def mutual_inh(self, thr: int, driven: bool = True):
+        """(mask of inhibitory neurons in a mutual inhibitory pair >= thr both ways, the pairs):
+        the flip-flop's hosts. With `driven`, only pairs whose members each have at least one
+        excitatory input >= thr (from outside the pair: the partner is inhibitory, so any such
+        input is), the driver a tonic bias stands in for -- bench/h1_inhpairs.py's count."""
+        key = ("mutual_inh", thr, driven)
+        if key not in self._memo:
+            A, _ = self.A(thr, "inh", "inh")
+            M = sp.triu(A.multiply(A.T), k=1).tocoo()
+            pairs = np.stack([M.row, M.col], 1).astype(np.int32)
+            if driven and len(pairs):
+                drv = self.indeg(thr, 1) > 0
+                pairs = pairs[drv[pairs[:, 0]] & drv[pairs[:, 1]]]
+            mask = np.zeros(self.n, bool)
+            mask[pairs.ravel()] = True
+            self._memo[key] = (mask, pairs)
+        return self._memo[key]
+
     def relay(self, r_se: int, r_si: int, r_ie: int):
         """Masks (S, E, I) of the real source/relay/inhibitor triples: S -> E >= r_se (exc -> exc),
         S -> I >= r_si (exc -> inh), I -> E >= r_ie (inh -> exc)."""
@@ -274,14 +296,14 @@ class _Anatomy:
 # ----------------------------------------------------------------------------------------
 @dataclass
 class Motif:
-    kind: str  # latch | relay | chain | hub | single
+    kind: str  # latch | ffpair | relay | chain | hub | single
     nodes: tuple
     edges: list = field(default_factory=list)  # internal hard edge indices
     reqs: dict = field(default_factory=dict)  # kind-specific
 
 
 class _Design:
-    def __init__(self, net: Netlist, policy: Policy, hub_deg: int, hard_hubs=()):
+    def __init__(self, net: Netlist, policy: Policy, hub_deg: int, hard_hubs=(), ff_driver: bool = True):
         self.net = net
         n = self.n = net.n
         self.src = np.asarray(net.src, dtype=np.int64)
@@ -289,11 +311,19 @@ class _Design:
         self.q = np.asarray(net.quanta, dtype=np.int64)
         self.req = np.array([policy.req_count(x) for x in self.q], dtype=np.int32)
         self.esign = np.where(self.q > 0, 1, -1).astype(np.int8)
+        self.bias = np.zeros(n, np.float64)  # the netlist's per-neuron tonic bias (mV); parallel to roles
+        self.bias[: len(net.bias)] = np.asarray(net.bias, dtype=np.float64)[:n]
+        self.ff_driver = ff_driver
         # neuron signs: majority of outgoing edges (Dale's law); a mixed neuron keeps its majority
-        # sign and its minority-sign edges can never be carried
+        # sign and its minority-sign edges can never be carried. A flip-flop member (a biased
+        # neuron in a mutual inhibitory pair with another biased neuron) is inhibitory whatever
+        # else it drives: its loop is what it is, and an excitatory readout edge from it (an edge
+        # relay reading `.u`) is the minority a GABA host cannot carry.
         pos = np.bincount(self.src, weights=(self.q > 0), minlength=n)
         neg = np.bincount(self.src, weights=(self.q < 0), minlength=n)
         self.sign = np.where(pos + neg == 0, 0, np.where(pos >= neg, 1, -1)).astype(np.int8)
+        self.ff_members = self._ff_members()
+        self.sign[list(self.ff_members)] = -1
         self.mixed = [int(d) for d in np.flatnonzero((pos > 0) & (neg > 0))]
         outdeg = np.bincount(self.src, minlength=n)
         indeg = np.bincount(self.dst, minlength=n)
@@ -329,6 +359,18 @@ class _Design:
                 return e
         return None
 
+    def _ff_members(self) -> set:
+        """Designed neurons that are flip-flop members: biased, with an inhibitory edge to a
+        biased neuron that inhibits them back (raw edges, before the sign vote)."""
+        inh_pairs = set()
+        for e in np.flatnonzero((self.q < 0) & (self.bias[self.src] != 0) & (self.bias[self.dst] != 0)).tolist():
+            inh_pairs.add((int(self.src[e]), int(self.dst[e])))
+        members = set()
+        for s, d in inh_pairs:
+            if (d, s) in inh_pairs:
+                members.add(s); members.add(d)
+        return members
+
     def _find_motifs(self):
         n = self.n
         taken = np.zeros(n, bool)
@@ -352,6 +394,22 @@ class _Design:
                     e2 = self._edge(v, u)
                     if e2 is not None:
                         add("latch", (u, v), [e, e2], {"r_uv": int(self.req[e]), "r_vu": int(self.req[e2])})
+                        break
+        # flip-flop pairs: mutual inhibitory hard pairs between biased neurons (protocol.flipflop);
+        # the loop's quanta are whatever the netlist gives (the flip-flop's default is 1.0x loop),
+        # the bias is what marks the pair. Placed on real mutual inhibitory pairs whose members
+        # each have an excitatory driver (ff_driver), as a unit like a latch.
+        for u in sorted(self.ff_members):
+            if taken[u]:
+                continue
+            for e in self.hard_out[u]:
+                v = int(self.dst[e])
+                if v > u and not taken[v] and v in self.ff_members and self.q[e] < 0:
+                    e2 = self._edge(v, u)
+                    if e2 is not None and self.q[e2] < 0:
+                        add("ffpair", (u, v), [e, e2], {"r_uv": int(self.req[e]), "r_vu": int(self.req[e2]),
+                                                         "driver": bool(self.ff_driver),
+                                                         "bias": (float(self.bias[u]), float(self.bias[v]))})
                         break
         # relays: excitatory E with inhibitory I whose only hard output is E and that shares a source with E
         for E in range(n):
@@ -457,6 +515,10 @@ class _Search:
         for mo in D.motifs:
             if mo.kind == "latch":
                 mm, _ = A.mutual(min(mo.reqs["r_uv"], mo.reqs["r_vu"]))
+                for x in mo.nodes:
+                    masks[x] &= mm
+            elif mo.kind == "ffpair":
+                mm, _ = A.mutual_inh(min(mo.reqs["r_uv"], mo.reqs["r_vu"]), mo.reqs["driver"])
                 for x in mo.nodes:
                     masks[x] &= mm
             elif mo.kind == "relay":
@@ -591,7 +653,7 @@ class _Search:
         dn = {x: pd[x] if x in pd else self._free(doms[x]) for x in mo.nodes}
         if any(v.size == 0 for v in dn.values()):
             return False
-        if mo.kind == "latch":
+        if mo.kind in ("latch", "ffpair"):
             u, v = mo.nodes
             r_uv, r_vu = mo.reqs["r_uv"], mo.reqs["r_vu"]
             du, dv = dn[u], dn[v]
@@ -684,6 +746,8 @@ class _Search:
 
     # ---- candidate generators (tier 0: complete instances) -------------------------
     def cands_latch(self, mo: Motif, doms: list):
+        """Real mutual pairs for a latch or a flip-flop pair (the domains are already sign-masked
+        and restricted to members of real pairs of the motif's kind)."""
         u, v = mo.nodes
         r_uv, r_vu = mo.reqs["r_uv"], mo.reqs["r_vu"]
         du, dv = self._free(doms[u]), self._free(doms[v])
@@ -863,7 +927,7 @@ class _Search:
 
     def candidates(self, mo: Motif, doms: list | None = None) -> list:
         doms = self.dom if doms is None else doms
-        if mo.kind == "latch":
+        if mo.kind in ("latch", "ffpair"):
             return self.cands_latch(mo, doms)
         if mo.kind == "relay":
             return self.cands_relay(mo, doms)
@@ -877,7 +941,7 @@ class _Search:
         return self.cands_single(mo, doms)
 
     # ---- variable ordering -----------------------------------------------------------
-    KIND_RANK = {"hub": 0, "latch": 1, "relay": 2, "chain": 3, "single": 4}
+    KIND_RANK = {"hub": 0, "latch": 1, "ffpair": 1, "relay": 2, "chain": 3, "single": 4}
 
     def pick_next(self, done: np.ndarray):
         """Most constrained motif first: the one whose tightest node has the fewest free
@@ -1240,6 +1304,19 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
         by_search[mo.kind][so] = by_search[mo.kind].get(so, 0) + 1
     pl.motifs = motifs
     pl.motifs_search = by_search
+    # flip-flop hosts with an anatomical driver (an excitatory input >= the loop threshold): the
+    # bias is a parameter edit and needs none, so this is reported, not required
+    ff_hosts, ff_drv = 0, 0
+    for mo in D.motifs:
+        if mo.kind != "ffpair":
+            continue
+        thr = min(mo.reqs["r_uv"], mo.reqs["r_vu"])
+        for x in mo.nodes:
+            if real[x] >= 0:
+                ff_hosts += 1
+                ff_drv += int(A.indeg(thr, 1)[int(real[x])] > 0)
+    if ff_hosts:
+        pl.ffpair_drivers = {"hosts": ff_hosts, "with_driver": ff_drv}
     pl.missing_by_class = {f"{a} -> {b}": v for (a, b), v in sorted(missing_by_class.items(), key=lambda kv: -kv[1][0])}
     return pl
 
@@ -1252,7 +1329,7 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
                   max_backtracks: int = 8, backtrack_depth: int = 3, repair_rounds: int = 6, seed: int = 0,
                   strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=(),
                   order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0,
-                  isolation_weight: float = 0.0) -> Placement:
+                  isolation_weight: float = 0.0, ff_driver: bool = True) -> Placement:
     """Motif-level placement with backtracking and forward checking (module docstring), then
     a large-neighbourhood repair. Runs up to `restarts` descents, cycling `strategies`, within
     `time_limit_s`; returns the placement that carries the most designed edges.
@@ -1272,10 +1349,15 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
     placement returned is the restart with the largest objective (carried edges minus the exact
     penalty of its hosts, minus that cap per unplaced neuron); at 0 (the default) this is the
     most edges carried, as before. Placement.exposure and summary report the hosts' external
-    input / output synapses and edges (total, mean, max, p90)."""
+    input / output synapses and edges (total, mean, max, p90).
+    `ff_driver`: a flip-flop pair's hosts are drawn from real mutual inhibitory pairs whose
+    members each have an excitatory input >= the loop threshold (the driver the designed bias
+    stands in for; anatomically unnecessary since the bias is a parameter edit, but the pool
+    bench/h1_inhpairs.py counted); False draws from every mutual inhibitory pair. Either way
+    Placement.ffpair_drivers reports how many chosen hosts have such a driver."""
     t0 = time.time()
     A = _Anatomy(m, policy)
-    D = _Design(net, policy, hub_deg, hard_hubs)
+    D = _Design(net, policy, hub_deg, hard_hubs, ff_driver=ff_driver)
     if verbose:
         kinds = {}
         for mo in D.motifs:

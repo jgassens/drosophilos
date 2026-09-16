@@ -17,6 +17,11 @@ Edges, under the H0 Profile 2 rules (embed_h0.Policy):
   parasitic  every anatomical edge among the hosts that is not a carried designed edge: zeroed
              when policy.zero_parasitic (a documented zero-weight edit), else kept at its
              anatomical quanta (count * QUANTA_PER_SYNAPSE, sign from the host's transmitter).
+  biases     the netlist's per-neuron tonic bias (mV above rest; the flip-flop latch's members,
+             protocol.flipflop) goes onto the host as a Profile 2 parameter edit
+             (ParameterEdit "bias", anatomical 0 -> designed mV; `biases` in the manifest counts)
+             and into the image topology's `bias`; a synthetic neuron keeps its bias as part of
+             its own (Profile 3) definition.
 
 `simulate_channel` runs a four-phase channel (the adder) on an image with the channel's own
 drive and decode; `run_h1_conditions` is the H1 measurement (docs/h1_placement.md).
@@ -83,6 +88,7 @@ class Image:
     counts: dict = field(default_factory=dict)
     manifest: dict = field(default_factory=dict)
     carried_syn: list = field(default_factory=list)  # (src, dst, quanta, delay) per carried designed synapse, designed indices
+    biases: list = field(default_factory=list)  # ParameterEdit per biased designed neuron on a real host (0 mV -> designed mV)
 
     @property
     def profile(self) -> int:
@@ -195,7 +201,11 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
                                        f"{role_key(net.roles[s])} -> {role_key(net.roles[d])}", int(cnt), params.default_delay_steps))
             if not policy.zero_parasitic:
                 src_t.append(s); dst_t.append(d); q_t.append(int(sign[rs]) * int(cnt) * QUANTA_PER_SYNAPSE); dl_t.append(params.default_delay_steps)
-    topo = Topology.from_edges(n, src_t, dst_t, q_t, dl_t)
+    bias = np.zeros(n, np.float64)  # the netlist's tonic biases (mV), image index = designed index
+    bias[: len(net.bias)] = np.asarray(net.bias, dtype=np.float64)[:n]
+    topo = Topology.from_edges(n, src_t, dst_t, q_t, dl_t, bias=bias if np.any(bias) else None)
+    bias_edits = [ParameterEdit("bias", None, int(bodies[d]), 0.0, float(bias[d]), "tonic bias, mV added to the resting potential",
+                                f"{net.roles[d]} bias {bias[d]:g} mV") for d in np.flatnonzero(bias != 0).tolist() if real[d] >= 0]
 
     hist = {}
     lo = 0.0
@@ -219,9 +229,11 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
         "parasitic_abs_quanta": int(sum(abs(e.quanta) for e in parasitic)),
         "scales": hist, "scale_max": round(max(scales.values()), 3) if scales else None,
         "topology_edges": topo.nnz,
+        "biases": len(bias_edits),  # biased designed neurons on real hosts: one parameter edit each
+        "biases_synthetic": int(sum(1 for d in np.flatnonzero(bias != 0).tolist() if real[d] < 0)),
     }
     img = Image(n, topo, real, bodies, synthetic, carried_edges, scales, p3, omitted, parasitic, policy.zero_parasitic, counts,
-                carried_syn=carried_syn)
+                carried_syn=carried_syn, biases=bias_edits)
     if placement.carried and placement.carried != len(carried_edges):
         counts["placement_carried_mismatch"] = placement.carried  # the audit and the image disagree: report it
     img.manifest = image_manifest(net, m, img, policy, params)
@@ -230,9 +242,9 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
 
 def image_manifest(net: Netlist, m: MCNS, img: Image, policy: Policy, params: Params) -> dict:
     """A manifest in the style of connectome/manifest.py: the four graphs (original, retained,
-    active-nonzero, silencing), the parameter edits (carried edges rescaled, parasitic edges
-    zeroed) and the structural edits (Profile 3 edges and synthetic neurons), plus the counts."""
-    edits = list(img.carried)
+    active-nonzero, silencing), the parameter edits (carried edges rescaled, the hosts' tonic
+    biases, parasitic edges zeroed) and the structural edits (Profile 3 edges and synthetic neurons), plus the counts."""
+    edits = list(img.carried) + list(img.biases)
     if img.zero_parasitic:
         edits += [ParameterEdit("weight", int(img.bodies[e.src]), int(img.bodies[e.dst]), e.quanta, 0, "documented zero weight",
                                 f"parasitic edge among circuit neurons ({e.reason})") for e in img.parasitic]
@@ -324,6 +336,8 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
       parasitic  zeroed when the image zeroes them (kept otherwise: they are the anatomy);
       Profile 3  added as new synapses at the designed quanta and delay; the image's synthetic
                  neurons are appended after the m.n real ones;
+      biases     the image topology's per-neuron bias goes onto each host (and synthetic neuron)
+                 at its full-graph index, on top of the base topology's own biases if it has any;
       zero_outputs   also zero every edge from a host to a neuron outside the circuit (H0's
                  outputs-zeroed condition: the circuit cannot disturb the brain);
       zero_inputs    also zero every edge from outside the circuit into a host (the isolated case
@@ -389,11 +403,23 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
         delay = np.concatenate([delay, np.array([e.delay for e in image.profile3], np.int32)])
     if abs(quanta).max() > np.iinfo(np.int32).max:
         raise ValueError("quanta overflow")
-    topo = Topology.from_edges(n_full, src, dst, quanta.astype(np.int32), delay)
+    bias = None
+    n_bias = n_bias_syn = 0
+    if base.bias is not None or image.topology.bias is not None:
+        bias = np.zeros(n_full, np.float64)
+        if base.bias is not None:
+            bias[: m.n] = base.bias
+        if image.topology.bias is not None:
+            biased = np.flatnonzero(image.topology.bias)
+            bias[index_map[biased]] = image.topology.bias[biased]
+            n_bias = int((image.real[biased] >= 0).sum())
+            n_bias_syn = int(len(biased) - n_bias)
+    topo = Topology.from_edges(n_full, src, dst, quanta.astype(np.int32), delay, bias=bias)
     counts = {"n": n_full, "n_real": int(m.n), "synthetic_neurons": n_syn, "topology_edges": topo.nnz,
               "carried_synapses": len(image.carried_syn), "carried_edges_rescaled": len(per_edge), "delay_edits": int(n_delay_edits),
               "profile3_added": len(image.profile3), "parasitic_zeroed": n_par, "outputs_zeroed": n_out, "inputs_zeroed": n_in,
               "zero_outputs": bool(zero_outputs), "zero_inputs": bool(zero_inputs),
+              "biases": n_bias, "biases_synthetic": n_bias_syn,
               "nonzero_edges": int((topo.quanta != 0).sum())}
     return FullGraph(topo, index_map, int(m.n), counts)
 

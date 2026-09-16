@@ -4,6 +4,15 @@ Fast: a single latch with its edge relay and the relay's inhibitor, built with t
 helpers, placed completely onto a synthetic connectome that contains one planted instance
 among random weak wiring. The search must find the planted neurons and carry all six edges,
 with the mixed-sign, hub and chain bookkeeping exercised on the way.
+
+Flip-flops (protocol.flipflop): two flip-flops joined by one edge relay, placed on a synthetic
+connectome with two planted driven mutual inhibitory pairs among undriven and unreachable
+decoys. The pairs are `ffpair` motifs, placed as units on the planted pairs; the relay's edges
+FROM a flip-flop member (`u -> edge`, `u -> edge_inh`, excitatory) are of the wrong sign for a
+GABA host under Dale's law on any connectome and must be reported as such, not carried.
+
+MCNS (skipped without the data): the chain toy of docs/h1_placement.md "Placing flip-flops", at
+a small size.
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ from drosophilos.connectome.embed_netlist import Placement, _Anatomy, _Design, a
 from drosophilos.connectome.mcns import MCNS
 from drosophilos.connectome.mcns_download import DEFAULT_DIR, path_of
 from drosophilos.lib.netlist import Drive, Netlist
+from drosophilos.protocol.flipflop import BIAS_213HZ_MV, add_flipflop
 from drosophilos.protocol.latch import add_edge_relay, add_latch
 from drosophilos.sim.model import Params
 
@@ -70,6 +80,74 @@ def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: i
     df = df.sort_values(["pre", "post"])
     neurons = pd.DataFrame({"bodyId": 1000 + np.arange(n), "type": [f"T{i}" for i in range(n)], "superclass": "cb",
                             "class": None, "somaSide": "R", "nt": nts, "nt_conf": 0.9})
+    neurons["sign"] = np.where(neurons["nt"].isin(["gaba", "glutamate", "histamine"]), -1, 1).astype(np.int8)
+    m = MCNS(neurons, df["pre"].to_numpy(np.int32), df["post"].to_numpy(np.int32), df["count"].to_numpy(np.int32), min_syn=1)
+    return m, idx
+
+
+def chain_toy_netlist(n_pairs: int, kind: str = "ffpair"):
+    """`n_pairs` flip-flops (or excitatory latches, kind="latch") in a line, each joined to the
+    next by one edge relay read off the previous pair's `u` and igniting the next pair's `u`:
+    the toy of docs/h1_placement.md "Placing flip-flops". Returns (net, drive, pairs, relays).
+    For flip-flops the two edges from `u` into each relay (excitatory, from an inhibitory
+    neuron) cannot be carried by any host: `possible_edges` counts the rest."""
+    params = Params()
+    drive = Drive.from_params(params)
+    net = Netlist(params)
+    pairs, relays = [], []
+    for k in range(n_pairs):
+        pairs.append(add_flipflop(net, drive, f"F{k}") if kind == "ffpair" else add_latch(net, drive, f"L{k}"))
+        if k:
+            relay = add_edge_relay(net, drive, f"r{k}", pairs[k - 1].u)
+            net.synapse(relay, pairs[k].u, drive.ignite)
+            relays.append(relay)
+    return net, drive, pairs, relays
+
+
+def possible_edges(net: Netlist) -> int:
+    """Designed edges whose sign agrees with their source's (a flip-flop member is inhibitory)."""
+    D = _Design(net, Policy(), hub_deg=20)
+    return int((~D.impossible).sum())
+
+
+def two_flipflop_netlist():
+    """F0 (u0, v0) -> [edge relay: edge, edge_inh] -> F1 (u1, v1): 6 neurons, 8 designed edges,
+    of which 6 are of a carriable sign."""
+    net, drive, pairs, relays = chain_toy_netlist(2, "ffpair")
+    ids = {"u0": pairs[0].u, "v0": pairs[0].v, "u1": pairs[1].u, "v1": pairs[1].v, "edge": relays[0], "edge_inh": relays[0] + 1}
+    return net, drive, ids
+
+
+def synthetic_ff_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: int = 80, n_weak: int = 600) -> tuple[MCNS, dict]:
+    """Two planted driven mutual inhibitory pairs (U1, V1) and (U2, V2), each member with a
+    cholinergic driver at the loop threshold, and a relay (E, I) with I -> E and E -> U2 at their
+    requirements; decoys: an undriven inhibitory mutual pair (P, Q), a driven inhibitory pair (R, T)
+    that no relay reaches, and an excitatory mutual pair (X, Y); random weak wiring around them."""
+    rng = np.random.default_rng(seed)
+    req = policy.req_count
+    names = ["U1", "V1", "U2", "V2", "E", "I", "D1", "D2", "D3", "D4", "P", "Q", "R", "T", "D5", "X", "Y"]
+    nts = {"U1": "gaba", "V1": "glutamate", "U2": "gaba", "V2": "gaba", "I": "gaba", "P": "gaba", "Q": "gaba", "R": "gaba", "T": "glutamate"}
+    idx = {nm: i for i, nm in enumerate(names)}
+    thr = req(drive.loop)
+    edges = [
+        (idx["U1"], idx["V1"], thr + 3), (idx["V1"], idx["U1"], thr), (idx["U2"], idx["V2"], thr + 1), (idx["V2"], idx["U2"], thr + 5),
+        (idx["D1"], idx["U1"], thr + 2), (idx["D2"], idx["V1"], thr), (idx["D3"], idx["U2"], thr + 9), (idx["D4"], idx["V2"], thr),
+        (idx["I"], idx["E"], req(int(round(2.2 * drive.loop))) + 2), (idx["E"], idx["U2"], req(drive.ignite) + 1),
+        (idx["P"], idx["Q"], thr + 20), (idx["Q"], idx["P"], thr + 20),  # undriven decoy pair
+        (idx["R"], idx["T"], thr + 4), (idx["T"], idx["R"], thr + 4), (idx["D5"], idx["R"], thr + 1), (idx["D5"], idx["T"], thr + 1),  # driven, unreachable
+        (idx["X"], idx["Y"], thr + 2), (idx["Y"], idx["X"], thr + 2),  # excitatory pair (a latch host, not a flip-flop's)
+    ]
+    n0 = len(names)
+    n = n0 + n_distractors
+    nt_list = [nts.get(nm, "acetylcholine") for nm in names] + list(rng.choice(["acetylcholine", "gaba", "glutamate"], n_distractors))
+    for _ in range(n_weak):
+        a, b = rng.integers(0, n, 2)
+        if a != b:
+            edges.append((int(a), int(b), int(rng.integers(1, 4))))
+    df = pd.DataFrame(edges, columns=["pre", "post", "count"]).groupby(["pre", "post"], as_index=False)["count"].sum()
+    df = df.sort_values(["pre", "post"])
+    neurons = pd.DataFrame({"bodyId": 2000 + np.arange(n), "type": [f"T{i}" for i in range(n)], "superclass": "cb",
+                            "class": None, "somaSide": "R", "nt": nt_list, "nt_conf": 0.9})
     neurons["sign"] = np.where(neurons["nt"].isin(["gaba", "glutamate", "histamine"]), -1, 1).astype(np.int8)
     m = MCNS(neurons, df["pre"].to_numpy(np.int32), df["post"].to_numpy(np.int32), df["count"].to_numpy(np.int32), min_syn=1)
     return m, idx
@@ -227,6 +305,96 @@ def test_greedy_baseline_runs_on_synthetic():
     m, _ = synthetic_mcns(Policy(), drive)
     pl = place_netlist_greedy(net, m, Policy())
     assert 0 <= pl.carried <= net.nnz
+
+
+# ----------------------------------------------------------------------------------------
+# flip-flops (protocol.flipflop): the ffpair motif
+# ----------------------------------------------------------------------------------------
+def test_flipflop_motifs_are_found_from_structure():
+    net, drive, ids = two_flipflop_netlist()
+    assert net.bias[ids["u0"]] == net.bias[ids["v1"]] == BIAS_213HZ_MV and net.bias[ids["edge"]] == 0.0
+    D = _Design(net, Policy(), hub_deg=20)
+    kinds: dict = {}
+    for mo in D.motifs:
+        kinds.setdefault(mo.kind, []).append(mo)
+    assert set(kinds) == {"ffpair", "single"}, {k: len(v) for k, v in kinds.items()}
+    assert sorted(mo.nodes for mo in kinds["ffpair"]) == [(ids["u0"], ids["v0"]), (ids["u1"], ids["v1"])]
+    thr = Policy().req_count(drive.loop)
+    for mo in kinds["ffpair"]:
+        assert mo.reqs["r_uv"] == mo.reqs["r_vu"] == thr and mo.reqs["driver"] and mo.reqs["bias"] == (BIAS_213HZ_MV, BIAS_213HZ_MV)
+        assert len(mo.edges) == 2 and all(D.q[e] == -drive.loop for e in mo.edges)
+    # a flip-flop member is inhibitory even though its two readout edges (u0 -> edge, u0 -> edge_inh) are excitatory
+    assert D.sign[ids["u0"]] == D.sign[ids["v0"]] == -1 and D.sign[ids["edge"]] == 1 and D.sign[ids["edge_inh"]] == -1
+    assert D.mixed == [ids["u0"]]
+    imp = {(int(D.src[e]), int(D.dst[e])) for e in np.flatnonzero(D.impossible)}
+    assert imp == {(ids["u0"], ids["edge"]), (ids["u0"], ids["edge_inh"])}
+    assert int(D.hard.sum()) == 6 == possible_edges(net)
+    # the relay is not a relay motif here (its source edges are impossible): E and I are singles joined by a hard edge
+    assert sorted(mo.nodes[0] for mo in kinds["single"]) == sorted([ids["edge"], ids["edge_inh"]])
+    # the excitatory latch motif is unchanged: a latch netlist has no ffpair, and its members are excitatory
+    net_l, _, ids_l = latch_relay_netlist()
+    D_l = _Design(net_l, Policy(), hub_deg=20)
+    assert [mo.kind for mo in D_l.motifs if mo.kind in ("latch", "ffpair")] == ["latch"] and not D_l.ff_members
+    assert D_l.sign[ids_l["u"]] == 1
+
+
+def test_real_mutual_inhibitory_pairs_need_a_driver():
+    _, drive, _ = two_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_ff_mcns(policy, drive)
+    A = _Anatomy(m, policy)
+    thr = policy.req_count(drive.loop)
+    mask, pairs = A.mutual_inh(thr, driven=True)
+    assert {tuple(sorted(p)) for p in pairs.tolist()} == {(idx["U1"], idx["V1"]), (idx["U2"], idx["V2"]), (idx["R"], idx["T"])}
+    assert not mask[idx["P"]] and not mask[idx["X"]] and mask[idx["U1"]]
+    mask_all, pairs_all = A.mutual_inh(thr, driven=False)
+    assert len(pairs_all) == 4 and mask_all[idx["P"]] and mask_all[idx["Q"]] and not mask_all[idx["X"]]
+    mm, _ = A.mutual(thr)  # the excitatory pairs are a different pool
+    assert mm[idx["X"]] and mm[idx["Y"]] and not mm[idx["U1"]]
+
+
+def test_two_flipflops_with_relay_are_placed_completely_on_synthetic():
+    net, drive, ids = two_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_ff_mcns(policy, drive)
+    pl = place_netlist(net, m, policy, time_limit_s=20, restarts=2, verbose=False)
+    assert not pl.unplaced and len(pl.mapping) == net.n == 6
+    # both pairs on the planted driven pairs, the reachable one under the relay
+    assert {pl.mapping[ids["u1"]], pl.mapping[ids["v1"]]} == {idx["U2"], idx["V2"]}
+    assert {pl.mapping[ids["u0"]], pl.mapping[ids["v0"]]} == {idx["U1"], idx["V1"]}
+    assert pl.mapping[ids["edge"]] == idx["E"] and pl.mapping[ids["edge_inh"]] == idx["I"] and pl.mapping[ids["u1"]] == idx["U2"]
+    # every edge of a carriable sign is carried; the two excitatory readout edges from u0 are reported as wrong sign
+    assert pl.carried == possible_edges(net) == 6 and pl.edges == net.nnz == 8
+    assert sorted((s, d, r) for s, d, _, r in pl.missing) == sorted([(ids["u0"], ids["edge"], "wrong sign (mixed-sign designed neuron)"),
+                                                                      (ids["u0"], ids["edge_inh"], "wrong sign (mixed-sign designed neuron)")])
+    assert pl.motifs == {"ffpair": {"complete": 2}, "single": {"complete": 2}}
+    assert pl.ffpair_drivers == {"hosts": 4, "with_driver": 4}
+    s = pl.summary(net)
+    assert s["ffpair_hosts"] == 4 and s["ffpair_hosts_with_driver"] == 4 and s["carried_fraction"] == 0.75
+    # without the driver requirement the undriven decoy pair is a legal host too; the drivers are still reported
+    A = _Anatomy(m, policy)
+    thr = policy.req_count(drive.loop)
+    assert A.mutual_inh(thr, driven=False)[0][idx["P"]]
+    pl2 = place_netlist(net, m, policy, time_limit_s=20, restarts=2, verbose=False, ff_driver=False)
+    assert pl2.carried == 6 and pl2.ffpair_drivers["hosts"] == 4 and 2 <= pl2.ffpair_drivers["with_driver"] <= 4
+
+
+@pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")
+def test_flipflop_chain_toy_on_mcns():
+    """A short flip-flop chain and the matching latch chain on the real connectome (the 32-pair
+    figures are in docs/h1_placement.md "Placing flip-flops"; this is the same builder at 6)."""
+    from drosophilos.connectome.mcns import load_mcns
+
+    m = load_mcns()
+    net_f, _, _, _ = chain_toy_netlist(6, "ffpair")
+    pl_f = place_netlist(net_f, m, Policy(), time_limit_s=60, restarts=1, verbose=False)
+    assert pl_f.motifs.get("ffpair", {}).get("complete", 0) == 6, pl_f.motifs
+    assert pl_f.ffpair_drivers["hosts"] == 12 and pl_f.ffpair_drivers["with_driver"] == 12
+    assert pl_f.carried + len(pl_f.missing) == pl_f.edges and pl_f.carried >= 12
+    net_l, _, _, _ = chain_toy_netlist(6, "latch")
+    pl_l = place_netlist(net_l, m, Policy(), time_limit_s=60, restarts=1, verbose=False)
+    assert pl_l.motifs.get("latch", {}).get("complete", 0) == 6, pl_l.motifs
+    assert pl_l.ffpair_drivers == {}
 
 
 @pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")
