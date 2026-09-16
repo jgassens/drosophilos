@@ -502,17 +502,78 @@ roles.  `c1_and`/`c2_load`/`c3_load` are already at rest when the all-cell windo
 The available dumps can therefore prove the stale-operand run and its complete propagation,
 but cannot prove which pre-window spike kept or re-lit r10's REQ.
 
-This **refines, but does not confirm, §10.4**.  A stale per-source REQ-true surviving r10's
-previous START and meeting the later IDLE is consistent with exactly this early replay, but
-the proposed both-live transition, its killing spike, and a relay doublet are outside the
-capture.  The broad one-hot/four-pulse/wider-hop remedy remains disproved by its cluster
-stalls.  A fourth pulse on only the START clear was also tested as the narrow candidate: a
-single 150-quanta hit on the request latch's `v` member at its closest clean-model approach
-to threshold (about 0.015 mV below threshold while the clear lands) does not retain or replay
-the request, while forcing REQ true at the later IDLE bypasses both three- and four-pulse
-clears.  That experiment does not reproduce the captured mechanism, so the extra pulse is
-not landed as a fix.  A row-role capture beginning before 255,000 is required to name the
-actual REQ/relay transition and justify a local repair.
+| perturbation of the false rail (loop, kill, V_th, bias) | re-light fails up to | works from |
+|---|---|---|
+| none | Δ = 300 | 350 |
+| 2 σ: loop ×0.92, kill ×1.08, +0.2 mV, −0.2 mV | 600 | 650 |
+| 3 σ: ×0.88, ×1.12, +0.4, −0.4 | 700 | 800 |
+| 4 σ: ×0.85, ×1.15, +0.6, −0.6 | the latch no longer sustains | — |
+
+The real Δ is 740–770 steps: the 3 σ corner of one latch's six parameters, before the stray
+stream's ±0.4 mV. A 16-row multiplier has 32 such rails.
+
+What a dark `REQ` false rail does is the whole shape. The start has killed `REQ` true, so
+both rails are dark. (1) The producer's commit guard sees no `REQ` true and commits its next
+word through its `pa` path as soon as its stage completes — the reader sampled at `ACT^d`,
+58 ms after the start, long before that rewrite. (2) The reader's IDLE rises 106 ms after its
+done, its `pb` relay is vetoed by nothing, and the row **starts with no request**, sampling
+whatever the producer's rails hold: with tokens 15.8k steps apart and a row cycle of 14.1k
+that is the *next* word, already in place. (3) That word's real request arrives 1–2k steps
+after this start, is not reached by the start's kill train, and pends (`pa` vetoed by IDLE
+false). (4) At the next IDLE the pending request starts the row on the producer's master,
+which still holds the same word — the producer's commit for the word after is blocked on
+the pending `REQ` true — and the row runs it a second time. This start re-lights `REQ` false
+(the kill was long ago), the producer commits, and the pipeline resumes: the sequence is n,
+n+1, n+1, n+2 — copy 5's `64, 51, 51, 43` — with nothing lost and no fault. The same dark
+rail gives the campaign's other perspective shape when the phase differs: if the producer's
+rewrite is in flight at the request-less sample (rails dark for ~85 ms; token intervals of
+~19–20k) the operand gates take nothing and the row stalls; beyond that the old word is
+sampled and n itself is duplicated.
+
+**Reproduction** (`test_dark_request_rail_replays_the_next_word_and_actd_relights_it`,
+4-bit `MULP`, 7,108 neurons, two `RefSim` copies, tokens `[3, 5, 2]` × 3, 1.4 s host gap,
+8.8 s of neural time, 18 s wall). Copy 1 carries only the 3 σ corner above on
+`m.r2.req.m.r1r0` (two loop synapses, two kill synapses, `V_th` and bias of its two members).
+
+| copy 1 (`m.r2`) | steps |
+|---|---|
+| trigger, `pa`, start (token 1) | 29,861, 30,581, 30,623 |
+| `REQ` false: one spike, no train | 30,676 |
+| done, IDLE, `pb`, start **with no request**; `ACT^d` samples token 2 | 40,281, 41,383, 42,485, 42,527; 43,110 |
+| token 2's trigger; `REQ` true rises and pends | 44,154; 44,196 … 54,932 |
+| done, IDLE, `pb`, start: token 2 **again** | 52,662, 53,764, 54,866, 54,908 |
+| token 3's trigger (released by that start's `REQ` false rise), `pb`, start | 60,435, 67,246, 67,288 |
+| outputs | `[9, 15, 15, 6]` against copy 0's `[9, 15, 6]` |
+
+**Fix: the row's own `ACT^d` pulse re-lights every rail the start pulse re-lit.** One synapse
+per rail (`act_d → idle[0].u` and `act_d → req[0].u` per request), no new neurons, no change
+to any delay, veto set or kill train. `ACT^d` is the start pulse 11 hops later, so the second
+ignition lands ~111 ms after the kill train — twice the 3 σ boundary — and when the first
+ignition worked it is a re-ignition of a lit rail, which its consumers (veto interneurons
+and the producer's 20-hop guard chain) do not see. In the guard-doublet case `ACT^d` is a
+train (eleven spikes at r10, 215,292–215,739): a lit rail fed eleven ignite pulses at 213 Hz
+runs at a 31-step period for those 45 ms and is back at 47 afterwards, alive, its own kill
+relay silent (measured on an isolated kill pair, loop ×1.0 and ×0.88). Timing when the first
+ignition failed:
+`REQ` false rises at start + ~60 ms instead of + 4 ms, the producer's `pb` commit follows
+20 hops later and its master reset ~64 ms after that, all after the reader's sample at the
+same `ACT^d`. On the reproduction's 3 σ copy with the fix, the start's ignition still gives
+the one spike at 30,676, `ACT^d` at 31,206 re-lights the rail (train from 31,249), every
+start follows its trigger by the guard's 12 hops (30,623, 44,916, 58,866 against triggers
+29,861, 44,154, 58,104 — the clean copy's steps to the step) and the outputs are `[9, 15, 6]`.
+The test keeps both: copy 0 is the 3 σ rail with the fix, copy 1 the same rail with the
+`ACT^d` synapse zeroed (`[9, 15, 15]`, four starts, the second before its trigger). The fast
+kernel tests pass; the 100-copy mix-B campaigns are the confirmation.
+
+**Against §10.4.** Refuted in its specifics: no both-live pair, no restored losing rail and no
+one-hot condition is involved — the failing transition is a *dark* pair, which a one-hot
+guard does not see either, and the wider veto sets and 14/22-hop paths only lengthened the
+races that stalled copies. Refined in its location: the fault is at a per-source `REQ` pair
+and the replay goes through the `pb` relay, as §10.4 guessed for shape A. The commit pair
+has the same primitive (the commit pulse re-lights `CREQ` false ~50 ms after `CREQ` true's
+rise killed it); its failure would open a request-less commit at the reader's next start,
+which the reference showed as a stall, not a duplicate, and is left for the 100-copy rerun
+to weigh.
 
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
