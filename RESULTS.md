@@ -902,7 +902,12 @@ in 10,000 mix-B transfers 37 fail-stops (0.37 %) and no wrong value on a clean t
 wrong values were cascades after a fail-stop under the harness's fixed load period, which a
 producer waiting for READY cannot reach). Every traced fail-stop has one cause: under ±4 %
 weights a flip-flop can fall into *lockstep*, both members firing alternately instead of one
-silencing the other — the next fix. Not yet done: an adder on flip-flops placed and simulated.
+silencing the other. Mapped and fixed (`docs/a1_flipflop.md`, "Lockstep"): the alternating
+orbit is an attractor a SET train falls into when the v → u inhibition is ≥ 1.125× nominal, so
+u first fires on the train's last pulse; a four-pulse SET train instead of three takes the
+mix-B lockstep rate from 0.1–0.5 % of SETs to 0 in 16,000, with the contract unchanged. Not
+yet done: the register's campaign re-run on the four-pulse train; an adder on flip-flops
+placed and simulated.
 
 **The first perturbation campaigns on kernels (2026-09-16, Juno H200, 100 copies × 8 tokens,
 mix B).** With no perturbation every copy of every block is correct. Under mix B the render
