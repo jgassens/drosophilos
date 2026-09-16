@@ -484,3 +484,130 @@ condition): under that drive the simulated brain fires ~1.9 M spikes per 1.2 s o
 45,000 spikes per ms reach hosts with thousands of inputs each. Whether a fly brain at these LIF
 parameters is really that excitable is a question about the model's surround, not the circuit —
 H0's envelope was measured for 15 quiet hosts, and it does not transfer to 614 hubs.
+
+## One kernel cell
+
+Tool: `drosophilos/bench/h1_cell.py`; data: `docs/h1_cell.json`. The next real target after the
+adder is a resident kernel (`lib/kernel.py`, `build_pipeline`; `docs/a3_kernels.md` §1–4), and its
+smallest instance is one cell: `c1 = input + 1` at 8 bits — the host-loaded input register, the
+cell's operand gates, ALU, stage and master register, with their completion trees, resets and
+watchdogs. It is five times the adder: 3,170 neurons, 5,768 synapse entries (5,760 distinct
+pairs). Placed with `place_netlist(k_max=4, restarts=2, time_limit_s=1800, seed=0)` as built and
+after `split_hubs`; the 4-bit cell (1,906 neurons) the same way, because it is the one size at
+which the requested `split_hubs(max_fanout=16)` terminates (below). No simulation. Each placement
+ran in a child process whose resident memory was polled and capped at 8 GB; the cap was never
+approached.
+
+| | adder | adder, split 16 | 4-bit cell | 4-bit cell, split 16 | **8-bit cell** | **8-bit cell, split 20** |
+|---|---|---|---|---|---|---|
+| neurons | 614 | 629 | 1,906 | 1,948 | 3,170 | 3,222 |
+| synapse entries (distinct pairs) | 1,146 (1,144) | 1,194 | 3,412 (3,404) | 3,555 (3,547) | 5,768 (5,760) | 5,958 (5,950) |
+| latches / relays / chains | 72 / 79 / 18 | — | 217 / 256 / 39 | 220 / 287 / 38 | 375 / 444 / 63 | 380 / 514 / 62 |
+| hubs (> 20 partners) and fan-outs | 3: 115, 102, 41 | 0 | 9: 255, 78, 69, 47, 39, 38, 29, 24, 21 | 0 | 12: 455, 109, 94, 87, 79, 70, 45, 34, 33, 32, 29, 21 | 0 (52 copies, 190 duplicated inputs) |
+| carried | 704 / 1,146 (61.4 %) | 721 / 1,194 (60.4 %) | 2,030 / 3,404 (59.6 %) | 2,059 / 3,547 (58.0 %) | **3,073 / 5,760 (53.3 %)** | **3,046 / 5,950 (51.2 %)** |
+| hard (motif and motif-to-motif) | 697 / 884 (78.8 %) | 604 / 888 (68.0 %) | 1,947 / 2,812 (69.2 %) | 1,853 / 2,812 (65.9 %) | 2,953 / 4,680 (63.1 %) | 2,815 / 4,680 (60.2 %) |
+| hub fan-out (after a split: the trees' outputs) | 7 / 258 (2.7 %) | 101 / 258 (39.1 %) | 83 / 580 (14.3 %) | 156 / 589 (26.5 %) | 120 / 1,068 (11.2 %) | 213 / 1,078 (19.8 %) |
+| tree inputs (duplicated onto copies) | — | 16 / 48 | — | 50 / 134 (37.3 %) | — | 18 / 180 (10.0 %) |
+| neurons placed | 612 / 614 | 628 / 629 | 1,894 / 1,906 | 1,938 / 1,948 | 3,097 / 3,170 | 3,122 / 3,222 |
+| latches complete (both loop edges on a real mutual pair) | 58 / 72 | — | 158 / 217 | 157 / 220 | 194 / 375 | 306 / 380 |
+| parasitic anatomical edges among the hosts | 17,844 | 14,043 | 87,575 | 91,749 | 199,131 | 181,654 |
+| search seconds (restarts) | 65 (8) | 54 (4) | 66 (2) | 62 (2) | 167 (2) | 77 (2) |
+| peak memory (child process, `ru_maxrss`) | not measured | not measured | 2.34 GB | 2.31 GB | 2.10 GB | 2.14 GB |
+
+The adder columns are §Result (8 restarts) and §Broadcast neurons split into trees (`max_fanout 16`,
+`k_max 4`, 4 restarts); the cell columns are this bench, 2 restarts each, best restart kept
+(for the 8-bit cell restart 0, hubs last, unsplit — the hubs-first restart was 81 edges worse — and restart 1, hubs first, split, 17 edges better than restart 0). The
+"hard" and "hub" classes are the placer's own (`_Design.hard` / `.soft`); after a split there are
+no hubs, so "hub" counts the edges out of the former hubs' trees and "tree inputs" the inputs the
+split duplicated onto the copies.
+
+**`split_hubs(16)` does not terminate on the 8-bit cell.** The fault latch `c1.faultL.u` (32
+outputs) drives the register's reset trigger `c1.Q.reset`, whose inhibitor `c1.Q.reset_inh` (455
+outputs) inhibits the fault latch: splitting any of the three duplicates inputs onto copies, which
+pushes the next one past 16, which pushes the first past 16 again, and the transform raises
+`ValueError` (cycle through `c1.faultL.u`). The bench steps the bound up by 4 and 20 is the smallest
+that terminates (52 copies: 22 of `c1.Q.reset_inh`, 5 of `c1.M.reset_inh`, 4 each of the cancel
+and `IN.Q.reset_inh`, 3 of `c1.actd.d10`, one or two of the rest, and one each of the reset
+trigger and its three relays). At 4 bits, 16 works (42 copies) because the trigger stays under
+the bound after its copies are added. A bound of 16 on a kernel cell therefore needs the reset
+redesign that §Broadcast neurons already asked for, not a larger transform.
+
+**What changes at five and ten times the size.** The search's cost does not: setup (dense
+masks, motif instances, two rounds of arc consistency) went from 0.7 s for the adder to 16 s at
+1,906 neurons and 25 s at 3,170; one descent from 4–13 s to 22 s and 31 s; the whole run of two
+restarts with repair took 167 s of the 1,800 s allowed, at 2.1 GB (the connectome's own sparse
+matrices are about 1.5 GB of that; the 3,170 dense 166,700-byte rows add 0.5 GB and are freed
+after setup). Time and memory scale close to linearly in designed neurons and neither is near a
+limit at this size. What runs out is the connectome's supply of latches. The 750 latch members
+of the 8-bit cell all draw from the same 771 real neurons — the entire membership of the 1,223
+mutual cholinergic pairs at ≥ 57 synapses; the pairs share members heavily (the 2,446 of §What
+the wiring lacks counts each pair's two ends), and a placement that gives every designed neuron
+its own host can use at most a *disjoint* set of pairs: a maximum matching of that graph has
+**343 pairs**. So 375 designed latches cannot all be complete at `k_max 4` whatever the search
+does; the unsplit run completes 194 (52 %; 4 latches unplaced, 177 partial: one member on a
+mutual-pair neuron whose partner was taken by another latch or relay), the split run 306 (81 %,
+89 % of the 343 ceiling). Relays are the second wall: 888 designed relay neurons against 913
+distinct candidates. The classes that lose the most edges are the ones that were already thin in
+the adder, now at ten times the count: `edge → u` (relays igniting their latch) 335 of 491 missing,
+`reset_inh → u/v` 594 of 684, `u → veto` 264 of 406, `edge_inh → edge` 203 of 513, the latch loops
+themselves 283 of 764. The carried fraction falls from 61 % (adder) to 60 % (4-bit cell) to 53 %
+(8-bit cell) as the latch demand goes from 72 to 217 to 375 against 343 disjoint pairs; the hard
+edges fall from 79 % to 63 % for the same reason. And the parasitic edges grow faster than the
+circuit: 199,131 anatomical edges among the 3,097 hosts (64 per host, against 46 for the 4-bit cell's 1,894 hosts and 29 for the
+adder's 612), because the hosts are the brain's most strongly interconnected neurons and taking
+more of them takes more of the edges among them.
+
+The split run shows a limit of the search itself, distinct from the connectome's. With every
+fan-out ≤ 20 no neuron is a hub, so the 1,078 former broadcast edges become *hard*, and the strict
+layer's arc consistency then finds the design globally infeasible: 18 designed neurons lose their
+last candidate to a neighbour that still had candidates — the `actd.d10` copies' relays
+(`c1.aNrM.g.veto ← g.edge` at ≥ 29, 11 of them; the fan-out node of §What the wiring lacks, now
+enforced), five input-register master latch members (`IN.M.bNrM.u`) with no ≥ 57 edge onto any of their
+veto's 5–7 remaining candidates, `c1.sub.g.edge`,
+and `IN.Q.reset ← IN.Q.reset_inh.c4` (the copy has 2 candidates and neither is driven by the
+trigger's) — and the implementation then propagates *emptiness*: an empty domain gives its hard
+neighbours no support, so they empty too, and 1,440 domains are empty after the first round and
+2,239 of 3,222 (69 %) after the second, 484 of the 760 latch members among them. The search runs on
+the loose layer (the motif's own instances, no context) for two thirds of the circuit. It still
+carries 51 %, and *more* complete latches than the unsplit run (306 against 194) because a latch
+placed from the loose layer is placed as a real mutual pair with no other demands — but the
+chains, which are found by depth-first search inside the strict domains, collapse (11 complete of
+62 against 39 of 63; the 92-hop watchdog chain is no longer even read as a chain, since each hop
+now has a second hard input from a cancel copy, and 42 hops go unplaced) and the trees' inputs
+carry 18 of 180. Arc consistency that empties a neighbour on the strength of an already-empty
+domain is throwing away information the search then has to rebuild motif by motif; making an
+empty domain fall back to its loose layer *before* it propagates is the one search change this
+run asks for, and it is cheap. At 4 bits the same split leaves no domain empty (the trees are
+small enough for consistent candidates to exist), and the split costs 1.6 points of coverage instead of 2.2.
+
+**What it implies for a 65,000-neuron render kernel.** Scale the cell twenty times: about 5,300
+latches (`capacity_doom.md` §5's count for the four-cell render kernel; at this cell's ratio of
+750 latch members per 3,170 neurons, 65,000 neurons would hold nearer 7,700) against a supply of disjoint real pairs that is
+**343 at `k_max 4`, 1,047 at `k_max 8`, 2,896 at `k_max 16`** (1,223 / 4,292 / 12,315 pairs on
+771 / 2,432 / 6,979 neurons; strong-edge cores of 3,197 / 10,131 / 22,347 neurons). So at most
+6.5 % of the kernel's latches can have both loop edges on real neurons at the H0 bound, 20 % at
+`k_max 8`, 55 % at `k_max 16` — and those are upper bounds from a perfect matching that ignores
+every other constraint on the same neurons (the 8-bit cell reaches 89 % of its ceiling only when
+the split frees the latches from their context). The relay supply is of the same order (913
+candidates for 888 relay neurons already at 3,170), so the arithmetic's relays are as short as its
+registers. Then the search: its memory is one dense 166,700-byte row per designed neuron during
+setup, 10.8 GB for 65,000 — above the 8 GB this laptop can give it — before any of the anatomy's
+own masks, so the setup has to go sparse (index arrays from the start, or masks per motif kind
+instead of per neuron) before a kernel can even be attempted here; its time, extrapolated
+linearly from 25 s setup and 31 s per descent at 3,170 neurons, is 8–9 minutes of setup and about
+11 minutes per descent, i.e. an hour for a few restarts, which is affordable. And the parasitic
+count: 65,000 hosts is 39 % of the brain's neurons and, on the trend of 29 → 46 → 64 edges per host
+from 612 to 1,894 to 3,097 hosts, several million anatomical edges to zero — the "Profile 2 image" would
+be a documented deletion of a large part of the fly's wiring. The honest reading of the numbers:
+the connectome carries about half of a kernel cell's edges and cannot carry more than about 6 %
+of a render kernel's latches at the H0 bound (a fifth at `k_max 8`, half at 16); the register file of any kernel this
+size is a Profile 3 object, and what Profile 2 can host is the small, latch-light logic between
+registers.
+
+Reproduce (about 8 minutes with the MCNS data present; no simulation):
+
+```python
+from drosophilos.bench.h1_cell import run_all, place_cell, latch_capacity
+run_all()                                   # docs/h1_cell.json: n8 and n4, unsplit and split, plus the capacity table
+place_cell(8, split=False, restarts=2)      # one configuration in-process (2.3 GB)
+```

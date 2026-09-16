@@ -1,0 +1,2017 @@
+{
+ "k_max": 4.0,
+ "restarts": 2,
+ "time_limit_s": 1800.0,
+ "max_fanout": 16,
+ "memory_limit_gb": 8.0,
+ "runs": {
+  "n8_unsplit": {
+   "width": 8,
+   "split": false,
+   "max_fanout": null,
+   "k_max": 4.0,
+   "restarts": 2,
+   "time_limit_s": 1800.0,
+   "netlist": {
+    "neurons": 3170,
+    "synapses": 5768,
+    "edges": 5760,
+    "hard": 4680,
+    "hub_soft": 1076,
+    "impossible": 12,
+    "mixed_sign": [
+     "Q.faultL.u",
+     "c1.faultL.u"
+    ],
+    "motifs": {
+     "hub": 12,
+     "latch": 375,
+     "relay": 444,
+     "single": 760,
+     "chain": 63
+    },
+    "latch_members": 750,
+    "relay_inhibitors": 444,
+    "chain_lengths": [
+     92,
+     20,
+     20,
+     20,
+     20,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     16,
+     16,
+     15,
+     15,
+     15,
+     12,
+     12,
+     12,
+     12,
+     12,
+     10,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     3
+    ],
+    "hubs": [
+     {
+      "role": "c1.Q.reset_inh",
+      "out": 455,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "c1.M.reset_inh",
+      "out": 109,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "P.wd.cancel_inh",
+      "out": 94,
+      "in": 2,
+      "sign": -1
+     },
+     {
+      "role": "IN.Q.reset_inh",
+      "out": 87,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "IN.M.reset_inh",
+      "out": 79,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "c1.actd.d10",
+      "out": 70,
+      "in": 1,
+      "sign": 1
+     },
+     {
+      "role": "c1.copy.u",
+      "out": 45,
+      "in": 3,
+      "sign": 1
+     },
+     {
+      "role": "IN.P.reset_inh",
+      "out": 34,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "IN.copy.u",
+      "out": 33,
+      "in": 3,
+      "sign": 1
+     },
+     {
+      "role": "c1.faultL.u",
+      "out": 32,
+      "in": 13,
+      "sign": 1
+     },
+     {
+      "role": "Q.faultL.u",
+      "out": 29,
+      "in": 10,
+      "sign": 1
+     },
+     {
+      "role": "c1.u0r0.u",
+      "out": 21,
+      "in": 1,
+      "sign": 1
+     }
+    ],
+    "max_out_degree": 455,
+    "max_in_degree": 16,
+    "required_counts": [
+     4,
+     12,
+     15,
+     29,
+     43,
+     57,
+     73,
+     85,
+     125
+    ]
+   },
+   "domains": {
+    "setup_seconds": 24.8,
+    "arc_consistency": {
+     "empty_domains_after_round": [
+      0,
+      0
+     ],
+     "emptied_by_a_neighbour_with_candidates": 0,
+     "emptied_by_an_empty_neighbour": 0,
+     "root_conflicts": [],
+     "root_conflict_classes": {}
+    },
+    "hub": {
+     "designed_nodes": 12,
+     "distinct_real_candidates": 13527,
+     "domain_median": 841.0,
+     "domain_min": 256,
+     "domain_max": 12120,
+     "empty_domains": 0
+    },
+    "latch": {
+     "designed_nodes": 750,
+     "distinct_real_candidates": 771,
+     "domain_median": 235.0,
+     "domain_min": 24,
+     "domain_max": 771,
+     "empty_domains": 0
+    },
+    "relay": {
+     "designed_nodes": 888,
+     "distinct_real_candidates": 913,
+     "domain_median": 57.0,
+     "domain_min": 9,
+     "domain_max": 377,
+     "empty_domains": 0
+    },
+    "single": {
+     "designed_nodes": 760,
+     "distinct_real_candidates": 37581,
+     "domain_median": 514.0,
+     "domain_min": 35,
+     "domain_max": 27723,
+     "empty_domains": 0
+    },
+    "chain": {
+     "designed_nodes": 760,
+     "distinct_real_candidates": 4867,
+     "domain_median": 3142.0,
+     "domain_min": 5,
+     "domain_max": 4769,
+     "empty_domains": 0
+    },
+    "latch_threshold": 57,
+    "real_mutual_pairs": 1223,
+    "real_mutual_members": 771,
+    "mutual_pairs_both_in_some_latch_domain": 1223,
+    "designed_latches": 375
+   },
+   "placement": {
+    "carried": 3073,
+    "edges": 5760,
+    "carried_fraction": 0.5335,
+    "by_class": {
+     "hard": {
+      "carried": 2953,
+      "total": 4680,
+      "fraction": 0.631
+     },
+     "hub": {
+      "carried": 120,
+      "total": 1068,
+      "fraction": 0.1124
+     },
+     "impossible": {
+      "carried": 0,
+      "total": 12,
+      "fraction": 0.0
+     }
+    },
+    "neurons_placed": 3097,
+    "neurons_total": 3170,
+    "unplaced_by_role": {
+     "v": 31,
+     "edge_inh": 16,
+     "edge": 7,
+     "d": 7,
+     "u": 4,
+     "h": 3,
+     "ready_delay": 2,
+     "veto": 2,
+     "ready": 1
+    },
+    "parasitic_to_zero": 199131,
+    "search_seconds": 167.3,
+    "placement_seconds": 167.3,
+    "strategy": "hub_last seed 0",
+    "order_note": "backtracks 801; 2842 carried before repair, +235 repaired; descent 32.2 s",
+    "peak_memory_gb": 2.1,
+    "motifs": {
+     "hub": {
+      "complete": 12
+     },
+     "latch": {
+      "complete": 194,
+      "partial": 177,
+      "unplaced": 4
+     },
+     "relay": {
+      "complete": 256,
+      "partial": 186,
+      "unplaced": 2
+     },
+     "single": {
+      "complete": 754,
+      "unplaced": 6
+     },
+     "chain": {
+      "partial": 24,
+      "complete": 39
+     }
+    },
+    "motifs_search": {
+     "hub": {
+      "skipped": 12
+     },
+     "latch": {
+      "complete": 27,
+      "partial": 303,
+      "skipped": 45
+     },
+     "relay": {
+      "complete": 34,
+      "partial": 401,
+      "skipped": 9
+     },
+     "single": {
+      "partial": 285,
+      "skipped": 31,
+      "complete": 444
+     },
+     "chain": {
+      "partial": 50,
+      "complete": 13
+     }
+    },
+    "missing_by_class_top": {
+     "edge -> u": [
+      335,
+      491
+     ],
+     "reset_inh -> u": [
+      316,
+      342
+     ],
+     "reset_inh -> v": [
+      278,
+      342
+     ],
+     "u -> veto": [
+      264,
+      406
+     ],
+     "edge_inh -> edge": [
+      203,
+      513
+     ],
+     "u -> v": [
+      142,
+      384
+     ],
+     "v -> u": [
+      141,
+      380
+     ],
+     "d -> edge": [
+      131,
+      250
+     ],
+     "u -> edge": [
+      97,
+      189
+     ],
+     "d -> edge_inh": [
+      92,
+      250
+     ],
+     "cancel_inh -> hop": [
+      89,
+      92
+     ],
+     "veto -> edge": [
+      77,
+      361
+     ],
+     "u -> edge_inh": [
+      62,
+      187
+     ],
+     "u -> hold_inh": [
+      51,
+      72
+     ],
+     "d -> d": [
+      46,
+      535
+     ],
+     "reset_inh -> or": [
+      38,
+      38
+     ],
+     "u -> or": [
+      32,
+      76
+     ],
+     "reset_inh -> and": [
+      32,
+      34
+     ],
+     "u -> and": [
+      26,
+      146
+     ],
+     "u -> d": [
+      25,
+      53
+     ]
+    },
+    "hubs": {
+     "c1.Q.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 69,
+      "out_total": 453,
+      "in_carried": 1,
+      "in_total": 4
+     },
+     "c1.M.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 1,
+      "out_total": 107,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "P.wd.cancel_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 3,
+      "out_total": 94,
+      "in_carried": 0,
+      "in_total": 2
+     },
+     "IN.Q.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 10,
+      "out_total": 85,
+      "in_carried": 1,
+      "in_total": 4
+     },
+     "IN.M.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 2,
+      "out_total": 77,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "c1.actd.d10": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 5,
+      "out_total": 70,
+      "in_carried": 0,
+      "in_total": 1
+     },
+     "c1.copy.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 5,
+      "out_total": 45,
+      "in_carried": 0,
+      "in_total": 3
+     },
+     "IN.P.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 10,
+      "out_total": 34,
+      "in_carried": 2,
+      "in_total": 4
+     },
+     "IN.copy.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 5,
+      "out_total": 33,
+      "in_carried": 1,
+      "in_total": 3
+     },
+     "c1.faultL.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 2,
+      "out_total": 32,
+      "in_carried": 1,
+      "in_total": 13
+     },
+     "Q.faultL.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 5,
+      "out_total": 29,
+      "in_carried": 2,
+      "in_total": 10
+     },
+     "c1.u0r0.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 3,
+      "out_total": 21,
+      "in_carried": 1,
+      "in_total": 1
+     }
+    },
+    "exposure": {
+     "hosts": 3097,
+     "in_edges": 1322353,
+     "out_edges": 1124518,
+     "in_total": 11271241,
+     "out_total": 8514515,
+     "in_mean": 3639.4,
+     "out_mean": 2749.3,
+     "in_max": 112886,
+     "out_max": 106240,
+     "in_p90": 7512.0,
+     "out_p90": 5290.8
+    }
+   },
+   "wall_seconds": 195.4,
+   "peak_memory_polled_gb": 2.1
+  },
+  "n8_split": {
+   "width": 8,
+   "split": true,
+   "max_fanout": 20,
+   "k_max": 4.0,
+   "restarts": 2,
+   "time_limit_s": 1800.0,
+   "netlist": {
+    "neurons": 3222,
+    "synapses": 5958,
+    "edges": 5950,
+    "hard": 5946,
+    "hub_soft": 0,
+    "impossible": 12,
+    "mixed_sign": [
+     "Q.faultL.u",
+     "c1.faultL.u",
+     "Q.faultL.u.c1",
+     "c1.faultL.u.c1"
+    ],
+    "motifs": {
+     "latch": 380,
+     "relay": 514,
+     "single": 766,
+     "chain": 62
+    },
+    "latch_members": 760,
+    "relay_inhibitors": 514,
+    "chain_lengths": [
+     20,
+     20,
+     20,
+     20,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     16,
+     16,
+     15,
+     15,
+     15,
+     12,
+     12,
+     12,
+     12,
+     12,
+     10,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     3
+    ],
+    "hubs": [],
+    "max_out_degree": 20,
+    "max_in_degree": 16,
+    "required_counts": [
+     4,
+     12,
+     15,
+     29,
+     43,
+     57,
+     73,
+     85,
+     125
+    ]
+   },
+   "split_note": "max_fanout 16: split_hubs: cycle through 'c1.faultL.u': splitting it raises its own out-degree; split at max_fanout 20 instead",
+   "split_copies": {
+    "c1.Q.reset_inh": 22,
+    "c1.M.reset_inh": 5,
+    "P.wd.cancel_inh": 4,
+    "IN.Q.reset_inh": 4,
+    "IN.M.reset_inh": 3,
+    "c1.actd.d10": 3,
+    "c1.copy.u": 2,
+    "IN.P.reset_inh": 1,
+    "Q.faultL.u": 1,
+    "IN.copy.u": 1,
+    "c1.faultL.u": 1,
+    "c1.u0r0.u": 1,
+    "c1.Q.reset_relay3": 1,
+    "c1.Q.reset_relay2": 1,
+    "c1.Q.reset_relay1": 1,
+    "c1.Q.reset": 1
+   },
+   "split_neurons_added": 52,
+   "split_synapses_added": 190,
+   "split_originals_out_degree": {
+    "IN.P.reset_inh": 34,
+    "P.wd.cancel_inh": 94,
+    "Q.faultL.u": 29,
+    "IN.M.reset_inh": 79,
+    "IN.copy.u": 33,
+    "IN.Q.reset_inh": 87,
+    "c1.faultL.u": 32,
+    "c1.M.reset_inh": 109,
+    "c1.copy.u": 45,
+    "c1.Q.reset_inh": 455,
+    "c1.actd.d10": 70,
+    "c1.u0r0.u": 21,
+    "c1.Q.reset_relay3": 1,
+    "c1.Q.reset_relay2": 2,
+    "c1.Q.reset_relay1": 2,
+    "c1.Q.reset": 3
+   },
+   "domains": {
+    "setup_seconds": 29.5,
+    "arc_consistency": {
+     "empty_domains_after_round": [
+      1440,
+      2239
+     ],
+     "emptied_by_a_neighbour_with_candidates": 18,
+     "emptied_by_an_empty_neighbour": 2221,
+     "root_conflicts": [
+      {
+       "neuron": "c1.sub.g.edge",
+       "neighbour": "c1.sub0.u",
+       "neighbour_candidates": 233,
+       "required_count": 73
+      },
+      {
+       "neuron": "c1.a0r0.g.veto",
+       "neighbour": "c1.a0r0.g.edge",
+       "neighbour_candidates": 12,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a0r1.g.veto",
+       "neighbour": "c1.a0r1.g.edge",
+       "neighbour_candidates": 12,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a1r0.g.veto",
+       "neighbour": "c1.a1r0.g.edge",
+       "neighbour_candidates": 12,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a1r1.g.veto",
+       "neighbour": "c1.a1r1.g.edge",
+       "neighbour_candidates": 12,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a2r0.g.veto",
+       "neighbour": "c1.a2r0.g.edge",
+       "neighbour_candidates": 12,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a2r1.g.veto",
+       "neighbour": "c1.a2r1.g.edge",
+       "neighbour_candidates": 18,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a3r0.g.veto",
+       "neighbour": "c1.a3r0.g.edge",
+       "neighbour_candidates": 18,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a3r1.g.veto",
+       "neighbour": "c1.a3r1.g.edge",
+       "neighbour_candidates": 18,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a4r0.g.veto",
+       "neighbour": "c1.a4r0.g.edge",
+       "neighbour_candidates": 18,
+       "required_count": 29
+      },
+      {
+       "neuron": "c1.a4r1.g.veto",
+       "neighbour": "c1.a4r1.g.edge",
+       "neighbour_candidates": 18,
+       "required_count": 29
+      },
+      {
+       "neuron": "IN.M.b5r1.u",
+       "neighbour": "c1.a5r0.g.veto",
+       "neighbour_candidates": 7,
+       "required_count": 57
+      },
+      {
+       "neuron": "IN.M.b5r0.u",
+       "neighbour": "c1.a5r1.g.veto",
+       "neighbour_candidates": 5,
+       "required_count": 57
+      },
+      {
+       "neuron": "IN.M.b6r1.u",
+       "neighbour": "c1.a6r0.g.veto",
+       "neighbour_candidates": 7,
+       "required_count": 57
+      },
+      {
+       "neuron": "IN.M.b6r0.u",
+       "neighbour": "c1.a6r1.g.veto",
+       "neighbour_candidates": 7,
+       "required_count": 57
+      },
+      {
+       "neuron": "IN.M.b7r1.u",
+       "neighbour": "c1.a7r0.g.veto",
+       "neighbour_candidates": 7,
+       "required_count": 57
+      },
+      {
+       "neuron": "c1.a7r1.g.veto",
+       "neighbour": "c1.a7r1.g.edge",
+       "neighbour_candidates": 1,
+       "required_count": 29
+      },
+      {
+       "neuron": "IN.Q.reset",
+       "neighbour": "IN.Q.reset_inh.c4",
+       "neighbour_candidates": 2,
+       "required_count": 57
+      }
+     ],
+     "root_conflict_classes": {
+      "edge <- u": 1,
+      "reset <- reset_inh": 1,
+      "u <- veto": 5,
+      "veto <- edge": 11
+     }
+    },
+    "latch": {
+     "designed_nodes": 760,
+     "distinct_real_candidates": 771,
+     "domain_median": 0.0,
+     "domain_min": 0,
+     "domain_max": 771,
+     "empty_domains": 484
+    },
+    "relay": {
+     "designed_nodes": 1028,
+     "distinct_real_candidates": 748,
+     "domain_median": 0.0,
+     "domain_min": 0,
+     "domain_max": 316,
+     "empty_domains": 794
+    },
+    "single": {
+     "designed_nodes": 766,
+     "distinct_real_candidates": 24089,
+     "domain_median": 0.0,
+     "domain_min": 0,
+     "domain_max": 19536,
+     "empty_domains": 452
+    },
+    "chain": {
+     "designed_nodes": 668,
+     "distinct_real_candidates": 4769,
+     "domain_median": 0.0,
+     "domain_min": 0,
+     "domain_max": 4613,
+     "empty_domains": 509
+    },
+    "latch_threshold": 57,
+    "real_mutual_pairs": 1223,
+    "real_mutual_members": 771,
+    "mutual_pairs_both_in_some_latch_domain": 1223,
+    "designed_latches": 380
+   },
+   "placement": {
+    "carried": 3046,
+    "edges": 5950,
+    "carried_fraction": 0.5119,
+    "by_class": {
+     "hard": {
+      "carried": 2815,
+      "total": 4680,
+      "fraction": 0.6015
+     },
+     "hub": {
+      "carried": 213,
+      "total": 1078,
+      "fraction": 0.1976
+     },
+     "impossible": {
+      "carried": 0,
+      "total": 12,
+      "fraction": 0.0
+     },
+     "tree_in": {
+      "carried": 18,
+      "total": 180,
+      "fraction": 0.1
+     }
+    },
+    "neurons_placed": 3122,
+    "neurons_total": 3222,
+    "unplaced_by_role": {
+     "hop": 42,
+     "d": 27,
+     "edge_inh": 14,
+     "veto": 12,
+     "ready_delay": 2,
+     "edge": 2,
+     "h": 1
+    },
+    "parasitic_to_zero": 181654,
+    "search_seconds": 76.6,
+    "placement_seconds": 76.5,
+    "strategy": "hub_first seed 1",
+    "order_note": "backtracks 142; 2888 carried before repair, +160 repaired; descent 24.3 s",
+    "peak_memory_gb": 2.14,
+    "motifs": {
+     "latch": {
+      "partial": 74,
+      "complete": 306
+     },
+     "relay": {
+      "complete": 210,
+      "partial": 304
+     },
+     "single": {
+      "complete": 711,
+      "unplaced": 55
+     },
+     "chain": {
+      "partial": 51,
+      "complete": 11
+     }
+    },
+    "motifs_search": {
+     "latch": {
+      "partial": 372,
+      "skipped": 1,
+      "complete": 7
+     },
+     "relay": {
+      "partial": 493,
+      "complete": 16,
+      "skipped": 5
+     },
+     "single": {
+      "skipped": 79,
+      "complete": 74,
+      "partial": 613
+     },
+     "chain": {
+      "partial": 62
+     }
+    },
+    "missing_by_class_top": {
+     "edge_inh -> edge": [
+      305,
+      513
+     ],
+     "c -> u": [
+      243,
+      295
+     ],
+     "c -> v": [
+      243,
+      295
+     ],
+     "edge -> u": [
+      241,
+      491
+     ],
+     "u -> veto": [
+      195,
+      392
+     ],
+     "d -> edge": [
+      172,
+      225
+     ],
+     "veto -> edge": [
+      154,
+      361
+     ],
+     "d -> d": [
+      139,
+      535
+     ],
+     "u -> edge": [
+      96,
+      171
+     ],
+     "d -> edge_inh": [
+      95,
+      225
+     ],
+     "reset_relay -> c": [
+      87,
+      94
+     ],
+     "hop -> hop": [
+      62,
+      91
+     ],
+     "v -> u": [
+      55,
+      380
+     ],
+     "c -> hop": [
+      54,
+      72
+     ],
+     "u -> v": [
+      47,
+      382
+     ],
+     "u -> and": [
+      44,
+      146
+     ],
+     "reset_inh -> u": [
+      42,
+      50
+     ],
+     "u -> or": [
+      41,
+      76
+     ],
+     "reset_inh -> v": [
+      38,
+      50
+     ],
+     "c -> or": [
+      37,
+      38
+     ]
+    },
+    "hubs": {
+     "IN.M.reset_inh": {
+      "members": 4,
+      "members_placed": 4,
+      "out_carried": 27,
+      "out_total": 77,
+      "in_carried": 4,
+      "in_total": 16
+     },
+     "IN.P.reset_inh": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 10,
+      "out_total": 34,
+      "in_carried": 2,
+      "in_total": 8
+     },
+     "IN.Q.reset_inh": {
+      "members": 5,
+      "members_placed": 5,
+      "out_carried": 12,
+      "out_total": 87,
+      "in_carried": 2,
+      "in_total": 20
+     },
+     "IN.copy.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 16,
+      "out_total": 33,
+      "in_carried": 3,
+      "in_total": 6
+     },
+     "P.wd.cancel_inh": {
+      "members": 5,
+      "members_placed": 5,
+      "out_carried": 21,
+      "out_total": 94,
+      "in_carried": 1,
+      "in_total": 10
+     },
+     "Q.faultL.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 9,
+      "out_total": 33,
+      "in_carried": 7,
+      "in_total": 20
+     },
+     "c1.M.reset_inh": {
+      "members": 6,
+      "members_placed": 6,
+      "out_carried": 13,
+      "out_total": 107,
+      "in_carried": 4,
+      "in_total": 24
+     },
+     "c1.Q.reset_inh": {
+      "members": 23,
+      "members_placed": 23,
+      "out_carried": 63,
+      "out_total": 456,
+      "in_carried": 2,
+      "in_total": 92
+     },
+     "c1.actd.d10": {
+      "members": 4,
+      "members_placed": 4,
+      "out_carried": 14,
+      "out_total": 70,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "c1.copy.u": {
+      "members": 3,
+      "members_placed": 3,
+      "out_carried": 14,
+      "out_total": 45,
+      "in_carried": 2,
+      "in_total": 9
+     },
+     "c1.faultL.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 2,
+      "out_total": 33,
+      "in_carried": 4,
+      "in_total": 26
+     },
+     "c1.u0r0.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 12,
+      "out_total": 21,
+      "in_carried": 2,
+      "in_total": 2
+     }
+    },
+    "exposure": {
+     "hosts": 3122,
+     "in_edges": 1277500,
+     "out_edges": 1069004,
+     "in_total": 10931578,
+     "out_total": 8008312,
+     "in_mean": 3501.5,
+     "out_mean": 2565.1,
+     "in_max": 113068,
+     "out_max": 106491,
+     "in_p90": 7282.8,
+     "out_p90": 4959.9
+    }
+   },
+   "wall_seconds": 108.7,
+   "peak_memory_polled_gb": 2.11
+  },
+  "n4_unsplit": {
+   "width": 4,
+   "split": false,
+   "max_fanout": null,
+   "k_max": 4.0,
+   "restarts": 2,
+   "time_limit_s": 1800.0,
+   "netlist": {
+    "neurons": 1906,
+    "synapses": 3412,
+    "edges": 3404,
+    "hard": 2812,
+    "hub_soft": 588,
+    "impossible": 12,
+    "mixed_sign": [
+     "Q.faultL.u",
+     "c1.faultL.u"
+    ],
+    "motifs": {
+     "hub": 9,
+     "latch": 217,
+     "relay": 256,
+     "single": 431,
+     "chain": 39
+    },
+    "latch_members": 434,
+    "relay_inhibitors": 256,
+    "chain_lengths": [
+     76,
+     20,
+     20,
+     20,
+     20,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     16,
+     16,
+     15,
+     15,
+     15,
+     12,
+     12,
+     12,
+     12,
+     12,
+     10,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     3
+    ],
+    "hubs": [
+     {
+      "role": "c1.Q.reset_inh",
+      "out": 255,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "P.wd.cancel_inh",
+      "out": 78,
+      "in": 2,
+      "sign": -1
+     },
+     {
+      "role": "c1.M.reset_inh",
+      "out": 69,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "IN.Q.reset_inh",
+      "out": 47,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "IN.M.reset_inh",
+      "out": 39,
+      "in": 4,
+      "sign": -1
+     },
+     {
+      "role": "c1.actd.d10",
+      "out": 38,
+      "in": 1,
+      "sign": 1
+     },
+     {
+      "role": "c1.copy.u",
+      "out": 29,
+      "in": 3,
+      "sign": 1
+     },
+     {
+      "role": "c1.faultL.u",
+      "out": 24,
+      "in": 9,
+      "sign": 1
+     },
+     {
+      "role": "Q.faultL.u",
+      "out": 21,
+      "in": 6,
+      "sign": 1
+     }
+    ],
+    "max_out_degree": 255,
+    "max_in_degree": 9,
+    "required_counts": [
+     4,
+     12,
+     15,
+     29,
+     43,
+     57,
+     73,
+     85,
+     125
+    ]
+   },
+   "domains": {
+    "setup_seconds": 15.4,
+    "arc_consistency": {
+     "empty_domains_after_round": [
+      0,
+      0
+     ],
+     "emptied_by_a_neighbour_with_candidates": 0,
+     "emptied_by_an_empty_neighbour": 0,
+     "root_conflicts": [],
+     "root_conflict_classes": {}
+    },
+    "hub": {
+     "designed_nodes": 9,
+     "distinct_real_candidates": 6863,
+     "domain_median": 841.0,
+     "domain_min": 453,
+     "domain_max": 5275,
+     "empty_domains": 0
+    },
+    "latch": {
+     "designed_nodes": 434,
+     "distinct_real_candidates": 771,
+     "domain_median": 181.0,
+     "domain_min": 4,
+     "domain_max": 771,
+     "empty_domains": 0
+    },
+    "relay": {
+     "designed_nodes": 512,
+     "distinct_real_candidates": 889,
+     "domain_median": 56.0,
+     "domain_min": 9,
+     "domain_max": 353,
+     "empty_domains": 0
+    },
+    "single": {
+     "designed_nodes": 431,
+     "distinct_real_candidates": 33786,
+     "domain_median": 410.0,
+     "domain_min": 35,
+     "domain_max": 27723,
+     "empty_domains": 0
+    },
+    "chain": {
+     "designed_nodes": 520,
+     "distinct_real_candidates": 4867,
+     "domain_median": 3118.0,
+     "domain_min": 5,
+     "domain_max": 4769,
+     "empty_domains": 0
+    },
+    "latch_threshold": 57,
+    "real_mutual_pairs": 1223,
+    "real_mutual_members": 771,
+    "mutual_pairs_both_in_some_latch_domain": 1223,
+    "designed_latches": 217
+   },
+   "placement": {
+    "carried": 2030,
+    "edges": 3404,
+    "carried_fraction": 0.5964,
+    "by_class": {
+     "hard": {
+      "carried": 1947,
+      "total": 2812,
+      "fraction": 0.6924
+     },
+     "hub": {
+      "carried": 83,
+      "total": 580,
+      "fraction": 0.1431
+     },
+     "impossible": {
+      "carried": 0,
+      "total": 12,
+      "fraction": 0.0
+     }
+    },
+    "neurons_placed": 1894,
+    "neurons_total": 1906,
+    "unplaced_by_role": {
+     "edge_inh": 9,
+     "d": 2,
+     "veto": 1
+    },
+    "parasitic_to_zero": 87575,
+    "search_seconds": 65.8,
+    "placement_seconds": 65.8,
+    "strategy": "hub_last seed 0",
+    "order_note": "backtracks 491; 1904 carried before repair, +133 repaired; descent 21.8 s",
+    "peak_memory_gb": 2.34,
+    "motifs": {
+     "hub": {
+      "complete": 9
+     },
+     "latch": {
+      "complete": 158,
+      "partial": 59
+     },
+     "relay": {
+      "partial": 91,
+      "complete": 165
+     },
+     "single": {
+      "complete": 430,
+      "unplaced": 1
+     },
+     "chain": {
+      "complete": 31,
+      "partial": 8
+     }
+    },
+    "motifs_search": {
+     "hub": {
+      "skipped": 9
+     },
+     "latch": {
+      "partial": 162,
+      "complete": 55
+     },
+     "relay": {
+      "partial": 205,
+      "complete": 50,
+      "skipped": 1
+     },
+     "single": {
+      "partial": 151,
+      "complete": 271,
+      "skipped": 9
+     },
+     "chain": {
+      "complete": 11,
+      "partial": 28
+     }
+    },
+    "missing_by_class_top": {
+     "edge -> u": [
+      174,
+      263
+     ],
+     "reset_inh -> u": [
+      155,
+      190
+     ],
+     "reset_inh -> v": [
+      141,
+      190
+     ],
+     "u -> veto": [
+      130,
+      218
+     ],
+     "edge_inh -> edge": [
+      92,
+      285
+     ],
+     "cancel_inh -> hop": [
+      72,
+      76
+     ],
+     "u -> edge": [
+      58,
+      113
+     ],
+     "d -> edge_inh": [
+      58,
+      130
+     ],
+     "d -> edge": [
+      56,
+      130
+     ],
+     "u -> v": [
+      54,
+      224
+     ],
+     "v -> u": [
+      44,
+      220
+     ],
+     "veto -> edge": [
+      42,
+      193
+     ],
+     "u -> edge_inh": [
+      39,
+      111
+     ],
+     "u -> hold_inh": [
+      24,
+      40
+     ],
+     "d -> d": [
+      24,
+      335
+     ],
+     "reset_inh -> or": [
+      21,
+      22
+     ],
+     "u -> and": [
+      20,
+      82
+     ],
+     "u -> or": [
+      17,
+      44
+     ],
+     "reset_inh -> and": [
+      16,
+      18
+     ],
+     "reset_relay -> reset_inh": [
+      13,
+      15
+     ]
+    },
+    "hubs": {
+     "c1.Q.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 40,
+      "out_total": 253,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "P.wd.cancel_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 4,
+      "out_total": 78,
+      "in_carried": 0,
+      "in_total": 2
+     },
+     "c1.M.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 16,
+      "out_total": 67,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "IN.Q.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 2,
+      "out_total": 45,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "IN.M.reset_inh": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 13,
+      "out_total": 37,
+      "in_carried": 0,
+      "in_total": 4
+     },
+     "c1.actd.d10": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 4,
+      "out_total": 38,
+      "in_carried": 0,
+      "in_total": 1
+     },
+     "c1.copy.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 1,
+      "out_total": 29,
+      "in_carried": 2,
+      "in_total": 3
+     },
+     "c1.faultL.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 1,
+      "out_total": 24,
+      "in_carried": 2,
+      "in_total": 9
+     },
+     "Q.faultL.u": {
+      "members": 1,
+      "members_placed": 1,
+      "out_carried": 2,
+      "out_total": 21,
+      "in_carried": 1,
+      "in_total": 6
+     }
+    },
+    "exposure": {
+     "hosts": 1894,
+     "in_edges": 898558,
+     "out_edges": 774259,
+     "in_total": 8203001,
+     "out_total": 6242354,
+     "in_mean": 4331.0,
+     "out_mean": 3295.9,
+     "in_max": 45653,
+     "out_max": 46262,
+     "in_p90": 8630.7,
+     "out_p90": 6380.9
+    }
+   },
+   "wall_seconds": 84.5,
+   "peak_memory_polled_gb": 2.03
+  },
+  "n4_split": {
+   "width": 4,
+   "split": true,
+   "max_fanout": 16,
+   "k_max": 4.0,
+   "restarts": 2,
+   "time_limit_s": 1800.0,
+   "netlist": {
+    "neurons": 1948,
+    "synapses": 3555,
+    "edges": 3547,
+    "hard": 3543,
+    "hub_soft": 0,
+    "impossible": 12,
+    "mixed_sign": [
+     "Q.faultL.u",
+     "c1.faultL.u",
+     "Q.faultL.u.c1",
+     "c1.faultL.u.c1"
+    ],
+    "motifs": {
+     "latch": 220,
+     "relay": 287,
+     "single": 492,
+     "chain": 38
+    },
+    "latch_members": 440,
+    "relay_inhibitors": 287,
+    "chain_lengths": [
+     20,
+     20,
+     20,
+     20,
+     17,
+     17,
+     17,
+     17,
+     17,
+     17,
+     16,
+     16,
+     16,
+     16,
+     15,
+     15,
+     15,
+     12,
+     12,
+     12,
+     12,
+     12,
+     10,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     6,
+     5,
+     5,
+     5,
+     5,
+     5,
+     5,
+     3
+    ],
+    "hubs": [],
+    "max_out_degree": 16,
+    "max_in_degree": 9,
+    "required_counts": [
+     4,
+     12,
+     15,
+     29,
+     43,
+     57,
+     73,
+     85,
+     125
+    ]
+   },
+   "split_note": null,
+   "split_copies": {
+    "c1.Q.reset_inh": 16,
+    "P.wd.cancel_inh": 4,
+    "c1.M.reset_inh": 4,
+    "IN.Q.reset_inh": 3,
+    "IN.M.reset_inh": 2,
+    "c1.actd.d10": 2,
+    "IN.P.reset_inh": 1,
+    "Q.faultL.u": 1,
+    "IN.copy.u": 1,
+    "c1.faultL.u": 1,
+    "c1.copy.u": 1,
+    "c1.a3dr0.d16": 1,
+    "c1.a3dr1.d16": 1,
+    "c1.Q.reset_relay3": 1,
+    "c1.Q.reset_relay2": 1,
+    "c1.Q.reset_relay1": 1,
+    "c1.Q.reset": 1
+   },
+   "split_neurons_added": 42,
+   "split_synapses_added": 143,
+   "split_originals_out_degree": {
+    "IN.P.reset_inh": 18,
+    "P.wd.cancel_inh": 78,
+    "Q.faultL.u": 21,
+    "IN.M.reset_inh": 39,
+    "IN.copy.u": 17,
+    "IN.Q.reset_inh": 47,
+    "c1.faultL.u": 24,
+    "c1.M.reset_inh": 69,
+    "c1.copy.u": 29,
+    "c1.Q.reset_inh": 255,
+    "c1.actd.d10": 38,
+    "c1.a3dr0.d16": 18,
+    "c1.a3dr1.d16": 18,
+    "c1.Q.reset_relay3": 1,
+    "c1.Q.reset_relay2": 2,
+    "c1.Q.reset_relay1": 2,
+    "c1.Q.reset": 3
+   },
+   "domains": {
+    "setup_seconds": 17.9,
+    "arc_consistency": {
+     "empty_domains_after_round": [
+      0,
+      0
+     ],
+     "emptied_by_a_neighbour_with_candidates": 0,
+     "emptied_by_an_empty_neighbour": 0,
+     "root_conflicts": [],
+     "root_conflict_classes": {}
+    },
+    "latch": {
+     "designed_nodes": 440,
+     "distinct_real_candidates": 771,
+     "domain_median": 94.5,
+     "domain_min": 7,
+     "domain_max": 771,
+     "empty_domains": 0
+    },
+    "relay": {
+     "designed_nodes": 574,
+     "distinct_real_candidates": 788,
+     "domain_median": 56.0,
+     "domain_min": 9,
+     "domain_max": 335,
+     "empty_domains": 0
+    },
+    "single": {
+     "designed_nodes": 492,
+     "distinct_real_candidates": 21283,
+     "domain_median": 225.0,
+     "domain_min": 5,
+     "domain_max": 14587,
+     "empty_domains": 0
+    },
+    "chain": {
+     "designed_nodes": 442,
+     "distinct_real_candidates": 4770,
+     "domain_median": 2448.5,
+     "domain_min": 5,
+     "domain_max": 4613,
+     "empty_domains": 0
+    },
+    "latch_threshold": 57,
+    "real_mutual_pairs": 1223,
+    "real_mutual_members": 771,
+    "mutual_pairs_both_in_some_latch_domain": 1223,
+    "designed_latches": 220
+   },
+   "placement": {
+    "carried": 2059,
+    "edges": 3547,
+    "carried_fraction": 0.5805,
+    "by_class": {
+     "hard": {
+      "carried": 1853,
+      "total": 2812,
+      "fraction": 0.659
+     },
+     "hub": {
+      "carried": 156,
+      "total": 589,
+      "fraction": 0.2649
+     },
+     "impossible": {
+      "carried": 0,
+      "total": 12,
+      "fraction": 0.0
+     },
+     "tree_in": {
+      "carried": 50,
+      "total": 134,
+      "fraction": 0.3731
+     }
+    },
+    "neurons_placed": 1938,
+    "neurons_total": 1948,
+    "unplaced_by_role": {
+     "d": 5,
+     "edge_inh": 2,
+     "hop": 2,
+     "c": 1
+    },
+    "parasitic_to_zero": 91749,
+    "search_seconds": 61.9,
+    "placement_seconds": 61.8,
+    "strategy": "hub_last seed 0",
+    "order_note": "backtracks 374; 1926 carried before repair, +136 repaired; descent 13.8 s",
+    "peak_memory_gb": 2.31,
+    "motifs": {
+     "latch": {
+      "complete": 157,
+      "partial": 63
+     },
+     "relay": {
+      "partial": 119,
+      "complete": 168
+     },
+     "single": {
+      "complete": 489,
+      "unplaced": 3
+     },
+     "chain": {
+      "complete": 27,
+      "partial": 11
+     }
+    },
+    "motifs_search": {
+     "latch": {
+      "partial": 196,
+      "complete": 24
+     },
+     "relay": {
+      "partial": 244,
+      "complete": 43
+     },
+     "single": {
+      "complete": 182,
+      "partial": 291,
+      "skipped": 19
+     },
+     "chain": {
+      "partial": 31,
+      "complete": 7
+     }
+    },
+    "missing_by_class_top": {
+     "edge -> u": [
+      160,
+      263
+     ],
+     "edge_inh -> edge": [
+      117,
+      285
+     ],
+     "c -> v": [
+      113,
+      153
+     ],
+     "u -> veto": [
+      112,
+      213
+     ],
+     "c -> u": [
+      105,
+      153
+     ],
+     "d -> edge": [
+      60,
+      117
+     ],
+     "u -> edge": [
+      58,
+      107
+     ],
+     "veto -> edge": [
+      57,
+      193
+     ],
+     "c -> hop": [
+      53,
+      60
+     ],
+     "reset_relay -> c": [
+      46,
+      73
+     ],
+     "u -> v": [
+      45,
+      222
+     ],
+     "d -> edge_inh": [
+      41,
+      117
+     ],
+     "v -> u": [
+      39,
+      220
+     ],
+     "reset_inh -> v": [
+      31,
+      40
+     ],
+     "reset_inh -> u": [
+      30,
+      40
+     ],
+     "d -> d": [
+      29,
+      335
+     ],
+     "u -> and": [
+      27,
+      82
+     ],
+     "u -> hold_inh": [
+      26,
+      40
+     ],
+     "c -> or": [
+      21,
+      22
+     ],
+     "u -> edge_inh": [
+      21,
+      103
+     ]
+    },
+    "hubs": {
+     "IN.M.reset_inh": {
+      "members": 3,
+      "members_placed": 3,
+      "out_carried": 7,
+      "out_total": 37,
+      "in_carried": 9,
+      "in_total": 12
+     },
+     "IN.Q.reset_inh": {
+      "members": 4,
+      "members_placed": 4,
+      "out_carried": 16,
+      "out_total": 47,
+      "in_carried": 5,
+      "in_total": 16
+     },
+     "P.wd.cancel_inh": {
+      "members": 5,
+      "members_placed": 5,
+      "out_carried": 11,
+      "out_total": 78,
+      "in_carried": 2,
+      "in_total": 10
+     },
+     "Q.faultL.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 5,
+      "out_total": 25,
+      "in_carried": 1,
+      "in_total": 12
+     },
+     "c1.M.reset_inh": {
+      "members": 5,
+      "members_placed": 5,
+      "out_carried": 31,
+      "out_total": 67,
+      "in_carried": 16,
+      "in_total": 20
+     },
+     "c1.Q.reset_inh": {
+      "members": 17,
+      "members_placed": 17,
+      "out_carried": 54,
+      "out_total": 255,
+      "in_carried": 15,
+      "in_total": 68
+     },
+     "c1.actd.d10": {
+      "members": 3,
+      "members_placed": 3,
+      "out_carried": 10,
+      "out_total": 38,
+      "in_carried": 0,
+      "in_total": 3
+     },
+     "c1.copy.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 16,
+      "out_total": 29,
+      "in_carried": 3,
+      "in_total": 6
+     },
+     "c1.faultL.u": {
+      "members": 2,
+      "members_placed": 2,
+      "out_carried": 6,
+      "out_total": 25,
+      "in_carried": 8,
+      "in_total": 18
+     }
+    },
+    "exposure": {
+     "hosts": 1938,
+     "in_edges": 872379,
+     "out_edges": 769937,
+     "in_total": 7934058,
+     "out_total": 6022319,
+     "in_mean": 4093.9,
+     "out_mean": 3107.5,
+     "in_max": 45382,
+     "out_max": 46261,
+     "in_p90": 8280.9,
+     "out_p90": 6006.3
+    }
+   },
+   "wall_seconds": 82.5,
+   "peak_memory_polled_gb": 2.31
+  }
+ },
+ "fallback": null,
+ "latch_capacity": {
+  "4": {
+   "threshold": 57,
+   "mutual_pairs": 1223,
+   "mutual_members": 771,
+   "max_disjoint_pairs": 343,
+   "matching": "maximum matching",
+   "strong_core": 3197
+  },
+  "8": {
+   "threshold": 29,
+   "mutual_pairs": 4292,
+   "mutual_members": 2432,
+   "max_disjoint_pairs": 1047,
+   "matching": "maximum matching",
+   "strong_core": 10131
+  },
+  "16": {
+   "threshold": 15,
+   "mutual_pairs": 12315,
+   "mutual_members": 6979,
+   "max_disjoint_pairs": 2896,
+   "matching": "maximum matching",
+   "strong_core": 22347
+  }
+ }
+}
