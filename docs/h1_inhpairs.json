@@ -43,6 +43,118 @@
    "antennal_lobe_members": 22,
    "antennal_lobe_column": "class",
    "antennal_lobe_prefix": "AL"
+  },
+  "proxy_readout": {
+   "loose": {
+    "pairs_with_a_proxy": 700,
+    "candidate_triples": 16962,
+    "distinct_proxies": 5629,
+    "mean_proxies_per_pair": 24.2,
+    "disjoint_triples": 358,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 351,
+    "pair_matching_upper_bound": 358,
+    "pairs_superclass_counts": {
+     "cb_intrinsic": 353,
+     "vnc_intrinsic": 256,
+     "ol_intrinsic": 25,
+     "descending_neuron": 24,
+     "ascending_neuron": 23,
+     "visual_projection": 18,
+     "visual_centrifugal": 14,
+     "cb_motor": 2,
+     "cb_sensory_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "LT51": 10,
+     "ER4m": 10,
+     "IN08A002": 6,
+     "IN13B001": 6,
+     "IN19A001": 6,
+     "IN08A007": 6,
+     "IN19A011": 6,
+     "IN13A001": 6
+    },
+    "proxies_superclass_counts": {
+     "cb_intrinsic": 159,
+     "vnc_intrinsic": 121,
+     "ascending_neuron": 21,
+     "visual_projection": 14,
+     "descending_neuron": 14,
+     "ol_intrinsic": 11,
+     "cb_sensory": 8,
+     "vnc_sensory": 5,
+     "cb_motor": 3,
+     "visual_centrifugal": 1,
+     "vnc_motor": 1
+    },
+    "proxies_top_cell_types": {
+     "IN03A067": 6,
+     "EPG": 5,
+     "DNg04": 4,
+     "IN02A015": 4,
+     "INXXX466": 3,
+     "TRN_VP1m": 3,
+     "IN01A015": 3,
+     "IN04B031": 3
+    },
+    "proxies_mean_external_input_synapses": 1782.1,
+    "pairs_mean_external_input_synapses": 6711.9
+   },
+   "strict": {
+    "pairs_with_a_proxy": 694,
+    "candidate_triples": 12256,
+    "distinct_proxies": 3638,
+    "mean_proxies_per_pair": 17.7,
+    "disjoint_triples": 353,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 345,
+    "pair_matching_upper_bound": 353,
+    "pairs_superclass_counts": {
+     "cb_intrinsic": 350,
+     "vnc_intrinsic": 257,
+     "descending_neuron": 23,
+     "ascending_neuron": 22,
+     "ol_intrinsic": 20,
+     "visual_projection": 18,
+     "visual_centrifugal": 13,
+     "cb_motor": 2,
+     "cb_sensory_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "LT51": 10,
+     "ER4m": 10,
+     "IN08A002": 6,
+     "IN13B001": 6,
+     "IN19A001": 6,
+     "IN08A007": 6,
+     "IN19A011": 6,
+     "IN13A001": 6
+    },
+    "proxies_superclass_counts": {
+     "cb_intrinsic": 156,
+     "vnc_intrinsic": 120,
+     "ascending_neuron": 23,
+     "descending_neuron": 18,
+     "visual_projection": 16,
+     "cb_sensory": 9,
+     "ol_intrinsic": 6,
+     "vnc_sensory": 4,
+     "visual_centrifugal": 1
+    },
+    "proxies_top_cell_types": {
+     "IN03A067": 6,
+     "EPG": 5,
+     "DNg04": 4,
+     "IN02A015": 4,
+     "INXXX466": 3,
+     "TRN_VP1m": 3,
+     "IN01A015": 3,
+     "IN20A.22A008": 3
+    },
+    "proxies_mean_external_input_synapses": 2007.1,
+    "pairs_mean_external_input_synapses": 6758.7
+   }
   }
  },
  "8": {
@@ -89,6 +201,121 @@
    "antennal_lobe_members": 27,
    "antennal_lobe_column": "class",
    "antennal_lobe_prefix": "AL"
+  },
+  "proxy_readout": {
+   "loose": {
+    "pairs_with_a_proxy": 3448,
+    "candidate_triples": 139276,
+    "distinct_proxies": 19750,
+    "mean_proxies_per_pair": 40.4,
+    "disjoint_triples": 1030,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 997,
+    "pair_matching_upper_bound": 1083,
+    "pairs_superclass_counts": {
+     "cb_intrinsic": 925,
+     "vnc_intrinsic": 601,
+     "ol_intrinsic": 331,
+     "ascending_neuron": 74,
+     "descending_neuron": 63,
+     "visual_projection": 37,
+     "visual_centrifugal": 24,
+     "cb_motor": 4,
+     "cb_sensory_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "MeLo9": 65,
+     "Pm2a": 63,
+     "Pm4": 31,
+     "Pm3": 29,
+     "Mi4": 23,
+     "Mi9": 23,
+     "Delta7": 14,
+     "LT51": 13
+    },
+    "proxies_superclass_counts": {
+     "cb_intrinsic": 422,
+     "vnc_intrinsic": 294,
+     "ol_intrinsic": 134,
+     "visual_projection": 59,
+     "ascending_neuron": 36,
+     "vnc_sensory": 23,
+     "descending_neuron": 22,
+     "cb_sensory": 18,
+     "cb_motor": 10,
+     "visual_centrifugal": 7,
+     "sensory_ascending": 3,
+     "vnc_motor": 2
+    },
+    "proxies_top_cell_types": {
+     "Lawf2": 43,
+     "MeLo7": 22,
+     "EPG": 18,
+     "TmY18": 14,
+     "Tm20": 10,
+     "TmY13": 9,
+     "Tm6": 8,
+     "LPC2": 8
+    },
+    "proxies_mean_external_input_synapses": 956.7,
+    "pairs_mean_external_input_synapses": 4738.3
+   },
+   "strict": {
+    "pairs_with_a_proxy": 3402,
+    "candidate_triples": 122097,
+    "distinct_proxies": 16058,
+    "mean_proxies_per_pair": 35.9,
+    "disjoint_triples": 997,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 963,
+    "pair_matching_upper_bound": 1056,
+    "pairs_superclass_counts": {
+     "cb_intrinsic": 923,
+     "vnc_intrinsic": 603,
+     "ol_intrinsic": 263,
+     "ascending_neuron": 75,
+     "descending_neuron": 63,
+     "visual_projection": 37,
+     "visual_centrifugal": 25,
+     "cb_motor": 4,
+     "cb_sensory_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "MeLo9": 40,
+     "Pm2a": 38,
+     "Pm4": 31,
+     "Pm3": 29,
+     "Mi4": 15,
+     "Mi9": 15,
+     "Delta7": 14,
+     "LT51": 13
+    },
+    "proxies_superclass_counts": {
+     "cb_intrinsic": 431,
+     "vnc_intrinsic": 295,
+     "ol_intrinsic": 100,
+     "visual_projection": 61,
+     "ascending_neuron": 37,
+     "vnc_sensory": 25,
+     "descending_neuron": 22,
+     "cb_sensory": 16,
+     "visual_centrifugal": 6,
+     "cb_motor": 2,
+     "sensory_ascending": 2
+    },
+    "proxies_top_cell_types": {
+     "MeLo7": 40,
+     "Y3": 25,
+     "EPG": 18,
+     "LC10d": 9,
+     "TmY13": 7,
+     "Tm20": 7,
+     "LLPC2": 6,
+     "IN04B074": 6
+    },
+    "proxies_mean_external_input_synapses": 1028.0,
+    "pairs_mean_external_input_synapses": 4794.5
+   }
   }
  },
  "16": {
@@ -138,6 +365,129 @@
    "antennal_lobe_members": 66,
    "antennal_lobe_column": "class",
    "antennal_lobe_prefix": "AL"
+  },
+  "proxy_readout": {
+   "loose": {
+    "pairs_with_a_proxy": 12630,
+    "candidate_triples": 727871,
+    "distinct_proxies": 51647,
+    "mean_proxies_per_pair": 57.6,
+    "disjoint_triples": 3712,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 3620,
+    "pair_matching_upper_bound": 3786,
+    "pairs_superclass_counts": {
+     "ol_intrinsic": 3722,
+     "cb_intrinsic": 2061,
+     "vnc_intrinsic": 1200,
+     "ascending_neuron": 154,
+     "descending_neuron": 116,
+     "visual_projection": 110,
+     "visual_centrifugal": 53,
+     "cb_motor": 4,
+     "sensory_ascending": 1,
+     "cb_sensory_tbc": 1,
+     "efferent_ascending": 1,
+     "vnc_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "Mi4": 1204,
+     "Mi9": 1204,
+     "Pm4": 128,
+     "L1": 103,
+     "C2": 102,
+     "MeLo9": 82,
+     "Pm2a": 75,
+     "Pm3": 69
+    },
+    "proxies_superclass_counts": {
+     "ol_intrinsic": 1714,
+     "cb_intrinsic": 910,
+     "vnc_intrinsic": 536,
+     "visual_projection": 223,
+     "vnc_sensory": 109,
+     "ascending_neuron": 76,
+     "cb_sensory": 60,
+     "descending_neuron": 50,
+     "cb_motor": 12,
+     "sensory_ascending": 12,
+     "visual_centrifugal": 5,
+     "vnc_motor": 4,
+     "visual_projection_tbc": 1
+    },
+    "proxies_top_cell_types": {
+     "Tm9": 742,
+     "Tm20": 199,
+     "T2a": 69,
+     "TmY18": 69,
+     "Lawf2": 52,
+     "Mi15": 51,
+     "Mi10": 48,
+     "EPG": 46
+    },
+    "proxies_mean_external_input_synapses": 497.9,
+    "pairs_mean_external_input_synapses": 2198.1
+   },
+   "strict": {
+    "pairs_with_a_proxy": 12619,
+    "candidate_triples": 710356,
+    "distinct_proxies": 48883,
+    "mean_proxies_per_pair": 56.3,
+    "disjoint_triples": 3703,
+    "packing_method": "milp optimal",
+    "greedy_lower_bound": 3612,
+    "pair_matching_upper_bound": 3778,
+    "pairs_superclass_counts": {
+     "ol_intrinsic": 3704,
+     "cb_intrinsic": 2053,
+     "vnc_intrinsic": 1202,
+     "ascending_neuron": 156,
+     "descending_neuron": 117,
+     "visual_projection": 111,
+     "visual_centrifugal": 55,
+     "cb_motor": 4,
+     "sensory_ascending": 1,
+     "cb_sensory_tbc": 1,
+     "efferent_ascending": 1,
+     "vnc_tbc": 1
+    },
+    "pairs_top_cell_types": {
+     "Mi4": 1196,
+     "Mi9": 1196,
+     "Pm4": 129,
+     "L1": 103,
+     "C2": 102,
+     "MeLo9": 82,
+     "Pm2a": 71,
+     "Pm3": 69
+    },
+    "proxies_superclass_counts": {
+     "ol_intrinsic": 1704,
+     "cb_intrinsic": 918,
+     "vnc_intrinsic": 532,
+     "visual_projection": 224,
+     "vnc_sensory": 111,
+     "ascending_neuron": 77,
+     "cb_sensory": 61,
+     "descending_neuron": 51,
+     "sensory_ascending": 12,
+     "cb_motor": 7,
+     "visual_centrifugal": 5,
+     "visual_projection_tbc": 1
+    },
+    "proxies_top_cell_types": {
+     "Tm9": 747,
+     "Tm20": 193,
+     "T2a": 92,
+     "Tm1": 56,
+     "EPG": 46,
+     "Mi15": 45,
+     "Mi10": 45,
+     "L3": 43
+    },
+    "proxies_mean_external_input_synapses": 506.6,
+    "pairs_mean_external_input_synapses": 2218.3
+   }
   }
  }
 }

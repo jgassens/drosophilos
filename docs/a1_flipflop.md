@@ -87,10 +87,91 @@ not break it: +10 mV still locks at 1.0× loop, and the +15 mV that does resolve
 | kill train into `u` only | **yes** | 3 × 1.0 loop at every phase; the standard 4 × 0.75 loop too, with ~7 % margin |
 | a single ignition pulse | **no** | see above |
 
-So the flip-flop is a drop-in as a **rail** (anything that reads `.u` as a 213 Hz train:
-edge relays, veto neurons, rate-mode gates see the same statistics) but not as a **target**:
+So the flip-flop is a drop-in as a **rail** in a simulation (anything that reads `.u` as a
+213 Hz train: edge relays, veto neurons, rate-mode gates see the same statistics) — on the
+connectome the rail has to be the excitatory proxy `p`, §below — but not as a **target**:
 every ignition or reset path that touches `.u` or `.members` directly must go through the
 two adapters, at 3 neurons per flip-flop for SET and 4 shared neurons for CLEAR.
+
+## The excitatory proxy: reading a flip-flop on the fly (`add_flipflop(proxy=True)`, 2026-09-16)
+
+**The problem.** `u` is an inhibitory neuron. Every reader in the protocol — an edge relay
+(`u → edge`, `u → edge_inh`), a veto neuron (`u → veto`) — takes its rail through an
+*excitatory* synapse, and under Dale's law an inhibitory host has no excitatory outputs. The
+placement toy in `docs/h1_placement.md` (§Placing flip-flops) carries every flip-flop loop and
+none of the 62 readout edges: on the connectome the flip-flop can be built but not read.
+
+**The design.** A third neuron `p`, **excitatory**, on the same 58 mV bias as the pair, with one
+synapse `v → p` of −1.0× loop and no outputs of its own. While CLEAR, `v`'s 213 Hz train parks
+`p` ~15 mV below threshold exactly as it parks `u`; while SET, `v` is silent and `p` fires its
+own tonic train, 212.9 Hz, period 47 steps, step for step with `u`. So `p` is `u` with the
+right sign, and every reader connects to `ff.p` (`ff.rail`) instead of `ff.u` with no other
+change. Writers are untouched: the set chain still pulses `u`, the clear chain still inhibits
+`u` only. `p` feeds nothing back, so nothing that happens to `p` can move the pair's state.
+`clear_proxy=True` adds `q`, the same neuron inhibited by `u`, as the CLEAR rail.
+
+Sweep of the `v → p` strength (contract `proxy_readout.design.v_to_p_quanta_sweep`): 0.75×
+loop leaks (`p` fires through `v`'s train), 0.8× is the floor, and above 1.0× the only effect
+is a deeper park and a slower restart (1.5×: 20–23 ms after `v` stops; 2.0×: 26–29 ms). 1.0×
+is the default: the pair's own strength, 25 % above the leak floor, the same margin the
+loop itself has.
+
+**What it costs: one park recovery each way.** A parked neuron does not fire the instant its
+inhibitor stops; it climbs 15 mV with τ_m, which is why `v`'s first spike comes 9.5–14 ms after
+a CLEAR. `p` pays that same delay on every edge (24 phases measured, every 2nd of 47):
+
+| | through `u` | through `p` |
+|---|---|---|
+| rail's first spike after the first SET pulse (train / single 3× pulse) | 6.0–6.4 / 1.4–1.6 ms | 18.5–23.1 / 13.2–17.8 ms (10.5–14.0 after `v`'s last spike) |
+| rail's last spike after the first CLEAR pulse | at once | 9.8–17.8 ms (`v` restarts at 9.5–14.0; `p` crosses once or twice before the park) |
+| `add_edge_relay(source=rail)` | once per SET, ~11 ms after the pulse | **once per SET (3 of 3)**, 4.2 ms after `p`'s first spike, 24.1–24.6 ms after the pulse; never on the train |
+| `add_veto_relay(vetoes=[rail])`: SET train must lead the driver's rise by | ≥ 10 ms | **≥ 22 ms** (`p` is up ~12 ms later) |
+| re-drive after the first CLEAR pulse that fires the vetoed relay | 45 ms yes, 40 no | **60 ms yes, 55 no** — measured from the rail's last spike the 55 ms recovery rule is unchanged |
+| set chain (latch → edge relay → chain) and clear chain | work | work; `p` up 34 ms after the source ignites (`u`: 19.5), down 25 ms after the clear trigger (`u`: 6.4) |
+| kill train 4 × 0.75 loop into `u` | clears | clears; `p`'s last spike 22.9 ms after the first kill pulse |
+| power-on without a pulse into the rail | `u` never fires (its pulse) | `p` fires once at 2.5 ms — before `v`'s first inhibition lands at 4.3 ms — and an edge relay on it fires at 6.7 ms. **`power_on_pulse` and `power_on_events` now pulse `p` as well as `u`**; `q` is left to start with `v` |
+| hold, 2 s | 425 spikes | `p` 426 spikes SET / 0 CLEAR; `q` the reverse |
+| resources | 2 neurons, 2 synapses, 2 biases | 3 / 3 / 3 (4 / 4 / 4 with `q`); all synapses inhibitory |
+
+**Margins, from the reader's side.** A stray excitatory pulse into `p` while CLEAR: 1.1×
+ignite (5,120 quanta) never fires it (24/24 phases); 1.15× fires `p` exactly once and the
+edge relay on it once (1.8×: two `p` spikes), and the pair is untouched. That is the same
+1.1× number as `u`'s own lockstep threshold (§Register), with a milder failure: one spurious
+relay pulse instead of a permanent lockstep. A stray inhibitory pulse into `p` while SET only
+pauses it — 7–9 ms at 1.0× loop, 11–16 ms at 2.25× (the firing member's own margin), 14–19 ms
+at 3.0× — and it resumes at every phase; an edge relay on `p` never re-fires on the pause
+(0/24 at 1.0–3.0×), and a veto relay vetoed by `p` stays held when its driver rises 0–27 ms
+after a 3.0× stray (0/10). In the pair's lockstep third state `p` and `q` both run at ~105 Hz,
+as `u` and `v` do: a reader sees the same fault either way.
+
+**Supply on the connectome** (`bench/h1_inhpairs.py`, `docs/h1_inhpairs.json`,
+`proxy_readout`). A proxy host is an excitatory neuron outside the pair that one member
+inhibits with ≥ the loop threshold; the *strict* host also has an excitatory output ≥ the
+threshold to a neuron outside the pair, so it can drive a relay. Counted over the driven
+inh-inh pairs, then packed: the largest set of (pair, proxy) triples with no neuron in two
+pairs and no proxy shared (a 3-set packing, solved exactly by MILP at every k_max; ties
+broken towards the quietest proxies by a min-weight bipartite re-assignment):
+
+| k_max | threshold | driven inh-inh pairs | with a proxy, loose / strict | candidate triples | proxies per pair | disjoint triples, loose / strict (disjoint-pair bound) | proxies' mean external input synapses (pair members') | proxy superclasses, strict |
+|---|---|---|---|---|---|---|---|---|
+| 4 | 57 | 729 | 700 / 694 | 16,962 / 12,256 | 24.2 / 17.7 | **358 / 353** (358 / 353) | 1,782.1 / 2,007.1 (6,758.7) | cb_intrinsic 156, vnc_intrinsic 120, ascending_neuron 23, descending_neuron 18 |
+| 8 | 29 | 3,970 | 3,448 / 3,402 | 139,276 / 122,097 | 40.4 / 35.9 | **1,030 / 997** (1,083 / 1,056) | 956.7 / 1,028.0 (4,794.5) | cb_intrinsic 431, vnc_intrinsic 295, ol_intrinsic 100, visual_projection 61 |
+| 16 | 15 | 12,666 | 12,630 / 12,619 | 727,871 / 710,356 | 57.6 / 56.3 | **3,712 / 3,703** (3,786 / 3,778) | 497.9 / 506.6 (2,218.3) | ol_intrinsic 1704, cb_intrinsic 918, vnc_intrinsic 532, visual_projection 224 |
+
+Proxies are not the bottleneck: a driven pair has 18–58 candidates on average, and the
+packing reaches the disjoint-pair bound at k_max 4 (358 = the pool the placer already uses)
+and 94–98 % of it at 8 and 16. Against the earlier readout-by-silence count (358 / 1,105 /
+3,717 disjoint driven pairs with an inhibitory output each) the strict proxy supply is
+353 / 997 / 3,703. The chosen proxies take 3–5× fewer input synapses from the rest of the
+brain than the pair members (they are picked for that among equals), so the readout neuron
+is the quiet one of the three. Runtime: ~10 min for the three thresholds, 2 GB, almost all
+of it the two k_max 16 MILPs (`MILP_TIME_LIMIT_S`).
+
+**Not done here.** Placing the proxy: `place_netlist`'s `ffpair` motif is two biased
+inhibitory neurons in mutual inhibition; `p` is a biased excitatory neuron with one inhibitory
+input, which the placer will treat as a single. A `ffproxy` motif (pair + proxy as a unit on a
+packed triple) is the next placement step. Weight-noise campaigns through `p`; the register
+(`build_channel(storage="flipflop")`) still reads `.u`.
 
 ## Not done
 

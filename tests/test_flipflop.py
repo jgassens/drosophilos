@@ -8,7 +8,7 @@ import pytest
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.protocol.celement import add_veto_relay
 from drosophilos.protocol.flipflop import (add_clear_chain, add_flipflop, add_set_chain, clear_pulse,
-                                           power_on_pulse, set_pulse)
+                                           power_on_events, power_on_pulse, set_pulse)
 from drosophilos.protocol.latch import add_edge_relay, add_latch
 from drosophilos.sim.lif_torch import TorchSim
 from drosophilos.sim.model import Params, Topology
@@ -141,6 +141,132 @@ def test_train_into_both_members_does_not_clear():
     train = [(53 * i, n, -int(0.75 * D.loop)) for i in range(4) for n in ff.members]
     sim = _sim(net, 400, power_on_pulse(ff, D) + _at(set_pulse(ff, D), 500) + _at(train, 2000))
     assert _state(sim, ff, 2500, 4000) == "SET"
+
+
+# ---- the excitatory proxy p (add_flipflop(proxy=True)) ------------------------------
+
+def _ff_proxy(**kw):
+    net = Netlist(P)
+    return net, add_flipflop(net, D, "ff", proxy=True, **kw)
+
+
+def test_proxy_is_excitatory_u_and_default_build_is_unchanged():
+    net, ff = _ff_proxy(clear_proxy=True)
+    assert (ff.p, ff.q) == (2, 3) and ff.rail == ff.p and ff.proxies == (2, 3) and ff.proxy_quanta == D.loop
+    assert net.roles[2:] == ["ff.p", "ff.q"] and net.bias[2:] == [58.0, 58.0]
+    assert set(zip(net.src, net.dst, net.quanta)) == {(ff.u, ff.v, -D.loop), (ff.v, ff.u, -D.loop),
+                                                      (ff.v, ff.p, -D.loop), (ff.u, ff.q, -D.loop)}
+    assert not any(q > 0 for q in net.quanta)  # p and q have no outputs of their own: readers add those
+    # SET: p runs with u, step for step, at the latch's rate; q silent. CLEAR: the reverse. Both hold 2 s.
+    sim = _sim(net, 2100, power_on_pulse(ff, D) + _at(set_pulse(ff, D), 500))
+    pp, uu = _spikes(sim, ff.p, 3000, 21000), _spikes(sim, ff.u, 3000, 21000)
+    assert abs(len(pp) / 1.8 - 213) / 213 < 0.05 and np.all(np.diff(pp) == D.loop_period_steps) and len(pp) == len(uu)
+    assert len(_spikes(sim, ff.q, 1000)) == 0
+    sim = _sim(net, 2100, power_on_pulse(ff, D))
+    assert len(_spikes(sim, ff.p)) == 0 and len(_spikes(sim, ff.u)) == 0
+    assert abs(len(_spikes(sim, ff.q, 3000, 21000)) / 1.8 - 213) / 213 < 0.05
+    # the default build carries no proxy: two neurons, two synapses, rail == u
+    net0 = Netlist(P)
+    ff0 = add_flipflop(net0, D, "ff")
+    assert net0.n == 2 and net0.nnz == 2 and ff0.p is None and ff0.q is None and ff0.rail == ff0.u and ff0.proxies == ()
+    assert power_on_pulse(ff0, D) == [(0, ff0.u, -D.loop)]
+
+
+def test_proxy_switching_time_at_every_phase():
+    """p rises 18.5-23.1 ms after the first SET pulse (10.5-14.0 after v's last spike: the parked
+    neuron climbs 15 mV with tau_m, as v does on CLEAR) and its last spike is <= 17.8 ms after the
+    first CLEAR pulse (v's first spike 9.5-14.0, then one or two p spikes cross before the park)."""
+    net, ff = _ff_proxy()
+    for ph in range(0, 47, 6):
+        ev = power_on_pulse(ff, D) + _at(set_pulse(ff, D), 1000 + ph) + _at(clear_pulse(ff, D), 2500 + ph)
+        sim = _sim(net, 400, ev)
+        t0, t1 = 1000 + ph, 2500 + ph
+        p_on, v_last = _spikes(sim, ff.p, t0)[0], _spikes(sim, ff.v, 0, t1)[-1]
+        assert 180 <= p_on - t0 <= 235 and 100 <= p_on - v_last <= 145, (ph, p_on - t0, p_on - v_last)
+        assert len(_spikes(sim, ff.p, 0, t0)) == 0 and _state(sim, ff, t0 + 300, t1) == "SET"
+        p_after = _spikes(sim, ff.p, t1)
+        assert len(p_after) and p_after[-1] - t1 <= 180 and len(_spikes(sim, ff.p, t1 + 180)) == 0, (ph, p_after - t1)
+
+
+def test_proxy_noise_margins():
+    """A stray pulse into p touches only p. While CLEAR: 1.1x ignite never fires it (the same
+    margin as u's lockstep threshold); from 1.15x it fires once and is re-parked, and the pair is
+    untouched. While SET: a stray 2.25x loop (u's own margin) pauses p for <= 16 ms and it resumes;
+    an edge relay on p does not re-fire on the pause."""
+    net, ff = _ff_proxy()
+    relay = add_edge_relay(net, D, "r", ff.p)
+    for ph in range(0, 47, 6):
+        sim = _sim(net, 150, power_on_pulse(ff, D) + [(1000 + ph, ff.p, int(round(1.1 * D.ignite)))])
+        assert len(_spikes(sim, ff.p)) == 0 and len(_spikes(sim, relay)) == 0, ph
+        sim = _sim(net, 150, power_on_pulse(ff, D) + [(1000 + ph, ff.p, int(round(1.15 * D.ignite)))])
+        assert len(_spikes(sim, ff.p)) == 1 and _state(sim, ff, 1000 + ph, 1500) == "CLEAR", ph
+        assert len(_spikes(sim, relay)) == 1  # one stray p spike is one relay pulse: the reader's real margin is 1.1x
+        ev = power_on_pulse(ff, D) + _at(set_pulse(ff, D), 500) + [(1500 + ph, ff.p, -int(round(2.25 * D.loop)))]
+        sim = _sim(net, 300, ev)
+        pp = _spikes(sim, ff.p, 1400)
+        assert 100 <= np.diff(pp).max() <= 160 and len(_spikes(sim, ff.p, 2500)) >= 9, ph
+        assert len(_spikes(sim, relay)) == 1 and _state(sim, ff, 1500, 3000) == "SET", ph
+
+
+def test_edge_relay_on_proxy_fires_once_per_set():
+    """The reader's contract redone through p: once per SET (3 of 3), ~4.2 ms after p's first
+    spike, ~24 ms after the first SET pulse (u: ~11); never on the train; once at power-on if the
+    power-on pulse omits p."""
+    net, ff = _ff_proxy()
+    relay = add_edge_relay(net, D, "r", ff.p)
+    ev = list(power_on_pulse(ff, D))
+    for k in range(3):
+        ev += _at(set_pulse(ff, D), 1000 + 3000 * k) + _at(clear_pulse(ff, D), 2500 + 3000 * k)
+    sim = _sim(net, 1000, ev)
+    r = _spikes(sim, relay)
+    assert len(r) == 3, r
+    for k in range(3):
+        assert 1220 + 3000 * k <= r[k] <= 1260 + 3000 * k, r
+        assert 35 <= r[k] - _spikes(sim, ff.p, 1000 + 3000 * k)[0] <= 50
+    assert len(_spikes(sim, ff.p)) > 80
+    sim = _sim(net, 100, [(0, ff.u, -D.loop)])  # u's pulse alone: p fires at 2.5 ms and the relay follows
+    assert len(_spikes(sim, ff.p)) == 1 and len(_spikes(sim, relay)) == 1
+
+
+def test_veto_relay_vetoed_by_proxy():
+    """ff.p as a veto rail holds the relay while SET when the SET train leads the driver by >= 22
+    ms (u: 10; p rises ~12 ms later); after CLEAR the relay is drivable again 60 ms after the
+    first clear pulse (u: 45): p's last spike is <= 18 ms after it, and the veto's 55 ms recovery
+    runs from there."""
+    def trial(redrive_ms, lead_ms=90):
+        net, ff = _ff_proxy()
+        drv, tgt = add_latch(net, D, "drv"), add_latch(net, D, "tgt")
+        vr = add_veto_relay(net, D, "vr", drv.u, [ff.p], tgt)
+        ev = power_on_pulse(ff, D) + _at(set_pulse(ff, D), 1000 - lead_ms * 10) + [(1000, drv.u, D.ignite)]
+        ev += [(2000 + o, n, D.reset) for o in (0, 53, 106, 159) for n in drv.members]  # driver off
+        ev += _at(clear_pulse(ff, D), 3000) + [(3000 + redrive_ms * 10, drv.u, D.ignite)]
+        sim = _sim(net, 300 + redrive_ms + 150, ev)
+        held = len(_spikes(sim, vr, 0, 3000)) == 0 and len(_spikes(sim, tgt.u, 0, 3000)) == 0
+        released = len(_spikes(sim, vr, 3000)) == 1 and len(_spikes(sim, tgt.u, 3000 + redrive_ms * 10 + 200)) > 10
+        return held, released
+    assert trial(60) == (True, True)
+    assert trial(50) == (True, False)
+    assert trial(80, lead_ms=22) == (True, True)
+    assert trial(80, lead_ms=15)[0] is False  # u's own lead would hold here; p is not up yet
+
+
+def test_chains_and_kill_train_through_proxy():
+    """The set chain and the clear chain (and a kill train into u) work unchanged with a proxy
+    built; p follows u with its park delay and power_on_events covers p."""
+    net, ff = _ff_proxy()
+    src = add_latch(net, D, "src")
+    relay = add_edge_relay(net, D, "r", src.u)
+    net.synapse(relay, add_set_chain(net, D, "ff", ff), D.ignite)
+    ctrig, _ = add_clear_chain(net, D, "ff", [ff])
+    assert power_on_events(net, D) == [(0, ff.u, -D.loop), (0, ff.p, -D.loop)]
+    sim = _sim(net, 500, power_on_events(net, D) + [(1000, src.u, D.ignite), (3000, ctrig, D.pulse)])
+    assert _state(sim, ff, 1500, 3000) == "SET" and _state(sim, ff, 3300, 5000) == "CLEAR"
+    assert len(_spikes(sim, ff.p, 1500, 3000)) > 25 and len(_spikes(sim, ff.p, 3300)) == 0
+    net, ff = _ff_proxy()
+    train = [(53 * i, ff.u, -int(0.75 * D.loop)) for i in range(4)]
+    sim = _sim(net, 400, power_on_pulse(ff, D) + _at(set_pulse(ff, D), 500) + _at(train, 2000))
+    assert _state(sim, ff, 2500, 4000) == "CLEAR" and len(_spikes(sim, ff.p, 2300)) == 0
+    assert _spikes(sim, ff.p, 2000)[-1] - 2000 <= 240
 
 
 # ---- per-neuron bias plumbing ------------------------------------------------------

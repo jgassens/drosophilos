@@ -28,6 +28,15 @@ are all-phase minima at the default inhibition (1.0x loop per spike):
 The defaults of set_pulse / clear_pulse carry a margin over those minima: SET is three
 standard ignite pulses (1.0x, minimum 0.75x) or one 3x ignite pulse (minimum 2.25x); CLEAR
 is three standard reset pulses (1.5x loop, minimum 1.0x) or one 5x loop pulse (minimum 4x).
+
+Readout on the connectome (add_flipflop(proxy=True)): u is inhibitory, so no host can carry an
+excitatory read of it. p, an EXCITATORY neuron on the same bias inhibited by v at 1.0x loop,
+fires the same 212.9 Hz train exactly while SET and is what a reader connects to (ff.p /
+ff.rail): edge relay once per SET, veto held while SET. It costs one park recovery each way:
+p rises 18.5-23.1 ms after the first SET pulse (u: 6.0-6.4) and stops <= 17.8 ms after the
+first CLEAR pulse (u: at once); a veto through p needs the SET train >= 22 ms before the
+driver (u: 10) and re-arms 60 ms after CLEAR (u: 45). Stray 1.1x ignite into p while CLEAR
+never fires it; 1.15x gives one p spike (one relay pulse) and leaves the pair untouched.
 """
 
 from __future__ import annotations
@@ -40,30 +49,73 @@ from ..lib.netlist import Drive, Netlist
 BIAS_213HZ_MV = 58.0
 #: Spacing of the pulses of a switching train, steps (the reset controller's relay hop, ~5.3 ms).
 TRAIN_SPACING_STEPS = 53
+#: v -> p inhibition per spike as a multiple of drive.loop: the pair's own loop strength. p is
+#: silent while CLEAR from 0.8x up (0.75x leaks); 1.0x parks it 15 mV down like u, restarts
+#: 10.5-14 ms after v stops; heavier inhibition only slows the restart (1.5x: 20-23 ms).
+PROXY_QUANTA_X = 1.0
 
 
 @dataclass(frozen=True)
 class FlipFlop:
-    u: int  # fires while SET; the rail every reader taps (as Latch.u)
+    u: int  # fires while SET (inhibitory: readable in a simulation, never on the connectome)
     v: int  # fires while CLEAR
     bias_mv: float
     inh_quanta: int
+    p: int | None = None  # excitatory SET proxy: fires while SET (silenced by v); what a reader taps on the fly
+    q: int | None = None  # excitatory CLEAR proxy: fires while CLEAR (silenced by u)
+    proxy_quanta: int = 0  # v -> p (and u -> q) inhibition per spike
 
     @property
     def members(self) -> tuple[int, int]:
         return (self.u, self.v)
 
+    @property
+    def rail(self) -> int:
+        """The SET rail a reader connects to: the excitatory proxy p when built, else u. On a
+        placed circuit only p is sign-correct (u is inhibitory, so `u -> reader` would be an
+        inhibitory synapse); in a bare simulation either carries the same 213 Hz train."""
+        return self.u if self.p is None else self.p
+
+    @property
+    def proxies(self) -> tuple[int, ...]:
+        return tuple(x for x in (self.p, self.q) if x is not None)
+
 
 def add_flipflop(net: Netlist, drive: Drive, name: str, bias_mv: float = BIAS_213HZ_MV,
-                 inh_quanta: int | None = None) -> FlipFlop:
+                 inh_quanta: int | None = None, proxy: bool = False, clear_proxy: bool = False,
+                 proxy_quanta: int | None = None) -> FlipFlop:
     """Two biased inhibitory neurons in mutual inhibition. `inh_quanta` (positive; default
-    drive.loop) is the strength of each member's inhibition of the other per spike."""
+    drive.loop) is the strength of each member's inhibition of the other per spike.
+
+    `proxy`: add p, an EXCITATORY neuron on the same bias, inhibited by v (`proxy_quanta` per
+    spike, default drive.loop = PROXY_QUANTA_X x loop). p fires the same 212.8 Hz train as u
+    while SET and is parked ~15 mV below threshold by v's train while CLEAR: it is u's
+    sign-correct readout. Readers connect to `ff.p` (`ff.rail`) exactly as they would to a
+    latch's u: add_edge_relay(source=ff.p), add_veto_relay(vetoes=[ff.p]). u's own outputs are
+    inhibitory and cannot be carried by any host (docs/h1_placement.md, Placing flip-flops).
+    What it costs (docs/contracts/flipflop.yaml): p rises 10.5-14 ms after v's last spike
+    (18.7-23.1 ms after the first SET pulse, against u's 6.0-6.5), because a parked neuron
+    climbs 15 mV with tau_m as v does on CLEAR; it stops within 17.8 ms of the first CLEAR
+    pulse. `clear_proxy`: add q, the same neuron inhibited by u (fires while CLEAR).
+    Neither proxy feeds back: a stray spike of p never touches the pair's state.
+    power_on_pulse / power_on_events include p (it would otherwise fire at 2.5 ms, before v's
+    first inhibition lands, and an edge relay on it would fire at power-on)."""
     q = drive.loop if inh_quanta is None else int(inh_quanta)
     u = net.neuron(f"{name}.u", bias=bias_mv)
     v = net.neuron(f"{name}.v", bias=bias_mv)
     net.synapse(u, v, -q)
     net.synapse(v, u, -q)
-    return FlipFlop(u, v, float(bias_mv), q)
+    p = qq = None
+    pq = 0
+    if proxy or clear_proxy:
+        pq = int(round(PROXY_QUANTA_X * drive.loop)) if proxy_quanta is None else int(proxy_quanta)
+    if proxy:
+        p = net.neuron(f"{name}.p", bias=bias_mv)
+        net.synapse(v, p, -pq)
+    if clear_proxy:
+        qq = net.neuron(f"{name}.q", bias=bias_mv)
+        net.synapse(u, qq, -pq)
+    return FlipFlop(u, v, float(bias_mv), q, p, qq, pq)
 
 
 def set_pulse(ff: FlipFlop, drive: Drive, pulses: int = 3) -> list[tuple[int, int, int]]:
@@ -89,9 +141,15 @@ def clear_pulse(ff: FlipFlop, drive: Drive, pulses: int = 3) -> list[tuple[int, 
 
 
 def power_on_pulse(ff: FlipFlop, drive: Drive) -> list[tuple[int, int, int]]:
-    """Inject at step 0 to start CLEAR: one loop-strength inhibitory pulse into u. Without it
-    both members fire together from step 25 on and stay in lockstep (measured, 300 ms)."""
-    return [(0, ff.u, -drive.loop)]
+    """Inject at step 0 to start CLEAR: one loop-strength inhibitory pulse into u, and one
+    into the SET proxy p when there is one (every biased neuron starts at rest and would fire
+    at 2.5 ms, before any inhibition lands). Without it both members fire together from step
+    25 on and stay in lockstep (measured, 300 ms). q, the CLEAR proxy, is left alone: it
+    starts firing with v, which is the state it reports."""
+    ev = [(0, ff.u, -drive.loop)]
+    if ff.p is not None:
+        ev.append((0, ff.p, -drive.loop))
+    return ev
 
 
 def schedule(sim, ff_events: list[tuple[int, int, int]], at_step: int, node: int = 0) -> None:
@@ -153,15 +211,17 @@ def connect_clear(net: Netlist, drive: Drive, inh: int, flipflops: list[FlipFlop
         net.synapse(inh, f.u, q)
 
 
-def flipflop_taps(net: Netlist) -> list[int]:
+def flipflop_taps(net: Netlist, suffix: str = ".u") -> list[int]:
     """The u members of every flip-flop in the netlist: biased neurons whose role ends in
-    `.u` (add_flipflop names them so; nothing else in the library carries a bias)."""
-    return [i for i, (role, b) in enumerate(zip(net.roles, net.bias)) if b != 0.0 and role.endswith(".u")]
+    `.u` (add_flipflop names them so; nothing else in the library carries a bias). With
+    `suffix=".p"`, the SET proxies instead."""
+    return [i for i, (role, b) in enumerate(zip(net.roles, net.bias)) if b != 0.0 and role.endswith(suffix)]
 
 
 def power_on_events(net: Netlist, drive: Drive, at_step: int = 0) -> list[tuple[int, int, int]]:
     """What a harness injects when it loads an image: one loop-strength inhibitory pulse into
-    every flip-flop's u at `at_step`, so each starts CLEAR instead of in lockstep (see
-    power_on_pulse). Returns (step, neuron, quanta) triples; `schedule`-compatible after
-    subtracting `at_step`, or fed straight to `sim.add_events`."""
-    return [(at_step, u, -drive.loop) for u in flipflop_taps(net)]
+    every flip-flop's u, and into every SET proxy p, at `at_step`, so each starts CLEAR
+    instead of in lockstep and no proxy fires before v parks it (see power_on_pulse).
+    Returns (step, neuron, quanta) triples; `schedule`-compatible after subtracting
+    `at_step`, or fed straight to `sim.add_events`."""
+    return [(at_step, n, -drive.loop) for n in flipflop_taps(net, ".u") + flipflop_taps(net, ".p")]

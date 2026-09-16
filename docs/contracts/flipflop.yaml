@@ -21,7 +21,7 @@ design:
   mutual_inhibition_quanta_per_spike: 3621  # 1.0x loop, each direction
   bistable_from_quanta: 2900                # 0.8x loop holds; 0.75x does not (silent member escapes, both fire ~123 Hz)
   parked_member_mv_below_threshold: ~15     # mean, at 1.0x loop; ripple ~1 mV
-resources:
+resources:                                  # the bare pair; the proxy readout adds 1 neuron / 1 synapse (proxy_readout below)
   neurons: 2
   synapses: 2
   excitatory_synapses: 0
@@ -83,11 +83,52 @@ primitive_compatibility:                    # measured directly, RefSim
   kill_train_into_u: 3 x 1.0 loop clears at every phase; the standard 4 x 0.75 loop clears too with ~7 % margin
   single_ignition_pulse: does not set it (see above)
   weight_noise: not measured under perturbation; the bistability floor is 20-25 % below the default inhibition
+proxy_readout:                              # add_flipflop(proxy=True): p, an EXCITATORY neuron, bias 58 mV, inhibited by v
+  why: u is inhibitory, so every reader's edge from it (edge relay, veto neuron) is of the wrong sign on any host; p is the sign-correct SET rail (docs/h1_placement.md, Placing flip-flops)
+  design:
+    p: excitatory, bias 58 mV (BIAS_213HZ_MV), one synapse v -> p of -1.0x loop (3621 quanta); no outputs of its own; no feedback into the pair
+    q (clear_proxy=True): the same, inhibited by u; fires while CLEAR
+    v_to_p_quanta_sweep:                    # p silent over 2 s of CLEAR? / p's first spike after v's last, ms / p's last spike after the first CLEAR pulse, ms
+      0.75x: leaks (p fires through v's train)
+      0.8x: silent / 11.0-15.3 / 20.7-25.0
+      1.0x: silent / 10.5-14.0 / 10.1-17.8   # default: the pair's own park depth (~15 mV); 25 % above the leak floor
+      1.25x: silent / 16.0-19.0 / 8.6-17.6
+      1.5x: silent / 20.0-22.9 / 9.2-14.4
+      2.0x: silent / 26.0-28.8 / 8.0-15.5
+  resources:
+    neurons: 3 (4 with q)
+    synapses: 3 (4 with q), all inhibitory
+    biased_neurons: 3 (4 with q)
+  activity:
+    p_rate_hz_while_set: 212.9 (isi 47 steps, step for step with u; 426 spikes in 2 s)
+    p_spikes_while_clear_2s: 0
+    q_rate_hz_while_clear: 212.9
+    q_spikes_while_set_2s: 0
+    lockstep: in the pair's lockstep third state (no power-on pulse) p and q both fire at ~105 Hz like u and v
+  switching_time_ms:                        # all 24 measured phases (every 2nd of 47)
+    p_first_spike_after_first_set_pulse: 18.5-23.1 (train) / 13.2-17.8 (single 3x pulse); u's is 6.0-6.4 / 1.4-1.6
+    p_first_spike_after_v_last_spike: 10.5-14.0 (the parked neuron climbs 15 mV with tau_m, exactly v's 9.5-14.0 on CLEAR)
+    p_last_spike_after_first_clear_pulse: 9.8-17.8 (train) / 10.8-17.0 (single 5x pulse); u stops at once, v's first spike is 9.5-14.0 and p crosses once or twice before the park
+    q_first_spike_after_first_clear_pulse: 9.5-14.0 (with v)
+    q_last_spike_after_first_set_pulse: 4.5-12.6 (with v)
+  power_on:
+    without_a_pulse_into_p: p fires once at 2.5 ms (before v's first inhibition lands at 4.3 ms); an edge relay on p fires at 6.7 ms
+    power_on_pulse: now [(0, u, -loop), (0, p, -loop)]; power_on_events covers every .p; p never fires, q fires from 2.5 ms (CLEAR)
+  noise_margin:
+    stray_excitatory_into_p_while_clear: "1.1x ignite (5120 quanta) never fires it, 24/24 phases; 1.15x fires p ONCE at every phase (1.8x: twice), and an edge relay on p fires once on that spike; the pair is untouched (u never fires). The reader's margin is therefore 1.1x ignite, the same number as u's lockstep threshold, with a milder failure (one spurious relay pulse against a permanent lockstep)"
+    stray_inhibitory_into_p_while_set: p pauses and resumes at every phase; pause 7.0-8.8 ms at 1.0x loop, 11.4-15.8 at 2.25x (u's margin), 13.9-19.4 at 3.0x; an edge relay on p never re-fires on the pause (0/24 at 1.0-3.0x); a veto relay vetoed by p stays held when its driver rises 0-27 ms after a 3.0x stray (0/10 leaks)
+  primitive_compatibility:                  # the table above redone through p
+    add_edge_relay_on_p: "fires exactly once per SET (3 of 3 cycles), 4.2 ms after p's first spike, 24.1-24.6 ms after the first SET pulse (through u: ~11); never on the tonic train; once at power-on if the pulse into p is omitted"
+    add_veto_relay_with_p_as_veto: "holds the relay and target while SET when the SET train leads the driver's rise by >= 22 ms (through u: 10; p rises ~12 ms later); after CLEAR a re-drive 60 ms after the first clear pulse fires the relay and ignites the target, 55 does not (through u: 45 yes, 40 no). Measured from the rail's last spike the 55 ms rule is unchanged (p's last spike is <= 17.8 ms after the clear pulse)"
+    add_set_chain_and_add_clear_chain: "unchanged (latch -> edge relay -> chain -> SET; trigger -> clear); p first spike 34 ms after the source ignites (u: ~19.5), p's last spike 25.2 ms after the clear trigger (u: 6.4)"
+    kill_train_into_u: 4 x 0.75 loop clears the pair and p follows, last p spike 22.9 ms after the first kill pulse
+    what_a_reader_connects_to: ff.p (ff.rail) instead of ff.u; nothing else changes. Writers still target u (set chain) and u only (clear chain)
+  cost_summary: +1 neuron, +1 inhibitory synapse and +1 bias per flip-flop; every SET-side reader sees the rail ~12 ms later and every CLEAR-side release ~15 ms later than through u
 timing_assumptions:
 - both members must be biased identically (58 mV); a bias difference is not a usable symmetry breaker (lockstep persists up to +10 mV at 1.0x loop; +15 mV resolves it but leaves the v member unparked)
 - the switching train's pulses are 53 steps apart (the reset controller's relay hop); a SET source must be one-shot (an edge relay) into add_set_chain
-- a veto rail from u is established >= 15 ms before its driver rises, as for a latch
-- power-on pulse (or a clear train) before any edge relay on u is trusted
+- a veto rail from u is established >= 15 ms before its driver rises, as for a latch; through p the SET train must lead the driver by >= 22 ms
+- power-on pulse (or a clear train) before any edge relay on u or p is trusted; the pulse goes into p as well as u
 notes:
 - bias is a per-neuron Netlist/Topology parameter (Netlist.neuron(bias=), Topology.bias, Topology.sim_bias()); the simulators are given it by the caller
 - measured in this run's scratch scripts (RefSim, < 200 neurons, <= 2.1 s each); regression in tests/test_flipflop.py
