@@ -849,6 +849,12 @@ the fly's wiring and a working adder under the H0 weight rules. Loosening the we
 (`Netlist.split_hubs`, no timing change) each shrinks the gap by about a fifth (to 337 or 346
 added edges) and they do not add up; the bare placement still computes nothing, and a reset
 that reaches half its latches is no reset (`docs/h1_placement.md`, the last three sections).
+Inside the whole simulated brain (166,702 neurons, `bench/h1_fullgraph.py`, Juno) the same image
+computes 10 / 10 additions only when the hosts' 327,497 inputs from the rest of the brain are
+silenced; with them live it computes 0 / 30 under a silent, a 2 Hz Poisson or a burst surround —
+its own output spikes wake 24,000 surround neurons, and 20,000–45,000 spikes per millisecond come
+back into hosts that average ~530 external inputs. Stage H0's circuit survived the same surround
+on 15 hosts chosen for isolation; the placement search must score isolation too.
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

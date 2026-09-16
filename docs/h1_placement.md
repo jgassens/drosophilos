@@ -402,3 +402,44 @@ the impossible neuron into possible ones) but not a sufficient one: the reset's 
 different design — a reset that each register motif derives locally from a signal it already
 receives (its own completion or the consumer's ACCEPT), instead of a tree that must be driven
 from one point — and that is a circuit change, not a placement change.
+
+## The placed adder inside the whole brain
+
+Tool: `embed_image.full_graph_topology` and `bench/h1_fullgraph.py`; data: `docs/h1_fullgraph.json`
+(compact) and Juno's `data/h1_fullgraph/*.json` (job 405257). The condition-A image — 704 carried
+edges rescaled in place, 442 Profile 3 edges added, 17,845 parasitic edges among the hosts zeroed,
+2 synthetic neurons — applied to the entire MCNS topology (166,702 neurons, 25.6 M edges), driven
+and decoded exactly as in isolation, with the surround driven as Stage H0 drove it: *silent* (nothing
+outside the circuit is driven), *Poisson* (every sensory neuron at 2 Hz, 17,922 of them), *burst*
+(1,000 random cholinergic neurons together 5 ms after the operands load). Two controls: the hosts'
+inputs from the rest of the brain zeroed (327,497 edges: the isolated case embedded), and the hosts'
+outputs into the brain zeroed (302,263 edges). About 45–55 s of wall time per addition on a CPU core.
+
+| surround | hosts' brain inputs | hosts' brain outputs | correct | how it fails | spikes entering the circuit (max per ms, exc / inh) | circuit spikes per addition (isolated: 14–16 k) |
+|---|---|---|---|---|---|---|
+| Poisson 2 Hz | **zeroed** (327,497) | live | **10 / 10** (7 spike-identical to isolation) | — | 0 / 0 | 14.7 k |
+| silent | live | live | 0 / 30 | 19 faults, 6 timeouts, 5 incomplete; ACCEPT at 16 ms (the fault path) | 28,041 / 14,840 | 71 k |
+| Poisson 2 Hz | live | live | 0 / 30 | 22 faults, 2 timeouts, 6 incomplete | 25,543 / 12,477 | 71 k |
+| burst | live | live | 0 / 30 | 21 faults, 8 timeouts, 1 incomplete | 24,304 / 16,706 | 71 k |
+| Poisson 2 Hz | live | **zeroed** (302,263) | 0 / 10 | 9 faults, 1 incomplete | 45,855 / 15,913 | 70 k |
+| Poisson 2 Hz, chained | live | live | 0 / 20 | 19 faults, 1 no ACCEPT | 25,662 / 12,480 | 71 k |
+
+**What it says.** The image is a circuit only when the rest of the brain cannot reach its hosts.
+With the hosts' 327,497 anatomical inputs live, the adder computes nothing under any surround —
+not even a silent one: the circuit's own spikes leave through the hosts' 302,263 output edges at
+anatomical weight, 24,000 neurons of the surround fire 3.8 M spikes within the 1.2 s window, and
+some 20,000–28,000 spikes per millisecond come back into the 614 hosts, whose output rails light
+within 16 ms of loading (a fault, before any arithmetic). Silencing the outputs does not help: under
+the 2 Hz sensory drive the brain itself fires ~1.9 M spikes from ~38,000 neurons in 1.2 s (the
+inputs-zeroed run shows the same surround activity with the circuit sealed off), and 45,000
+excitatory spikes per millisecond arrive at the hosts. H0's 15-neuron circuit survived this surround
+because its hosts were chosen for a small isolation cost (`embed_h0.isolation_cost`); the placement
+search never looked at it, and it put the adder on antennal-lobe and gnathal neurons with ~530
+inputs from the brain each. So the Profile 2 image of the adder is, today: 61 % of its edges the
+fly's own, 442 added, and **327,497 documented zeroings** of the hosts' inputs on top of the 17,845
+among the hosts — computing all sums inside the whole brain with those zeroings, none without.
+
+The next placement objective is therefore not coverage alone: the hosts' external in-degree (and
+the surround's response to their outputs) must be part of the score, and the whole-brain LIF at
+these weights is itself a storm under the 2 Hz drive — the "background-input envelope" a Profile 2
+circuit must tolerate is set by that, not by the circuit.
