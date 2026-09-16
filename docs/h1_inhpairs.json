@@ -1,0 +1,143 @@
+{
+ "4": {
+  "threshold": 57,
+  "reciprocal_pairs": {
+   "exc_exc": 1223,
+   "inh_inh": 1133,
+   "mixed": 4967
+  },
+  "inh_inh": {
+   "pairs": 1133,
+   "driven_each_member": 729,
+   "driven_and_readout_each_member": 707
+  },
+  "max_disjoint_pairs": {
+   "inh_inh": 503,
+   "driven_and_readout": 358
+  },
+  "driven_disjoint_set": {
+   "pairs": 358,
+   "members": 716,
+   "superclass_counts": {
+    "cb_intrinsic": 354,
+    "vnc_intrinsic": 255,
+    "ol_intrinsic": 26,
+    "ascending_neuron": 24,
+    "descending_neuron": 23,
+    "visual_projection": 18,
+    "visual_centrifugal": 13,
+    "cb_motor": 2,
+    "cb_sensory_tbc": 1
+   },
+   "top_cell_types": {
+    "ER4m": 10,
+    "LT51": 10,
+    "ER4d": 6,
+    "IN19A001": 6,
+    "IN08A007": 6,
+    "IN08A002": 6,
+    "IN13A001": 6,
+    "IN13B001": 6
+   },
+   "mean_external_input_synapses": 6677.2,
+   "antennal_lobe_members": 22,
+   "antennal_lobe_column": "class",
+   "antennal_lobe_prefix": "AL"
+  }
+ },
+ "8": {
+  "threshold": 29,
+  "reciprocal_pairs": {
+   "exc_exc": 4292,
+   "inh_inh": 5444,
+   "mixed": 19372
+  },
+  "inh_inh": {
+   "pairs": 5444,
+   "driven_each_member": 3970,
+   "driven_and_readout_each_member": 3904
+  },
+  "max_disjoint_pairs": {
+   "inh_inh": 2003,
+   "driven_and_readout": 1105
+  },
+  "driven_disjoint_set": {
+   "pairs": 1105,
+   "members": 2210,
+   "superclass_counts": {
+    "cb_intrinsic": 1105,
+    "vnc_intrinsic": 609,
+    "ol_intrinsic": 304,
+    "ascending_neuron": 70,
+    "descending_neuron": 60,
+    "visual_projection": 37,
+    "visual_centrifugal": 22,
+    "cb_motor": 2,
+    "cb_sensory_tbc": 1
+   },
+   "top_cell_types": {
+    "Pm2a": 67,
+    "MeLo9": 67,
+    "Pm4": 30,
+    "Pm3": 29,
+    "ER5": 20,
+    "ER4d": 20,
+    "ER2_c": 19,
+    "ER3m": 18
+   },
+   "mean_external_input_synapses": 4246.9,
+   "antennal_lobe_members": 27,
+   "antennal_lobe_column": "class",
+   "antennal_lobe_prefix": "AL"
+  }
+ },
+ "16": {
+  "threshold": 15,
+  "reciprocal_pairs": {
+   "exc_exc": 12315,
+   "inh_inh": 14824,
+   "mixed": 54818
+  },
+  "inh_inh": {
+   "pairs": 14824,
+   "driven_each_member": 12666,
+   "driven_and_readout_each_member": 12557
+  },
+  "max_disjoint_pairs": {
+   "inh_inh": 5428,
+   "driven_and_readout": 3717
+  },
+  "driven_disjoint_set": {
+   "pairs": 3717,
+   "members": 7434,
+   "superclass_counts": {
+    "ol_intrinsic": 3592,
+    "cb_intrinsic": 2212,
+    "vnc_intrinsic": 1217,
+    "ascending_neuron": 142,
+    "descending_neuron": 112,
+    "visual_projection": 107,
+    "visual_centrifugal": 45,
+    "cb_motor": 3,
+    "cb_sensory_tbc": 1,
+    "sensory_ascending": 1,
+    "vnc_tbc": 1,
+    "efferent_ascending": 1
+   },
+   "top_cell_types": {
+    "Mi4": 1147,
+    "Mi9": 1147,
+    "Pm4": 123,
+    "L1": 100,
+    "C2": 99,
+    "MeLo9": 82,
+    "Pm3": 69,
+    "Pm2a": 57
+   },
+   "mean_external_input_synapses": 2136.5,
+   "antennal_lobe_members": 66,
+   "antennal_lobe_column": "class",
+   "antennal_lobe_prefix": "AL"
+  }
+ }
+}
