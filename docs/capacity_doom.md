@@ -198,10 +198,16 @@ earlier draft of this paragraph read a truncated figure as 66; the JSON says 6,6
 k_max 16 the supply lives in the optic lobe — 3,592 of 7,434 members
 are optic-lobe intrinsic, led by the medulla's Mi4 and Mi9 (1,147 disjoint pairs, one per
 column) — so the visual system, useless to the excitatory design (§Is the fly's visual system
-involved), is where an inhibition-based latch would go. No such latch exists in this repo: a
-flip-flop needs tonic drive, reads out as silence versus firing, and every timing contract of
-the token protocol (relay recovery, veto windows, kill trains) would have to be re-measured
-for it. That design is the next fork.
+involved), is where an inhibition-based latch would go. That latch now exists
+(`protocol/flipflop.py`, `docs/a1_flipflop.md`): two biased inhibitory neurons at the latch's
+exact rate, plus an excitatory *proxy* neuron silenced by the CLEAR member, so every existing
+reader sees an excitatory 213 Hz rail when the flip-flop is SET (at ~12 ms more lead than a
+latch gives). The proxy costs nothing in supply: almost every driven inhibitory pair has a
+strongly inhibited excitatory neighbour to serve as its proxy (24–58 candidates per pair), and
+the largest set of disjoint (pair, proxy) triples is **358 / 1,030 / 3,712** at k_max 4 / 8 / 16
+(exact, by integer programming) against 358 / 1,105 / 3,717 bare pairs. Not yet done for it:
+the triple's placement motif, the register reading through the proxy, a perturbation campaign
+through it.
 
 **Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
 loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual

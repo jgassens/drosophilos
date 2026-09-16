@@ -884,8 +884,15 @@ need; 2.25× loop on the firing member against 2×). What does not carry over: a
 ignites or resets a latch by a single pulse into its members needs a three-relay adapter
 (`add_set_chain` / `add_clear_chain`), and a flip-flop must be pulsed once at power-on. Per-neuron
 bias is now a field of the netlist (a Profile 2 parameter edit, counted in the manifest),
-carried by the topology into both simulators. Not yet done: a perturbation campaign on it and
-a register built from it.
+carried by the topology into both simulators. Because its members are inhibitory, nothing
+downstream could read it with the right sign; an excitatory proxy neuron silenced by the
+CLEAR member fixes that (it fires step for step with the SET member, 18–23 ms after SET,
+silent within 18 ms of CLEAR), and the fly has a proxy for almost every usable pair (358 /
+1,030 / 3,712 disjoint pair-and-proxy triples at ×4 / ×8 / ×16). A dual-rail register on
+flip-flop storage crosses the four-phase handshake (48 fail-stop errors and no wrong value in
+10,000 mix-B transfers, against ~1 in 100,000 for the latch register); the placement motif for
+flip-flops is in. Not yet done: the register through the proxy, the triple's placement motif, a
+perturbation campaign through the proxy.
 
 **The first perturbation campaigns on kernels (2026-09-16, Juno H200, 100 copies × 8 tokens,
 mix B).** With no perturbation every copy of every block is correct. Under mix B the render
