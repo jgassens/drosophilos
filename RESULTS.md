@@ -938,8 +938,11 @@ phase gates and no host barrier: all 2,000 pixels equal to the reference, no fau
 of neural time, 7 h 53 min of wall time (`docs/img/doom2_40_0_neural.png`). The frame loop's
 ordering label for this run is *neural*; the token dealing stays hybrid. Its cost is visible:
 about 7 s of neural time per token against 3 s under host pacing, because the compiler's
-wrapping counter is a three-cell feedback loop every token waits for — a one-hot ring
-counter advanced by done pulses is being built to replace it.
+wrapping counter was a three-cell feedback loop every token waited for. A one-hot ring
+counter advanced by done pulses replaced it: the two-pass renderer under neural pacing now
+runs within 4 % of its host-paced time (29.4 s against 30.6 s per two frames) with a third
+fewer neurons, and the 4 × 3 Doom sample went from 279 s to 255 s; the 40 × 25 textured run is
+being re-measured on the ring.
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

@@ -625,9 +625,13 @@ which is the two-cell pass's own pace (the ALU counter's phase end came ~5 s aft
 done). With both cells as triggers (the join) the wrap comes 146 ms after the later ring's.
 The two-pass renderer compiles to nine cells and two rings (`ph0_ring`, K = 4, on the column
 STORE; `ph1_ring`, K = 8, on the pixel output); 24,721 neurons where the counters made it
-36,880. Per-token figure on the cluster, before → after: **TODO (orchestrator: fill in from
-the cluster run of doom1 4 × 3 and doom2 on the H200; before: 279 s / 26 tokens = 10.7 s,
-1,932 s / 260 tokens = 7.4 s).**
+36,880. Measured (Juno 408459, CPU): the two-pass renderer's slow test, two frames under
+neural pacing, went from 42.6 s to **29.4 s** of neural time — within 4 % of the same program
+host-paced (30.6 s), so the pacing now costs nothing there; `doom1.c` at 4 × 3 (one copy, two
+frames, 26 tokens) from 279 s to **255 s**, every pixel right — a smaller gain, because at
+that size the Doom passes are bound by their own cells' latency, not the counter. The 40 × 25
+textured run on the H200 (1,982 s with the ALU counter) is queued again on the ring for the
+figure at scale.
 
 One caveat the tiny test exposed, and it is the host's, not the ring's: with a program of
 one inner loop and the tick (two phases), the host deals the next frame's first pass token
