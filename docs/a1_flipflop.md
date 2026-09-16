@@ -170,8 +170,9 @@ of it the two k_max 16 MILPs (`MILP_TIME_LIMIT_S`).
 **Not done here.** Placing the proxy: `place_netlist`'s `ffpair` motif is two biased
 inhibitory neurons in mutual inhibition; `p` is a biased excitatory neuron with one inhibitory
 input, which the placer will treat as a single. A `ffproxy` motif (pair + proxy as a unit on a
-packed triple) is the next placement step. Weight-noise campaigns through `p`; the register
-(`build_channel(storage="flipflop")`) still reads `.u`.
+packed triple) is the next placement step. The register reads through `p` since the same day
+(§Reading through the proxies below), and its mix-B campaign is the first weight-noise
+measurement through `p`.
 
 ## Not done
 
@@ -202,8 +203,11 @@ the contract's six words unless stated.
   only (`flipflop.connect_clear`): 4 × 1.5× loop, above the 3 × 1.0× all-phase minimum, and
   nothing into `v`. Clears at all 47 phases; the SET rails' last `u` spike is 5.9 ms (max
   6.3) after the reset trigger, against 8.5 ms (max 11.6) for the latch register's rails.
-- **Reading**: the valid ORs, fault ANDs and the completion tree tap `.u` exactly as before —
-  a 213 Hz rail is a 213 Hz rail.
+- **Reading**: every reader of a rail — the valid ORs, the fault ANDs, the decode taps
+  (`Register.rail_taps`) — takes the rail's excitatory proxy `p` (`celement.rail_of`), never
+  `u`; §Reading through the proxies below. (The first build, kept as `rail_proxy=False`, read
+  `.u`: a 213 Hz rail is a 213 Hz rail in a simulation, but not on a host.) The completion tree
+  reads the valid latches, which are latches.
 - **Flags stay latches** (valid, tree, completion, fault). Measured with them as flip-flops
   too (`flag_storage="flipflop"`, every gate→state path through a set chain): 249 neurons
   instead of 225, accept 154.3 ms mean / 159.0 max over 50 random words against 154.1 /
@@ -219,7 +223,11 @@ the contract's six words unless stated.
 
 ### Side by side (4-bit channel, consumer register through the four-phase handshake)
 
-| | latch register (`channel_4bit.yaml`) | flip-flop register (`ffregister.yaml`) |
+The flip-flop column is the first build, read at `u` (`rail_proxy=False`, the top of
+`ffregister.yaml`); the shipped build reads through `p` and is measured against it in
+§Reading through the proxies below.
+
+| | latch register (`channel_4bit.yaml`) | flip-flop register, read at `u` (`ffregister.yaml`) |
 |---|---|---|
 | neurons, whole channel | 201 | 225 (+6 per bit) |
 | rail storage per bit | 4 (two 2-neuron latches) | 10 (two flip-flops + two 3-neuron set chains) |
@@ -235,7 +243,7 @@ the contract's six words unless stated.
 | arrival jitter | bits up to 40 ms apart | bits up to 100 ms apart, 5/5 correct, accept after the last bit |
 | stray excitatory pulse, silent rail | ignites at 1.1× need (2,845 q) | `u`: unchanged to 1.1× ignite (5,120 q); set trigger: fires at 0.6× ignite (2,793 q) — see below |
 | stray inhibitory pulse, set rail | survives 2.0× loop | survives 2.25× loop; 2.5× clears 4/12 phases |
-| errors | 0 in 1e5 mix-B (1 late_activity) | 0 in 200 (upper 95 % 1.5 %); 10,000 at mix B pending (slow test, cluster) |
+| errors | 0 in 1e5 mix-B (1 late_activity) | 0 in 200 (upper 95 % 1.5 %); 48 fail-stop, 0 wrong in 10,000 at mix B |
 
 The flip-flop register is 3 ms faster to accept, not slower. Traced on one bit (word 2 of
 the run, times after the load): the data relay fires at 6.6 ms in both builds; the latch's
@@ -245,6 +253,76 @@ full rate from the first spike (ISIs 4.6, 3.9, 4.3, 4.5 ms). The rate-mode OR fe
 valid latch therefore fires at 37.9 ms instead of 41.1, and the 3 ms carry through the two
 tree levels (c0 at 101.4 vs 104.5 ms, c1 = ACCEPT at 153.6 vs 156.7). The 150 ms is the
 three rate-mode gate levels either way.
+
+### Reading through the proxies (`rail_proxy=True`, the default, 2026-09-16)
+
+`build_channel(storage="flipflop")` now builds every rail flip-flop with `proxy=True` and
+every reader of a rail takes `p`: the valid ORs and fault ANDs (`add_register`), the decode
+taps (`Register.rail_taps`, `celement.rail_of`), and the `hold_from` of a flag's ignition relay
+were a flag ever a proxied flip-flop. The completion tree reads the valid latches, which stay
+latches, so the register's only read stage through `p` is rails → valid OR. Writers are
+unchanged: the set chains pulse `u`, the reset controller's `inh` clears through `u` (an
+inhibitory synapse into an inhibitory neuron: sign-correct), and the power-on pulse goes into
+`u` and `p`. No veto in the channel reads a consumer rail — the watchdog reads the
+*producer's* latch rails and READY has no veto — so `p`'s 22 ms veto lead is not exercised
+and no delay chain was widened. The default latch build is unchanged neuron for neuron and
+synapse for synapse (compared: roles, src, dst, quanta, delay, bias, groups).
+
+| | read at `u` (first build) | read at `p` (shipped) |
+|---|---|---|
+| neurons, whole channel / consumer excl. reset and READY / rail storage per bit | 225 / 86 (21.5 per bit) / 10 | 233 / 94 (23.5 per bit) / 12 (+1 per rail) |
+| synapses (inhibitory) / biased neurons | 427 (153) / 16 | 435 (161) / 24 |
+| accept latency, mean / max, contract's six words | 152.3 / 155.1 ms | 166.4 / 168.1 ms (**+14.1**) |
+| accept latency, mean / max, 200 random words (fast test) | 154.2 / 156.8 ms | 167.7 / 170.0 ms (+13.5) |
+| initiation interval, mean / max, six words (200 words) | 330.3 / 333.1 (332.2 / 334.8) ms | 344.4 / 346.1 (345.7 / 348.0) ms (+14.1) |
+| rail's first spike after the set trigger's pulse | `u` 6.0–6.5 ms | `p` 18.5–23.1 ms |
+| reset trigger → last `u` spike / → last spike the readers see, mean / max | 5.9 / 6.3 ms, the same | 4.9 / 6.2 ms; `p` 22.1 / 23.3 ms (200 words: 23.8 / 27.2) |
+| READY after the reset trigger | 84.8 ms | 84.8 ms (`p` silent ~60 ms before it) |
+| spikes per transaction | 2,103 | 2,383 (+13 %: four `p` trains per word, and the longer cycle) |
+| stray excitatory pulse into a parked rail's `p`, one proxy | — | 1.1× ignite never fires `p`; 1.15× / 1.8× / 4.0× fire it 1 / 2 / 3 times, pair untouched, and **nothing downstream fires** (no OR spike, no valid / tree / completion latch, no fault gate): one `p` spike is 766 q into an OR with a 2,586 q single need |
+| the same stray into both proxies of a bit at once | — | 1.15× nothing; 1.8× one OR spike → a false *valid* on that bit; a false *completion* needs it on every bit at once (1.8× into all eight does complete) |
+| 200 random transfers | 200 / 200, 0 errors | 200 / 200, 0 errors (upper 95 % 1.5 %) |
+| mix B, 10,000 transfers | 48 non-ok (43 timeout, 4 no ACCEPT, 1 no READY), **0 wrong** | 37 non-ok (21 timeout, 10 no ACCEPT, 1 no CLEARED, 3 no READY, **2 wrong after a fail-stop**), 0 wrong on a clean transfer; accept 171.2 mean / p99 194.8 / max 440.0 ms (u: 154.3 / 170.9 / 389.5) |
+
+The +14 ms is one park recovery — `p` climbs 15 mV with τ_m after `v` stops — paid once,
+at the rails → valid OR stage; every later stage reads a latch. On the CLEAR side `p` fires
+for 22–27 ms after the reset trigger instead of 6 ms, well inside the 85 ms to READY.
+
+**The campaign, and the two wrong values.** The fail-stop rate fell from 0.48 % to 0.37 %
+(different random draws: the 8 extra neurons shift every perturbation sample, so the two runs
+are not node for node). Every non-ok in chunk 0 (30 of 4,000, all in four nodes) was traced
+to one mechanism, present in both builds: a perturbed pair lands in **lockstep** on its SET
+train (`u`, `v` and `p` all at ~106 Hz), its valid OR is marginal at that rate (766 q per
+spike at 106 Hz ≈ 1.0× `rate_need`) and ignites 200+ ms late, and the watchdog times out.
+That is a fail-stop in both builds, and after it READY comes ~490 ms after the load, past
+the harness's next load at its fixed 450 ms period (the protocol's upstream would wait). The
+u-readout build recovered from every one of its 43 (the SET trains 56–62 ms after the reset
+trigger still take). The two wrong values are the transfer after such a timeout, in two
+nodes, by two routes:
+
+- **node 197, a double reset, proxy timing.** The late completion reaches the producer's
+  reset trigger 54 ms after the timeout's FAULT-ACCEPT (through `u` the same event came at
+  46 ms in the u-build's node 188 and was swallowed), past the trigger's ~50 ms edge re-arm,
+  so producer and consumer **reset twice**; the second consumer reset train lands ~456 ms
+  after the load, on top of the next load, the SET trains fail against it, the producer's
+  rails are never reset (its data edge relays fire only on a rise), and a stale partial word
+  completes three transfers later.
+- **node 175, a second lockstep event, timing-independent.** The next transfer (loaded before
+  READY) put the same pair into lockstep again; it completed at 440 ms with no watchdog
+  timeout, its producer reset came after the following load, and the stale rails made the
+  word. Through `u` the completion would have been ~427 ms: the same outcome.
+
+`run_ff_campaign` now files a wrong value whose node's previous transfer was non-ok as
+`wrong_value_after_failstop` and the slow test asserts only the fresh count is zero. So the
+direction: fewer fail-stops, and the timeout class now has a tail that a fixed-period harness
+turns into two wrong words in 10,000 (one of them from the proxy's 12 ms). The fix is
+upstream of the readout — keep a perturbed pair out of lockstep on SET (the next design
+step; ±4 % weights and ±0.2 mV bias are enough to get there at some phases) and lengthen the
+reset trigger's re-arm past the proxy's lag — and neither is a proxy change.
+
+`lib/contracts.measure_contract` classes a `Q.b*.p` role as control, not latch (its rule is
+`.u`/`.v`), so the by-class spike split in the contract moves the proxies' spikes from latch to
+control; the totals are right.
 
 ### What the measurement changed about the noise-margin claim above
 
@@ -277,6 +355,9 @@ itself, and at the campaigns' 150-quanta strays (0.03× ignite) neither margin i
 - `run_transactions` rebuilds the spike trace once per transaction (quadratic in the run
   length), and the `v` trains double the trace: 200 transfers in one run took 60 s, four
   runs of 50 take 23 s, which is how the fast test is split.
+- The campaign harness loads on a fixed 450 ms period whatever the channel says; after a
+  timeout the next load lands before READY. Under the protocol that load waits. This is what
+  turns the proxied build's double reset into wrong values (§Reading through the proxies).
 - The producer stays a latch register: every harness loads it with one pulse into
   `P.rails[i][r].u`. `add_register(storage="flipflop")` builds a flip-flop producer too
   (`build_channel(producer_storage=...)`), loaded through `P.rail_inputs`; not measured.

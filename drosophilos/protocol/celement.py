@@ -17,15 +17,24 @@ from .flipflop import FlipFlop, add_flipflop, add_set_chain
 from .latch import Latch, add_edge_relay, add_latch
 
 
-def add_state(net: Netlist, drive: Drive, name: str, storage: str = "latch"):
+def add_state(net: Netlist, drive: Drive, name: str, storage: str = "latch", proxy: bool = False):
     """A one-bit state element by `storage`: "latch" (the excitatory two-neuron loop, ignited
     by one pulse) or "flipflop" (two biased inhibitory neurons, set by a train through
-    add_set_chain). Both expose `.u`, a 213 Hz train while set, so every reader is the same."""
+    add_set_chain). Both expose `.u`, a 213 Hz train while set. `proxy` (flip-flop only) adds
+    the excitatory readout p (add_flipflop(proxy=True)); readers then take `rail_of(state)`,
+    which is p for a proxied flip-flop and u otherwise, so every reader is the same."""
     if storage == "latch":
         return add_latch(net, drive, name)
     if storage == "flipflop":
-        return add_flipflop(net, drive, name)
+        return add_flipflop(net, drive, name, proxy=proxy)
     raise ValueError(f"unknown storage {storage!r}: 'latch' or 'flipflop'")
+
+
+def rail_of(state) -> int:
+    """The neuron a reader of `state` connects to: a latch's u; a flip-flop's excitatory proxy
+    p when it has one (its u is inhibitory, so `u -> reader` is the wrong sign on any host),
+    else its u. Writers never use this: they go through set_input and the clear train."""
+    return state.rail if isinstance(state, FlipFlop) else state.u
 
 
 def set_input(net: Netlist, drive: Drive, name: str, state) -> int:
@@ -44,7 +53,7 @@ def _ignite_from(net: Netlist, drive: Drive, name: str, gate: int, latch) -> Non
     latch's train holds the relay down (hold_from): a gate source is too slow to do that
     itself, and a re-firing relay re-ignites the latch every ~43 ms (see add_edge_relay).
     A flip-flop target takes the pulse through its set chain (set_input)."""
-    relay = add_edge_relay(net, drive, f"{name}.ign", gate, hold_from=[latch.u])
+    relay = add_edge_relay(net, drive, f"{name}.ign", gate, hold_from=[rail_of(latch)])
     net.synapse(relay, set_input(net, drive, name, latch), drive.ignite)
 
 
@@ -88,7 +97,7 @@ def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: li
     while len(level) > 1:
         nxt = []
         for k in range(0, len(level) - 1, 2):
-            _, l = add_and_latched(net, drive, f"{name}.c{depth}_{k // 2}", [level[k].u, level[k + 1].u], storage)
+            _, l = add_and_latched(net, drive, f"{name}.c{depth}_{k // 2}", [rail_of(level[k]), rail_of(level[k + 1])], storage)
             internal.append(l)
             nxt.append(l)
         if len(level) % 2:

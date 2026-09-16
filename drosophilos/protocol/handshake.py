@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from ..lib.netlist import Drive, Netlist
 from ..sim.model import Params
-from .celement import add_and_gate, add_completion_tree, add_or_latched, add_state, set_input
+from .celement import add_and_gate, add_completion_tree, add_or_latched, add_state, rail_of, set_input
 from .flipflop import FlipFlop, connect_clear, power_on_events
 from .latch import Latch, add_edge_relay, add_latch, add_ready, add_reset, connect_trigger
 from .watchdog import StaleMonitor, Watchdog, add_stale_monitor, add_watchdog
@@ -23,7 +23,7 @@ from .watchdog import StaleMonitor, Watchdog, add_stale_monitor, add_watchdog
 
 @dataclass
 class Register:
-    rails: list  # rails[i][r] -> Latch (storage "latch") or FlipFlop (storage "flipflop"); both tap `.u`
+    rails: list  # rails[i][r] -> Latch (storage "latch", read at `.u`) or FlipFlop (storage "flipflop", read at `.p`)
     reset_trigger: int
     reset_inh: int
     ready: int
@@ -43,7 +43,9 @@ class Register:
 
     @property
     def rail_taps(self) -> list[list[int]]:
-        return [[self.rails[i][0].u, self.rails[i][1].u] for i in range(len(self.rails))]
+        """What a reader (the decoder, a downstream gate) taps per rail: a latch's u, a
+        flip-flop's excitatory proxy p (celement.rail_of)."""
+        return [[rail_of(self.rails[i][0]), rail_of(self.rails[i][1])] for i in range(len(self.rails))]
 
     def all_states(self) -> list:
         """Every state element (Latch or FlipFlop): rails, valids, tree, completion."""
@@ -62,22 +64,30 @@ class Register:
 
 
 def add_register(net: Netlist, drive: Drive, name: str, width: int, with_completion: bool,
-                 storage: str = "latch", flag_storage: str = "latch") -> Register:
+                 storage: str = "latch", flag_storage: str = "latch", rail_proxy: bool = True) -> Register:
     """`storage` is what holds the rails: "latch" (two-neuron excitatory loop, set by one
-    ignition pulse into `.u`) or "flipflop" (two biased inhibitory neurons in mutual
-    inhibition; set by a train of three pulses through a per-rail set chain, whose trigger
-    is `rail_inputs[i][r]`; cleared by the reset train aimed at `.u` only; needs one power-on
-    pulse, `power_on_events`). `flag_storage` is the same choice for the valid, tree and
-    completion elements. The default build is unchanged neuron for neuron."""
-    rails = [[add_state(net, drive, f"{name}.b{i}r{r}", storage) for r in (0, 1)] for i in range(width)]
+    ignition pulse into `.u`, read at `.u`) or "flipflop" (two biased inhibitory neurons in
+    mutual inhibition plus the excitatory proxy p; set by a train of three pulses through a
+    per-rail set chain, whose trigger is `rail_inputs[i][r]`; cleared by the reset train
+    aimed at `.u` only; READ at `.p` by every consumer of the rail - the valid ORs, the fault
+    ANDs, the decode taps `rail_taps` - because u is inhibitory and no host can carry an
+    excitatory read of it; needs one power-on pulse, `power_on_events`). `flag_storage` is
+    the same choice for the valid, tree and completion elements (unproxied: a flag
+    flip-flop is read at its u, an option kept for measurement only). `rail_proxy=False`
+    builds the flip-flop rails without p and reads them at u (the 2026-09-16 first build;
+    kept for the before/after in docs/contracts/ffregister.yaml, not for placement). The
+    default build is unchanged neuron for neuron."""
+    proxy = storage == "flipflop" and rail_proxy
+    rails = [[add_state(net, drive, f"{name}.b{i}r{r}", storage, proxy=proxy) for r in (0, 1)] for i in range(width)]
     rail_inputs = [[set_input(net, drive, f"{name}.b{i}r{r}", rails[i][r]) for r in (0, 1)] for i in range(width)]
     valid, fault, internal, completion, gates = [], [], [], None, []
     if with_completion:
         for i in range(width):
-            g, lv = add_or_latched(net, drive, f"{name}.valid{i}", [rails[i][0].u, rails[i][1].u], flag_storage)
+            taps = [rail_of(rails[i][0]), rail_of(rails[i][1])]  # a latch's u; a flip-flop's proxy p
+            g, lv = add_or_latched(net, drive, f"{name}.valid{i}", taps, flag_storage)
             valid.append(lv)
             gates.append(g)
-            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", [rails[i][0].u, rails[i][1].u], fraction=0.55))
+            fault.append(add_and_gate(net, drive, f"{name}.fault{i}", taps, fraction=0.55))
         completion, internal = add_completion_tree(net, drive, f"{name}.comp", valid, flag_storage)
         gates += [x for x, role in enumerate(net.roles) if role.startswith(f"{name}.comp.") and role.endswith(".and")]
         if completion in valid:  # width 1: the valid latch is the completion latch
@@ -169,18 +179,21 @@ def add_liveness(net: Netlist, drive: Drive, P: Register, Q: Register, watchdog_
 
 def build_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
                   watchdog_hops: int = 40, monitor: bool = False, storage: str = "latch",
-                  flag_storage: str | None = None, producer_storage: str = "latch") -> Channel:
+                  flag_storage: str | None = None, producer_storage: str = "latch", rail_proxy: bool = True) -> Channel:
     """`storage` is the consumer register's rail storage (see add_register); `flag_storage`
     that of its valid / tree / completion / fault elements (default: "latch" whatever the
-    rails are, chosen by measurement, docs/a1_flipflop.md). The producer stays a latch
+    rails are, chosen by measurement, docs/a1_flipflop.md). Flip-flop rails carry the
+    excitatory proxy p and are read there (`rail_proxy`, default True: the sign-correct
+    build; False is the u-readout build kept for comparison). The producer stays a latch
     register by default because every harness (run_transactions, the campaigns) loads it
     with one ignition pulse per rail into `P.rails[i][r].u`, which cannot set a flip-flop;
     a flip-flop producer (`producer_storage`) must be loaded through `P.rail_inputs`."""
     drive = drive or Drive.from_params(params)
     flag_storage = flag_storage or "latch"
     net = Netlist(params)
-    P = add_register(net, drive, "P", width, with_completion=False, storage=producer_storage)
-    Q = add_register(net, drive, "Q", width, with_completion=True, storage=storage, flag_storage=flag_storage)
+    P = add_register(net, drive, "P", width, with_completion=False, storage=producer_storage, rail_proxy=rail_proxy)
+    Q = add_register(net, drive, "Q", width, with_completion=True, storage=storage, flag_storage=flag_storage,
+                     rail_proxy=rail_proxy)
     for i in range(width):
         for r in (0, 1):
             relay = add_edge_relay(net, drive, f"data.b{i}r{r}", P.rails[i][r].u)

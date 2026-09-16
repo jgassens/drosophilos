@@ -45,8 +45,8 @@ activity:
   latch_member_rate_hz_while_holding: 212.8
   sustained_duty_cycle: a held latch fires continuously at the rate above until reset
   quiescent_spikes_between_ready_and_next_load: 0
-  v_member_spikes_between_ready_and_next_load: 0 (the harness loads at READY, so the
-    gap is empty; a CLEAR rail's v fires at 213 Hz whenever the register is idle)
+  v_member_spikes_between_ready_and_next_load: 0 (the harness loads at READY, so the gap is empty; a CLEAR
+    rail's v fires at 213 Hz whenever the register is idle)
 reset_energy:
   producer:
     pulses: 4
@@ -58,42 +58,45 @@ reset_energy:
     quanta_per_pulse: 111356
     quanta_per_reset: 445424
     mv_equivalent_per_reset: 7655.7
-delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
-  backend'
+delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this backend'
 stray_input_tolerance:
-  single_excitatory_pulse_into_parked_rail_u: 1.1x ignite (5,120 q) never changes
-    it; >= 1.15x drops the pair into LOCKSTEP (both ~105 Hz) at every phase, healed
-    by the next reset; 2.0x SETs it at ~50 % of phases
-  single_excitatory_pulse_into_set_trigger: '0.55x ignite (2,560 q, ~1.0x single need)
-    never fires it; 0.6x fires the chain and SETs the rail at every phase: the register''s
-    stray margin is the trigger''s, the same as a latch''s u (1.1x need)'
-  single_inhibitory_pulse_into_a_set_rail_u: 2.25x loop (8,147 q) never clears it;
-    2.5x clears 4 of 12 phases, 3.0x 8 of 12
-  measured_on: the consumer register alone, RefSim, phases 0..44 step 4 (12 phases)
-    unless stated
-campaign: 'mix_B_10000_transfers (2026-09-16, laptop, RefSim) - non_ok 48 / 10000 (timeout 43, no_accept 4, no_ready 1), wrong_value 0, non_ok_upper_95 0.0061, silent_wrong_upper_95 0.0003, accept_latency_ms mean 154.3 p99 170.9 max 389.5'
+  single_excitatory_pulse_into_parked_rail_u: 1.1x ignite (5,120 q) never changes it; >= 1.15x drops the
+    pair into LOCKSTEP (both ~105 Hz) at every phase, healed by the next reset; 2.0x SETs it at ~50 %
+    of phases
+  single_excitatory_pulse_into_set_trigger: '0.55x ignite (2,560 q, ~1.0x single need) never fires it;
+    0.6x fires the chain and SETs the rail at every phase: the register''s stray margin is the trigger''s,
+    the same as a latch''s u (1.1x need)'
+  single_inhibitory_pulse_into_a_set_rail_u: 2.25x loop (8,147 q) never clears it; 2.5x clears 4 of 12
+    phases, 3.0x 8 of 12
+  measured_on: the consumer register alone, RefSim, phases 0..44 step 4 (12 phases) unless stated
+campaign: mix_B_10000_transfers (2026-09-16, laptop, RefSim) - non_ok 48 / 10000 (timeout 43, no_accept
+  4, no_ready 1), wrong_value 0, non_ok_upper_95 0.0061, silent_wrong_upper_95 0.0003, accept_latency_ms
+  mean 154.3 p99 170.9 max 389.5
 timing_assumptions:
-- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
-  reset settling (~21 ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x
-  loop of inhibition on top of v's park
-- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s
-  pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence'
-- 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3
-  ms apart into u; u''s first spike ~6 ms after the first pulse'
-- 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u with the
-  image (Channel.power_on_events); without it a pair fires in lockstep for ever'
+- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed reset settling (~21
+  ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x loop of inhibition on top of v's park
+- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s pulse lands ~5.3
+  ms after; a relay re-arms only after ~50 ms of source silence'
+- 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3 ms apart into u; u''s
+  first spike ~6 ms after the first pulse'
+- 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u with the image (Channel.power_on_events);
+  without it a pair fires in lockstep for ever'
 - loads (upstream DATA) arrive only after READY
 notes:
-- 4-bit transport channel, consumer rails on flip-flops (storage='flipflop'), flags
-  (valid, tree, completion, fault) on latches by measurement, watchdog 55 hops
-- 'producer is the latch register: every harness loads it with one ignition pulse
-  per rail, which cannot set a flip-flop'
-- 'activity counts include the CLEAR-side v members: one member of every flip-flop
-  fires at 213 Hz at all times, so an idle register costs 8 x 213 Hz'
-- 'status: measured 2026-09-16, not frozen; mix-B campaign: 0.48 % fail-stop, 0 wrong in 10,000 (the latch channel: ~1e-5)'
+- the u-readout build (rail_proxy=False), kept for the before/after; the shipped build is under proxy_readout
+- 4-bit transport channel, consumer rails on flip-flops (storage='flipflop') read at u (rail_proxy=False,
+  the first build), flags (valid, tree, completion, fault) on latches by measurement, watchdog 55 hops
+- 'producer is the latch register: every harness loads it with one ignition pulse per rail, which cannot
+  set a flip-flop'
+- 'activity counts include the CLEAR-side v members: one member of every flip-flop fires at 213 Hz at
+  all times, so an idle register costs 8 x 213 Hz'
+- 'status: measured 2026-09-16, not frozen; mix-B campaign: 0.48 % fail-stop, 0 wrong in 10,000 (the latch
+  channel: ~1e-5)'
 reset_latency:
   clear_ms_mean: 5.9
   clear_ms_max: 6.3
+  reader_clear_ms_mean_last_u_spike: 5.9
+  reader_clear_ms_max_last_u_spike: 6.3
   ready_after_reset_trigger_ms: 84.8
   set_train_ms: u's first spike 6.0-6.5 ms after the set trigger's pulse (docs/a1_flipflop.md)
 arrival_jitter_tolerance:
@@ -122,16 +125,187 @@ reset_at_every_phase:
 fan_in_out:
   rail_u_fan_out:
   - 3
+  rail_u_fan_out_readers:
+  - 3
   set_trigger_fan_in: 1
   reset_inh_fan_out: 33
-  fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source
-    nothing (no load); measured on the real connectome as isolation cost instead (H0)'
+  fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source nothing (no load);
+    measured on the real connectome as isolation cost instead (H0)'
 error_rate:
   fast:
     transfers: 200
     decoded_errors: 0
     upper_95: 0.014867039231272054
     test: tests/test_ffregister.py::test_flipflop_register_200_random_transfers
-  mix_B_10000: '0.0048 non-ok in 10,000 (43 timeouts, 4 no ACCEPT, 1 no READY; all fail-stop),
-    0 wrong values (upper 95 % 3.0e-4); measured 2026-09-16, laptop reference simulator;
-    tests/test_ffregister.py::test_mix_b_10000_transfers'
+  mix_B_10000: 0.0048 non-ok in 10,000 (43 timeouts, 4 no ACCEPT, 1 no READY; all fail-stop), 0 wrong
+    values (upper 95 % 3.0e-4); measured 2026-09-16, laptop reference simulator; tests/test_ffregister.py::test_mix_b_10000_transfers
+proxy_readout:
+  primitive: ffregister_4bit
+  profile: 3
+  model:
+    dt_ms: 0.1
+    tau_m_ms: 20.0
+    tau_s_ms: 5.0
+    delay_ms: 1.8
+    w_syn_mv: 0.275
+  drive_quanta:
+    single_need: 2586.0434707264194
+    rate_need: 382.8363636363636
+    loop: 3621
+    pulse: 3621
+    and_in: 249
+    or_in: 766
+    reset: -5432
+    loop_period_steps: 47
+    ignite: 4655
+    relay_in: 4655
+  resources:
+    neurons: 233
+    synapses: 435
+    excitatory_synapses: 274
+    inhibitory_synapses: 161
+    total_abs_quanta: 1693361
+    biased_neurons: 24
+    consumer_neurons_excluding_reset_ready: 94
+    rail_storage_neurons_per_bit: 12.0
+    latch_register_neurons: 201
+    latch_register_rail_storage_neurons_per_bit: 4.0
+    latch_register_consumer_neurons_excluding_reset_ready: 62
+  latency:
+    accept_ms_mean: 166.4
+    accept_ms_max: 168.1
+  initiation_interval:
+    cycle_ms_mean: 344.4
+    cycle_ms_max: 346.1
+  activity:
+    spikes_per_transaction_total: 2382.5
+    spikes_per_transaction_by_class:
+      latch: 1390.5
+      gate: 71.3
+      control: 920.7
+    output_port_spikes_per_transaction: 235.0
+    latch_member_rate_hz_while_holding: 212.8
+    sustained_duty_cycle: a held latch fires continuously at the rate above until reset
+    quiescent_spikes_between_ready_and_next_load: 0
+    v_member_spikes_between_ready_and_next_load: 0 (the harness loads at READY, so the gap is empty; a
+      CLEAR rail's v fires at 213 Hz whenever the register is idle)
+  reset_energy:
+    producer:
+      pulses: 4
+      quanta_per_pulse: 48888
+      quanta_per_reset: 195552
+      mv_equivalent_per_reset: 3361.1
+    consumer:
+      pulses: 4
+      quanta_per_pulse: 111356
+      quanta_per_reset: 445424
+      mv_equivalent_per_reset: 7655.7
+  delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this backend'
+  stray_input_tolerance:
+    single_excitatory_pulse_into_parked_rail_u: 1.1x ignite (5,120 q) never changes it; >= 1.15x drops
+      the pair into LOCKSTEP (both ~105 Hz) at every phase, healed by the next reset; 2.0x SETs it at
+      ~50 % of phases
+    single_excitatory_pulse_into_set_trigger: '0.55x ignite (2,560 q, ~1.0x single need) never fires it;
+      0.6x fires the chain and SETs the rail at every phase: the register''s stray margin is the trigger''s,
+      the same as a latch''s u (1.1x need)'
+    single_inhibitory_pulse_into_a_set_rail_u: 2.25x loop (8,147 q) never clears it; 2.5x clears 4 of
+      12 phases, 3.0x 8 of 12
+    measured_on: the consumer register alone, RefSim, phases 0..44 step 4 (12 phases) unless stated
+    single_excitatory_pulse_into_parked_rail_p: '1.1x ignite (5,120 q) never fires p; 1.15x fires it once,
+      1.8x twice, 4.0x three times, the pair untouched; through the readers nothing follows at any of
+      them (no valid-OR spike, no valid / tree / completion latch, no fault gate): one p spike is 766
+      q into the OR against a 2,586 q single need. Only the same stray into BOTH proxies of a bit at once
+      makes a false valid on that bit, from 1.8x (four OR-input spikes); a false completion would need
+      that on every bit (measured: 1.8x into all eight proxies at once completes). tests/test_ffregister.py::test_stray_into_proxy_while_clear_gives_no_false_completion'
+  campaign: mix_B_10000_transfers (2026-09-16, laptop, TorchSim float64, proxy readout) - non_ok 37 /
+    10000 (timeout 21, no_accept 10, no_cleared 1, no_ready 3, wrong_value_after_failstop 2), fresh wrong_value
+    0, non_ok_upper_95 0.0049, silent_wrong_upper_95 0.0006 (fresh 0.0003), accept_latency_ms mean 171.2
+    p99 194.8 max 440.0
+  timing_assumptions:
+  - READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed reset settling (~21
+    ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x loop of inhibition on top of v's park
+  - 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s pulse lands ~5.3
+    ms after; a relay re-arms only after ~50 ms of source silence'
+  - 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3 ms apart into u;
+    u''s first spike ~6 ms after the first pulse, p''s (what the readers see) ~19-23 ms after it: one
+    park recovery (docs/contracts/flipflop.yaml)'
+  - 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u and p with the image (Channel.power_on_events);
+    without it a pair fires in lockstep for ever'
+  - loads (upstream DATA) arrive only after READY
+  - 'readers of a rail (valid OR, fault AND, decode taps) take the proxy p, never u: u is inhibitory and
+    no host carries an excitatory read of it; the reset controller still clears through u (inhibitory
+    into inhibitory: sign-correct)'
+  - no veto in this channel reads a consumer rail (the watchdog reads the producer's latch rails; READY
+    has no veto), so p's 22 ms veto lead is not exercised and no delay chain was widened
+  notes:
+  - 'the shipped build (rail_proxy=True): every reader of a rail takes the proxy p'
+  - 4-bit transport channel, consumer rails on flip-flops (storage='flipflop') read through their excitatory
+    proxies p (rail_proxy=True), flags (valid, tree, completion, fault) on latches by measurement, watchdog
+    55 hops
+  - 'producer is the latch register: every harness loads it with one ignition pulse per rail, which cannot
+    set a flip-flop'
+  - 'activity counts include the CLEAR-side v members: one member of every flip-flop fires at 213 Hz at
+    all times, so an idle register costs 8 x 213 Hz'
+  - lib/contracts.measure_contract classes a role 'Q.b*.p' as control, not latch (its rule is '.u'/'.v'),
+    so the by-class split moves the proxies' spikes (8 x 213 Hz while SET) from latch to control
+  - 'status: measured 2026-09-16, not frozen; mix-B campaign: 0.37 % fail-stop, 0 fresh wrong, 2 wrong
+    after a fail-stop in 10,000 (u readout: 0.48 %, 0 wrong; the latch channel: ~1e-5)'
+  reset_latency:
+    clear_ms_mean: 4.9
+    clear_ms_max: 6.2
+    reader_clear_ms_mean_last_p_spike: 22.1
+    reader_clear_ms_max_last_p_spike: 23.3
+    ready_after_reset_trigger_ms: 84.8
+    set_train_ms: u's first spike 6.0-6.5 ms after the set trigger's pulse; p's 18.5-23.1 ms (docs/a1_flipflop.md)
+  arrival_jitter_tolerance:
+    bits_up_to_10_ms_apart:
+      transfers: 5
+      correct: 5
+      accept_after_last_bit: true
+    bits_up_to_40_ms_apart:
+      transfers: 5
+      correct: 5
+      accept_after_last_bit: true
+    bits_up_to_100_ms_apart:
+      transfers: 5
+      correct: 5
+      accept_after_last_bit: true
+  retention:
+    hold_s: 2.0
+    decoded_after_hold: the loaded word, valid
+    rate_hz_while_holding: 212.5
+    period_steps: 47
+    measured_by: tests/test_ffregister.py::test_register_clears_at_every_phase_and_holds_two_seconds
+  reset_at_every_phase:
+    phases: all 47 measured; the fast test checks every second one
+    train: 4 x 1.5x loop into u only (the reset controller's inh)
+    lockstep_resolved: 'yes: tests/test_ffregister.py::test_stray_lockstep_is_healed_by_the_next_reset'
+  fan_in_out:
+    rail_u_fan_out:
+    - 1
+    rail_p_fan_out_readers:
+    - 2
+    set_trigger_fan_in: 1
+    reset_inh_fan_out: 33
+    fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source nothing (no load);
+      measured on the real connectome as isolation cost instead (H0)'
+  error_rate:
+    fast:
+      transfers: 200
+      decoded_errors: 0
+      upper_95: 0.014867039231272054
+      test: tests/test_ffregister.py::test_flipflop_register_200_random_transfers
+    mix_B_10000: '0.0037 non-ok in 10,000 (21 timeouts, 10 no ACCEPT, 1 no CLEARED, 3 no READY: fail-stop;
+      and 2 wrong values, both the transfer right after a timeout in the same node, loaded by the fixed-period
+      harness before that transfer''s READY), 0 wrong values on a clean transfer (upper 95 % 3.0e-4; 6.3e-4
+      counting the two); u readout: 0.0048, 0 wrong. Every non-ok traced in chunk 0 (30 of 4,000, four
+      nodes) starts the same way: one perturbed pair lands in LOCKSTEP on its SET train (u, v and p all
+      at ~106 Hz), its valid OR is marginal at that rate and ignites 200+ ms late, the watchdog times
+      out, and READY comes ~490 ms after the load, after the next load. Wrong value 1 (node 197): through
+      p the late completion reaches the producer''s reset trigger 54 ms after the timeout''s FAULT-ACCEPT
+      (u: 46, swallowed), past its ~50 ms edge re-arm, so producer and consumer reset twice; the second
+      consumer reset train (~456 ms) meets the next load, the SET trains fail, the producer''s rails are
+      never reset (edge relays fire on a rise only) and a stale partial word completes three transfers
+      later. Wrong value 2 (node 175): the next transfer put the same pair into lockstep again, completed
+      at 440 ms with no timeout, and its producer reset came after the following load - the same through
+      u. measured 2026-09-16, laptop; tests/test_ffregister.py::test_mix_b_10000_transfers'
