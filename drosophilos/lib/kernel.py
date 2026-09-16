@@ -388,6 +388,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
+        # The start pulse re-lights a request's false rail ~55 ms after that rail's own kill
+        # train (lit by the request 12 hops earlier) hyperpolarised both members: one ignite
+        # pulse whose loop then has to catch on a still-recovering partner. At a 3 sigma
+        # corner of one latch's loop, kill, threshold and bias the loop does not catch, the
+        # pair is dark, and the row's next IDLE starts it with no request (`pb` has nothing
+        # to veto), samples the producer's next word early and replays it when the real
+        # request arrives: the perspective duplicate (a3_kernels §10.5). ACT^d, the same
+        # pulse 11 hops later, re-lights the same rails ~110 ms after the kill, twice the
+        # measured boundary; when the first ignition worked it re-ignites a lit rail.
+        for l in [c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
+            net.synapse(act_d, l.u, drive.ignite)
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name
@@ -887,11 +898,12 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
                          expect_outputs: list | None = None, dtype=None, sim=None,
                          progress: "float | callable | None" = 300,
-                         capture_spikes: "tuple[int, object] | None" = None) -> tuple[list, object, dict]:
+                         capture_spikes: "tuple[int, object] | None" = None, gap_ms: float = 0.0) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
-    outputs node b owes (default: one per token). Returns per node the dict of output lists
+    outputs node b owes (default: one per token). `gap_ms` is run_pipeline's: no load sooner
+    than that after the node's previous load. Returns per node the dict of output lists
     (cell -> [(step, value)]), the simulator, and stats.
 
     `progress`: the interval in wall seconds between calls (default 300; None or 0 disables,
@@ -940,6 +952,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             out.append((t[0], t[1], t[2] if len(t) > 2 else 0) if isinstance(t, tuple) else (first_stream, t, 0))
         scheds.append(out)
     window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
+    gap = int(gap_ms / params.dt)
     ready_of = {st: reg.stage.ready for st, (reg, _) in pl.inputs.items()}
     watch = {}  # neuron -> ("ready", stream) | ("out", cell)
     for st, rn in ready_of.items():
@@ -985,7 +998,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             if k[b] < len(scheds[b]):
                 st, value, min_outs = scheds[b][k[b]]
                 n_out = sum(len(v) for v in outs[b].values())
-                if n_ready[b][st] >= loaded[b][st] and n_out >= min_outs:
+                if n_ready[b][st] >= loaded[b][st] and n_out >= min_outs and (not loads[b] or sim.step_index >= loads[b][-1] + gap):
                     t = sim.step_index + 5
                     Pst = pl.inputs[st][1]
                     ev_n = [Pst.rails[i][r].u for i, r in rails_for(value, pl.n)]

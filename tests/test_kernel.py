@@ -204,6 +204,79 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     assert [len(x) for x in starts] == [1, 2]
 
 
+def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
+    """§10.5: a request's false rail re-lit by the start pulse ~55 ms after its own kill train
+    can fail to catch; the dark pair lets the row's next IDLE start it with no request, and the
+    real request then replays the word. Both copies carry the same 3 sigma corner on one rail
+    (`m.r2.req.m.r1r0`: loop -12 %, kill +12 %, V_th +0.4 mV, bias -0.4 mV); copy 1 also has the
+    ACT^d re-light synapse zeroed, which is the pre-fix circuit. Three tokens 1.4 s apart, the
+    perspective pipeline's regime (token interval longer than a row's cycle)."""
+    import numpy as np
+
+    from drosophilos.lib.kernel import run_pipeline_batched
+    from drosophilos.sim.ref64 import RefSim
+
+    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                        consts={"k": 3})
+    assert pl.net.n < 30000
+    cell = next(c for c in pl.cells if c.name == "m.r2")
+    req = cell.reqs["m.r1"]
+    roles = pl.net.roles
+    topo = pl.net.topology()
+    u, v = req[0].u, req[0].v
+    k1_inh = roles.index("m.r2.req.m.r1.k1.inh")
+    act_d = roles.index("m.r2.actd.d10")
+    trigger = roles.index("m.r2.trigger.m.r1")
+    loop = ((topo.src == u) & (topo.dst == v)) | ((topo.src == v) & (topo.dst == u))
+    kill = (topo.src == k1_inh) & ((topo.dst == u) | (topo.dst == v))
+    relight = (topo.src == act_d) & (topo.dst == u)
+    assert loop.sum() == 2 and kill.sum() == 2 and relight.sum() == 1
+    quanta = np.broadcast_to(topo.quanta, (2, topo.nnz)).astype(np.float64).copy()
+    quanta[:, loop] *= 0.88
+    quanta[:, kill] *= 1.12
+    quanta[1, relight] = 0  # copy 1: the start pulse's ignition is the rail's only chance
+    quanta = np.rint(quanta).astype(np.int32)
+    vth = np.full((2, topo.n), PARAMS.V_th)
+    vth[:, [u, v]] += 0.4
+    bias = np.zeros((2, topo.n))
+    bias[:, [u, v]] -= 0.4
+
+    class Record(RefSim):
+        def __init__(self):
+            super().__init__(topo, PARAMS, n_nodes=2, quanta=quanta, V_th=vth, bias=bias)
+            self.rises = {(b, w): [] for b in range(2) for w in ("start", "trigger", "req_false")}
+            self.watch = {cell.start: "start", trigger: "trigger", u: "req_false"}
+
+        def step(self):
+            before = len(self._spk_step)
+            super().step()
+            for k in range(before, len(self._spk_step)):
+                step = int(self._spk_step[k][0])
+                for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
+                    what = self.watch.get(neuron)
+                    if what is not None:
+                        seen = self.rises[(node, what)]
+                        if not seen or step - seen[-1] > 150:
+                            seen.append(step)
+
+    sim = Record()
+    outs, sim, stats = run_pipeline_batched(pl, PARAMS, [[3, 5, 2], [3, 5, 2]], max_ms=9000, expect_outputs=[3, 3],
+                                             sim=sim, progress=0, gap_ms=1400)
+    got = [[value for _, value in outs[b]["m"]] for b in range(2)]
+    assert got == [[9, 15, 6], [9, 15, 15]], (got, stats)
+    starts = [sim.rises[(b, "start")] for b in range(2)]
+    triggers = [sim.rises[(b, "trigger")] for b in range(2)]
+    assert [len(x) for x in starts] == [3, 4], starts  # the pre-fix copy: token 2 early, token 2 again, then token 3
+    # fixed copy: every start follows its trigger by the guard's 12 hops
+    assert all(0 < s - t < 1000 for s, t in zip(starts[0], triggers[0])), (starts[0], triggers[0])
+    # pre-fix copy: the second start precedes the second trigger (a start with no request)
+    assert starts[1][1] < triggers[1][1], (starts[1], triggers[1])
+    # the rail: one spike from the start's ignition on both copies, a train only where ACT^d re-lit it
+    first_start = starts[0][0]
+    rail = [[r for r in sim.rises[(b, "req_false")] if first_start < r < first_start + 1500] for b in range(2)]
+    assert len(rail[1]) == 1 and len(rail[0]) >= 2 and rail[0][1] > first_start + 500, rail
+
+
 def test_batched_runner_captures_selected_spikes_before_trace_trimming():
     import numpy as np
 
