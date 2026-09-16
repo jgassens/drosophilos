@@ -611,3 +611,31 @@ from drosophilos.bench.h1_cell import run_all, place_cell, latch_capacity
 run_all()                                   # docs/h1_cell.json: n8 and n4, unsplit and split, plus the capacity table
 place_cell(8, split=False, restarts=2)      # one configuration in-process (2.3 GB)
 ```
+
+## What the fly's wiring contributes: shuffled controls
+
+Tool: `bench/h1_shuffle.py`; data: `docs/h1_shuffle.json`. The plan's Stage H asks for matched
+shuffled comparisons: is the adder's placement a property of the fly's actual wiring, or of any
+graph with those degrees? Three controls, two seeds each, the same search (k_max 4, two restarts,
+300 s), the real MCNS beside them under the same settings:
+
+| substrate | what it keeps | mutual pairs ≥ 57 | disjoint pairs | strong core | carried | hard | hub |
+|---|---|---|---|---|---|---|---|
+| **MCNS, real** | everything | 1,223 | 343 | 3,197 | **683 / 1,144 (60 %)** | 648 / 884 | 35 / 256 |
+| configuration shuffle | every neuron's in- and out-synapse counts, transmitters; the wiring randomised | 24 | 22–24 | ~6,350 | 570–579 (50 %) | 538–565 | 5–41 |
+| weights shuffle | who connects to whom; the synapse counts permuted among the edges | 62 | 62 | ~1,450 | 506–510 (44 %) | 487–508 | 2–19 |
+| transmitter shuffle | the wiring and its strengths; transmitter labels permuted within superclass | 2,482–2,888 | 698–715 | ~6,650 | **745–760 (65 %)** | 721–725 | 24–35 |
+
+**The fly's wiring beats a degree-matched random graph by ten points**, and the difference is
+reciprocity: a random graph with MCNS's degrees has 24 strong reciprocal pairs where the fly has
+1,223, and those pairs are the latches (the configuration control still carries the relays, vetoes
+and chains, which are paths, not loops). Which edges are *strong* matters more than who is wired to
+whom: permuting the synapse counts over the real edge set leaves 62 strong pairs and a 1,400-neuron
+core, and the placement falls to 44 %. And the fly's sign layout is a handicap for this circuit:
+relabelling transmitters at random within each superclass more than doubles the excitatory
+reciprocal pairs (2,500–2,900) and lifts the placement to 65 %, because many of the fly's strongest
+reciprocal pairs are between *inhibitory* local neurons (the antennal lobe's GABAergic LNs), which a
+two-neuron excitatory latch cannot use. So the measured statement is: the fly's reciprocal strong
+motifs are real and specific (fifty times a random graph's), they are what carries the register
+logic, and about a third of them are of the wrong sign for an excitatory latch — which is one more
+reason an inhibition-based latch design would fit this substrate better than the current one.

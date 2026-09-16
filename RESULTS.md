@@ -864,7 +864,12 @@ Stage H0's 15 quiet hosts survived it, 614 hubs do not. And the ceiling: MCNS ha
 2,896 at ×16); one 8-bit kernel cell needs 375, the pixel kernel ~5,300, the three Doom
 kernels ~35,000. On the fly's own synapses, one neuron per designed neuron, the wiring holds
 about one cell; 3- and 4-neuron loops as latches add a few percent, no more
-(`docs/capacity_doom.md` §5, "The ceiling").
+(`docs/capacity_doom.md` §5, "The ceiling"). Against matched controls the fly's wiring is
+specific: a random graph with the same degrees has 24 strong reciprocal pairs to the fly's
+1,223 and carries 50 % of the adder to the fly's 60 %; permuting the synapse strengths over
+the real edges drops it to 44 %; and permuting the transmitter labels *raises* it to 65 %,
+because many of the fly's strongest reciprocal pairs are inhibitory and useless to an
+excitatory latch (`docs/h1_placement.md`, shuffled controls).
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that
