@@ -23,6 +23,7 @@ from ..sim.model import Params
 
 OPLIST = list(OPS)
 MIXES = {
+    "0": Perturbation(0.0, 0.0, 0.0, 0.0, 0, 0),  # no perturbation: the control that separates a reference mismatch from a margin
     "B": Perturbation(0.04, 0.2, 0.2, 5.0, 150, 100),  # every M1 / A2 campaign so far
     "B+": Perturbation(0.05, 0.25, 0.25, 5.0, 150, 100),  # the failure-hunting probes of step 6
 }
