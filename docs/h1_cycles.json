@@ -1,0 +1,142 @@
+{
+ "4": {
+  "threshold": 57,
+  "graph_edges": 42657,
+  "graph_nodes_with_out_edge": 13967,
+  "pairs": {
+   "threshold": 57,
+   "mutual_pairs": 1223,
+   "mutual_members": 771,
+   "max_disjoint_pairs": 343,
+   "matching": "maximum matching",
+   "strong_core": 3197
+  },
+  "three_cycle": {
+   "count": 8402,
+   "disjoint": 144
+  },
+  "four_cycle": {
+   "walk_count": 553146,
+   "count": 125036,
+   "disjoint": 132
+  },
+  "mixed": {
+   "disjoint": 368,
+   "by_length": {
+    "2": 292,
+    "3": 32,
+    "4": 44
+   },
+   "superclass_counts": {
+    "cb_intrinsic": 421,
+    "vnc_intrinsic": 223,
+    "descending_neuron": 84,
+    "ascending_neuron": 50,
+    "cb_sensory": 22,
+    "vnc_sensory": 22,
+    "sensory_ascending": 16,
+    "visual_projection": 13,
+    "ol_intrinsic": 2,
+    "sensory_descending": 2,
+    "visual_centrifugal": 1
+   },
+   "mean_external_in_synapses": 5042.1
+  },
+  "seconds": 7.5
+ },
+ "8": {
+  "threshold": 29,
+  "graph_edges": 152108,
+  "graph_nodes_with_out_edge": 37085,
+  "pairs": {
+   "threshold": 29,
+   "mutual_pairs": 4292,
+   "mutual_members": 2432,
+   "max_disjoint_pairs": 1047,
+   "matching": "maximum matching",
+   "strong_core": 10131
+  },
+  "three_cycle": {
+   "count": 48228,
+   "disjoint": 500
+  },
+  "four_cycle": {
+   "walk_count": 5756472,
+   "count": 1355590,
+   "disjoint": 461
+  },
+  "mixed": {
+   "disjoint": 1096,
+   "by_length": {
+    "2": 763,
+    "3": 136,
+    "4": 197
+   },
+   "superclass_counts": {
+    "cb_intrinsic": 1401,
+    "vnc_intrinsic": 579,
+    "descending_neuron": 233,
+    "ascending_neuron": 208,
+    "vnc_sensory": 111,
+    "cb_sensory": 73,
+    "visual_projection": 52,
+    "sensory_ascending": 36,
+    "ol_intrinsic": 13,
+    "visual_centrifugal": 9,
+    "cb_motor": 3,
+    "sensory_descending": 2,
+    "vnc_motor": 2
+   },
+   "mean_external_in_synapses": 3838.8
+  },
+  "seconds": 45.5
+ },
+ "16": {
+  "threshold": 15,
+  "graph_edges": 454143,
+  "graph_nodes_with_out_edge": 75227,
+  "pairs": {
+   "threshold": 15,
+   "mutual_pairs": 12315,
+   "mutual_members": 6979,
+   "max_disjoint_pairs": 2896,
+   "matching": "maximum matching",
+   "strong_core": 22347
+  },
+  "three_cycle": {
+   "count": 149879,
+   "disjoint": 1433
+  },
+  "four_cycle": {
+   "walk_count": 25887490,
+   "count": 6150142,
+   "disjoint": 1182
+  },
+  "mixed": {
+   "disjoint": 2834,
+   "by_length": {
+    "2": 2025,
+    "3": 340,
+    "4": 469
+   },
+   "superclass_counts": {
+    "cb_intrinsic": 3213,
+    "vnc_intrinsic": 1126,
+    "vnc_sensory": 650,
+    "ascending_neuron": 436,
+    "visual_projection": 401,
+    "descending_neuron": 386,
+    "ol_intrinsic": 320,
+    "cb_sensory": 310,
+    "sensory_ascending": 63,
+    "visual_centrifugal": 30,
+    "cb_motor": 4,
+    "sensory_descending": 3,
+    "vnc_motor": 3,
+    "cb_endocrine": 1
+   },
+   "mean_external_in_synapses": 2590.2
+  },
+  "seconds": 145.8
+ }
+}
