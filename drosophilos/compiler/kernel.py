@@ -459,7 +459,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
 
 
 def compile_program(prog: Program, params: dict | None = None, fn: str = "main", pacing: str = "host",
-                    counts: dict | None = None) -> KernelSpec:
+                    counts: dict | None = None, mul: str = "array") -> KernelSpec:
     """A function with a loop nest of depth two (a frame loop around a column loop) as one
     pipeline with two token streams: the outer loop's body without the inner loop is the
     outer kernel (stream "input:<outer var>": the tick), the inner loop is the inner kernel
@@ -474,7 +474,7 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
     ob = loop_body(prog, fn, outer)
     inner = next((x for x in ob if isinstance(x, str) and x.startswith("loop")), None)
     if inner is None:
-        return compile_kernel(prog, ob, _induction_var(prog, fn, outer), params=params)
+        return compile_kernel(prog, ob, _induction_var(prog, fn, outer), params=params, mul=mul)
     # every inner loop of the outer body is a kernel with a stream named by its induction
     # variable (the first keeps the default stream "input"); the outer body without them is the
     # tick kernel; what the inner bodies read and the outer body writes is a parameter edge
@@ -496,7 +496,7 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
             keep[j] = False
     outer_body = [x for x, kp in zip(ob, keep) if kp and not (isinstance(x, Instr) and x.dst in ivars)]  # the inner counters' inits go; labels stay
     okey = f"input:{ovar}"
-    spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey, allow_no_output=True)
+    spec = compile_kernel(prog, outer_body, ovar, params=params, prefix="f", stream_key=okey, allow_no_output=True, mul=mul)
     for v, cname in spec.state_cells.items():  # the outer kernel's state carriers are outputs (the host paces on them)
         if cname not in spec.outputs:
             spec.outputs.append(cname)
@@ -509,7 +509,7 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
                 raise NotAKernel(f"the inner loop writes {ins.dst}, a variable the outer loop carries: the two kernels would each hold a copy (v0)")
     for idx, (_, ib, ivar, _, _) in enumerate(inners):
         key = "input" if idx == 0 else f"input:{ivar}"
-        spec = compile_kernel(prog, ib, ivar, params=params, prefix=(f"c{idx}_" if idx else "c"), stream_key=key, seeds=seeds, into=spec)
+        spec = compile_kernel(prog, ib, ivar, params=params, prefix=(f"c{idx}_" if idx else "c"), stream_key=key, seeds=seeds, into=spec, mul=mul)
         if idx:
             spec.streams.append(ivar)
             spec.stream_keys[ivar] = key

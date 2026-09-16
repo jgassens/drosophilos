@@ -34,6 +34,7 @@ def main():
     ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--progress", type=float, default=300, help="seconds between progress lines (0 disables)")
+    ap.add_argument("--mul", default="pipelined", choices=["array", "pipelined"], help="multiplier cells: the array multiplier's latency is n^2 (6.6 s per 16-bit product), the pipelined one's ~1.7 s")
     ap.add_argument("--pixel-stream", default="p", help="the inner stream whose tokens are row<<8|col pixel addresses")
     ap.add_argument("--tick-stream", default="f", help="the outer (frame) loop's induction variable")
     ap.add_argument("--params", default=None, help="JSON dict overriding the prologue's derived initial state, e.g. per-variable")
@@ -46,10 +47,10 @@ def main():
         raise SystemExit(f"neural pacing: the width {W} must be a multiple of the copies {B}")
     params = json.loads(a.params) if a.params else None  # None: compile_program derives state from the prologue's CONSTs
     pix_s, tick_s = a.pixel_stream, a.tick_stream
-    ks = compile_program(prog, params=params, pacing="host")  # discover the streams before pacing needs their counts
+    ks = compile_program(prog, params=params, pacing="host", mul=a.mul)  # discover the streams before pacing needs their counts
     col_streams = [s for s in ks.streams if s not in (pix_s, tick_s)]  # program order: every inner stream but the pixel and tick ones
     if a.pacing == "neural":
-        ks = compile_program(prog, params=params, pacing=a.pacing,
+        ks = compile_program(prog, params=params, pacing=a.pacing, mul=a.mul,
                              counts={**{s: per_node_cols for s in col_streams}, pix_s: per_node_cols * H})
     pix_key, tick_key = ks.stream_keys[pix_s], ks.stream_keys[tick_s]
     sx, sy = 160 // W, 100 // H
