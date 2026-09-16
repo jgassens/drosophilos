@@ -204,7 +204,6 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     assert [len(x) for x in starts] == [1, 2]
 
 
-@pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
 def test_batched_runner_captures_selected_spikes_before_trace_trimming():
     import numpy as np
 
