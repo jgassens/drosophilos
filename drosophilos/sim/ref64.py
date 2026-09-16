@@ -23,7 +23,7 @@ class RefSim:
         n_nodes: int = 1,
         *,
         V_th=None,
-        bias=0.0,
+        bias=None,
         gain=1.0,
         silenced=False,
         quanta=None,
@@ -41,7 +41,7 @@ class RefSim:
 
         B, n = self.B, self.n
         self.V_th = broadcast_param(params.V_th if V_th is None else V_th, B, n, np.float64)
-        self.bias = broadcast_param(bias, B, n, np.float64)
+        self.bias = broadcast_param(topo.sim_bias(bias), B, n, np.float64)  # None: the topology's own biases (flip-flops), else 0
         self.gain = broadcast_param(gain, B, n, np.float64)
         self.silenced = broadcast_param(silenced, B, n, bool)
         if quanta is None:

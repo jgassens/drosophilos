@@ -872,8 +872,19 @@ because many of the fly's strongest reciprocal pairs are inhibitory and useless 
 excitatory latch (`docs/h1_placement.md`, shuffled controls). Counting those inhibitory pairs
 as flip-flop latches instead — 358 / 1,105 / 3,717 disjoint driven pairs at ×4 / ×8 / ×16, on
 quiet neurons at the H0 bound and in the optic lobe's medulla columns at ×16 — would roughly
-double the supply, to about one pixel kernel's worth at ×16. That latch is not designed yet
-(`docs/capacity_doom.md` §5).
+double the supply, to about one pixel kernel's worth at ×16. **That latch now exists**
+(`protocol/flipflop.py`, `docs/a1_flipflop.md`, `docs/contracts/flipflop.yaml`): two inhibitory
+neurons on a 58 mV bias in mutual inhibition, the firing member at 212.8 Hz — the excitatory
+latch's exact period, so every primitive that reads a rail (edge relays, veto relays, rate
+gates) sees the same statistics — bistable from 0.8× the loop weight, holding 2 s in either
+state, switched by trains of three pulses and never by one standard ignition pulse; its noise
+margins are wider than the latch's (1.8× ignite on the silent member against the latch's 1.1×
+need; 2.25× loop on the firing member against 2×). What does not carry over: anything that
+ignites or resets a latch by a single pulse into its members needs a three-relay adapter
+(`add_set_chain` / `add_clear_chain`), and a flip-flop must be pulsed once at power-on. Per-neuron
+bias is now a field of the netlist (a Profile 2 parameter edit, counted in the manifest),
+carried by the topology into both simulators. Not yet done: a perturbation campaign on it and
+a register built from it.
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

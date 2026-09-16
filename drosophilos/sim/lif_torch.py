@@ -24,7 +24,7 @@ class TorchSim:
         n_nodes: int = 1,
         *,
         V_th=None,
-        bias=0.0,
+        bias=None,
         gain=1.0,
         silenced=False,
         quanta=None,
@@ -53,7 +53,7 @@ class TorchSim:
             return torch.as_tensor(np.ascontiguousarray(arr), device=dev, dtype=dt)
 
         self.V_th = T(broadcast_param(params.V_th if V_th is None else V_th, B, n, np.float64), dtype)
-        self.bias = T(broadcast_param(bias, B, n, np.float64), dtype)
+        self.bias = T(broadcast_param(topo.sim_bias(bias), B, n, np.float64), dtype)  # None: the topology's own biases
         self.gain = T(broadcast_param(gain, B, n, np.float64), dtype)
         self.silenced = T(broadcast_param(silenced, B, n, bool), torch.bool)
         self.E_L = float(params.E_L)
