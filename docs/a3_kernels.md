@@ -446,6 +446,70 @@ one input token. The two-LOAD ROM chain has 3,586 neurons and runs 5 s: the fixe
 statistical confirmation; the campaign runner can now retain the relevant evidence with
 `--dump-node N --dump-roles REGEX --dump-out trace.npz`.
 
+### 10.5 The perspective duplicate is an early multiplier-row replay (2026-09-16)
+
+The spike dump for perspective copy 5, seed 0, mix B changes the localization from §10.4.
+The repeated word is already in row 10's stage at the start of the retained window; row 13
+does not create it.  Decoding the carried `A` and `B` fields (master bits 19--34 and 35--50)
+at each completion gives this diagonal through the array:
+
+| event | step | decoded row word |
+|---|---:|---|
+| `c4_mulp.r10.Q.comp.c5_0.L.u` is live at the window boundary | 255,025 (first retained spike) | `A=51, B=100, acc=5100` |
+| `c4_mulp.r10.commit_pulse` | 255,090 | the already-complete stale stage is granted |
+| `c4_mulp.r10.M.comp.c5_0.L.u`; `r10.done.edge` | 260,498; 260,541 | second `51 * 100` publication |
+| `c4_mulp.r9.M.comp.c5_0.L.u`; `r9.done.edge` | 260,837; 260,880 | the next source word is `A=43, B=100`, after r10's stale stage was complete |
+| `c4_mulp.r11.Q.comp.c5_0.L.u`; `r11.M.comp.c5_0.L.u` | 255,046; 258,912 | the first `51 * 100` wave already advancing |
+| `c4_mulp.r11.start`; `ACT^d`; master completion | 261,345; 261,922; 274,161 | the legitimate r10 DONE advances the second `51 * 100` wave |
+| `c4_mulp.r12` master completions | 272,307; 287,541; 301,545 | `51 * 100`, `51 * 100`, then `43 * 100` |
+| `c4_mulp.r13` starts / `ACT^d` | 273,130 / 273,690; 288,367 / 288,931; 303,063 / 303,626 | samples those three r12 words in order |
+| `c4_mulp.r13` master completions | 285,547; 300,790; 314,888 | `51 * 100`, `51 * 100`, then `43 * 100` |
+| `c4_mulp.r14` master completions | 299,115; 314,395; 328,644 | `51 * 100`, `51 * 100`, then `43 * 100` |
+| `c4_mulp` (row 15) master completions | 312,340; 327,689; 341,234 | `51 * 100`, `51 * 100`, then `43 * 100` |
+| `c5_shr.start`; master completion | 313,179 / 322,101; 328,522 / 337,441; 342,075 / 351,012 | `19`, repeated `19`, then displaced `16` |
+
+The detailed row-13 handshake is ordered.  For the repeated wave its source DONE is 287,584;
+`REQ` true rises at 287,665 while false dies at 287,766, IDLE has been true since 286,680
+(its false rail dies at 286,824), `go.g0.pa.edge` fires at 288,324, START at 288,367, and
+`ACT^d` at 288,931.  START re-lights REQ-false at 288,413 and the true rail's last spike is
+288,470.  The stage completion, commit pulse, master completion and DONE are 294,727,
+295,515, 300,790 and 300,830.  Rows 14 and 15, and `c5_shr`, show the same valid
+DONE -> REQ -> START ordering.  Thus neither row 13 nor the shift cell starts without a
+source publication; they faithfully propagate the duplicate already emitted by row 10.
+
+At the shift cell the fourth result's row-15 master completes at 312,340 and DONE fires at
+312,381.  `c5_shr` REQ-true rises at 312,465, its false rail dies at 312,588, the guard's
+`pa.edge` fires at 313,139, START at 313,179, and `ACT^d` at 313,757.  Stage completion,
+commit, master completion and DONE are 316,694, 317,493, 322,101 and 322,144.  The duplicate
+has the same sequence: row-15 completion/DONE 327,689/327,729, REQ-true 327,811, guard/START
+328,483/328,522, `ACT^d` 329,102, stage/commit 331,988/332,785, and master completion/DONE
+337,441/337,484.  Finally the displaced `43 * 100` word completes row 15 at 341,234, raises
+REQ at 341,358 and starts `c5_shr` at 342,075; its completion is the `16` at 351,012 outside
+the all-cell window.  No c5 request, IDLE or commit event is out of order.
+
+The out-of-order neuron was therefore `c4_mulp.r10.start`: it ran on row 9's still-current
+`A=51, B=100` before row 9 published the fifth word (`A=43`) at 260,837.  Its exact START,
+REQ and IDLE transition is not in this artifact: the NPZ begins at 255,000 with r10's stale
+stage completion already live.  The older full-run input-only dump does establish the host
+side: values 3 and 4 (the fourth and fifth tokens) complete in `IN.M.comp.c3_0.L.u` at
+42,471 and 55,109, and `IN.done.edge` fires at 42,513 and 55,151 (values 4 and 5, if tokens
+are named by their zero-based values, complete at 55,109 and 67,620).  It contains no cell
+roles.  `c1_and`/`c2_load`/`c3_load` are already at rest when the all-cell window opens.
+The available dumps can therefore prove the stale-operand run and its complete propagation,
+but cannot prove which pre-window spike kept or re-lit r10's REQ.
+
+This **refines, but does not confirm, §10.4**.  A stale per-source REQ-true surviving r10's
+previous START and meeting the later IDLE is consistent with exactly this early replay, but
+the proposed both-live transition, its killing spike, and a relay doublet are outside the
+capture.  The broad one-hot/four-pulse/wider-hop remedy remains disproved by its cluster
+stalls.  A fourth pulse on only the START clear was also tested as the narrow candidate: a
+single 150-quanta hit on the request latch's `v` member at its closest clean-model approach
+to threshold (about 0.015 mV below threshold while the clear lands) does not retain or replay
+the request, while forcing REQ true at the later IDLE bypasses both three- and four-pulse
+clears.  That experiment does not reproduce the captured mechanism, so the extra pulse is
+not landed as a fix.  A row-role capture beginning before 255,000 is required to name the
+actual REQ/relay transition and justify a local repair.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
