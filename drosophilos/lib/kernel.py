@@ -817,7 +817,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
                          expect_outputs: list | None = None, dtype=None, sim=None,
-                         progress: "float | callable | None" = 300) -> tuple[list, object, dict]:
+                         progress: "float | callable | None" = 300,
+                         capture_spikes: "tuple[int, object] | None" = None) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
@@ -834,7 +835,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     `nodes_done`, `total_nodes`, `faults`, `timeouts`, plus `outs` — the per-node dict of
     output lists collected so far (the same live object the run fills in, for a caller that
     wants to assemble and write a partial result while the run continues). Wall time is
-    polled only every ~1000 steps, so the per-step cost of the run loop is unchanged."""
+    polled only every ~1000 steps, so the per-step cost of the run loop is unchanged.
+
+    `capture_spikes=(node, neuron_ids)` retains every matching `(step, neuron)` before the
+    runner trims the simulator's trace.  The arrays are returned in
+    `stats["captured_spikes"]`; campaigns use this for a narrow role-filtered handshake dump
+    without retaining every spike of a 100-copy run."""
     import torch
     from ..sim.lif_torch import TorchSim
     net, drive = pl.net, pl.drive
@@ -844,6 +850,19 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
     sim.run(3000)
+    captured_steps, captured_neurons = [], []
+    if capture_spikes is not None:
+        capture_node, capture_ids = capture_spikes
+        capture_ids = np.asarray(sorted(set(int(x) for x in capture_ids)), dtype=np.int64)
+
+        def capture_chunk(stp, nr, nd) -> None:
+            mask = (nd == capture_node) & np.isin(nr, capture_ids)
+            if np.any(mask):
+                captured_steps.extend(stp[mask].tolist())
+                captured_neurons.extend(nr[mask].tolist())
+
+        for stp, nr, nd in zip(sim._spk_step, sim._spk_neuron, sim._spk_node):
+            capture_chunk(stp, nr, nd)
     first_stream = next(iter(pl.inputs))
     scheds = []
     for sc in schedules:
@@ -905,7 +924,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     loads[b].append(t)
                     loaded[b][st] += 1
                     k[b] += 1
+        n_spike_chunks = len(sim._spk_step)
         sim.step()
+        if capture_spikes is not None:
+            for stp, nr, nd in zip(sim._spk_step[n_spike_chunks:], sim._spk_neuron[n_spike_chunks:],
+                                   sim._spk_node[n_spike_chunks:]):
+                capture_chunk(stp, nr, nd)
         s_ = sim.step_index - 1
         steps_since_check += 1
         if progress_interval and steps_since_check >= STEP_CHECK:
@@ -952,4 +976,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
              "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
              "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad}
+    if capture_spikes is not None:
+        stats["captured_spikes"] = (np.asarray(captured_steps, dtype=np.int64),
+                                    np.asarray(captured_neurons, dtype=np.int64))
     return outs, sim, stats
