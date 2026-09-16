@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from test_embed_netlist import latch_relay_netlist, synthetic_ff_mcns, synthetic_mcns, two_flipflop_netlist
+from test_embed_netlist import (latch_relay_netlist, synthetic_ff_mcns, synthetic_mcns, synthetic_triple_mcns, two_flipflop_netlist,
+                                two_proxied_flipflop_netlist)
 
 from drosophilos.connectome.embed_h0 import Policy
 from drosophilos.connectome.embed_image import (all_missing, build_image, from_sources, none_missing, of_class,
@@ -159,6 +160,36 @@ def test_image_carries_the_flipflop_biases():
     img_l = build_image(net_l, m_l, pl_l, policy_l)
     assert img_l.topology.bias is None and img_l.counts["biases"] == 0 and not img_l.biases
     assert full_graph_topology(m_l, params, img_l).topology.bias is None
+
+
+def test_image_carries_the_proxy_biases_onto_their_hosts():
+    """Two flip-flops with proxies placed as triples: the proxies' biases (the same 58 mV as the
+    members') land on the proxy hosts -- six bias edits, one per biased host, the p hosts among
+    them -- and the image is Profile 2 with every one of the 15 edges carried (the readout leaves
+    p, so nothing is wrong-sign). full_graph_topology puts each bias on the host's index."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, drive, ids = two_proxied_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_triple_mcns(policy, drive)
+    pl = place_netlist(net, m, policy, time_limit_s=30, restarts=2, verbose=False)
+    assert pl.carried == net.nnz == 15 and not pl.unplaced
+    img = build_image(net, m, pl, policy)
+    biased = [ids[k] for k in ("u0", "v0", "p0", "u1", "v1", "p1")]
+    assert sorted(img.topology.biased_neurons().tolist()) == sorted(biased)
+    assert all(img.topology.bias[d] == BIAS_213HZ_MV for d in biased) and img.topology.bias[ids["edge"]] == img.topology.bias[ids["set"]] == 0.0
+    assert img.counts["biases"] == 6 and img.counts["biases_synthetic"] == 0 and len(img.biases) == 6
+    edits = {e["post"]: e for e in img.manifest["parameter_edits"] if e["kind"] == "bias"}
+    for k in ("p0", "p1"):
+        e = edits[int(img.bodies[ids[k]])]
+        assert e["pre"] is None and e["anatomical"] == 0.0 and e["new"] == BIAS_213HZ_MV and e["reason"].startswith(f"F{k[1]}.p bias")
+    assert img.profile == 2 and img.counts["carried"] == 15 and not img.profile3
+    assert img.real[ids["p0"]] == idx["P1"] and img.real[ids["p1"]] == idx["P2"]
+    params = Params()
+    fg = full_graph_topology(m, params, img, base=m.topology(params))
+    assert fg.counts["biases"] == 6 and fg.counts["biases_synthetic"] == 0
+    assert sorted(fg.topology.biased_neurons().tolist()) == sorted(pl.mapping[d] for d in biased)
+    assert fg.topology.bias[idx["P1"]] == fg.topology.bias[idx["P2"]] == BIAS_213HZ_MV and fg.topology.bias[idx["E"]] == 0.0
 
 
 @pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")

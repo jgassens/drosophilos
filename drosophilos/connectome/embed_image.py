@@ -17,8 +17,9 @@ Edges, under the H0 Profile 2 rules (embed_h0.Policy):
   parasitic  every anatomical edge among the hosts that is not a carried designed edge: zeroed
              when policy.zero_parasitic (a documented zero-weight edit), else kept at its
              anatomical quanta (count * QUANTA_PER_SYNAPSE, sign from the host's transmitter).
-  biases     the netlist's per-neuron tonic bias (mV above rest; the flip-flop latch's members,
-             protocol.flipflop) goes onto the host as a Profile 2 parameter edit
+  biases     the netlist's per-neuron tonic bias (mV above rest; the flip-flop latch's members
+             and its excitatory proxy p, protocol.flipflop -- any biased designed neuron, whatever
+             its motif) goes onto the host as a Profile 2 parameter edit
              (ParameterEdit "bias", anatomical 0 -> designed mV; `biases` in the manifest counts)
              and into the image topology's `bias`; a synthetic neuron keeps its bias as part of
              its own (Profile 3) definition.

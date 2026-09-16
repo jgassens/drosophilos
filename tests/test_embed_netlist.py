@@ -11,8 +11,14 @@ decoys. The pairs are `ffpair` motifs, placed as units on the planted pairs; the
 FROM a flip-flop member (`u -> edge`, `u -> edge_inh`, excitatory) are of the wrong sign for a
 GABA host under Dale's law on any connectome and must be reported as such, not carried.
 
+Flip-flops with a proxy (add_flipflop(proxy=True)): the pair plus p, a biased excitatory neuron
+v inhibits, is the `fftriple` motif, placed as a unit on a planted (driven pair, inhibited
+excitatory neuron); p's outputs are ordinary excitatory edges, so the relay read off p and the
+set chain it fires into the second flip-flop are placed completely -- the edges the pair-only
+motif could never carry.
+
 MCNS (skipped without the data): the chain toy of docs/h1_placement.md "Placing flip-flops", at
-a small size.
+a small size, with and without proxies.
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from drosophilos.connectome.embed_netlist import Placement, _Anatomy, _Design, a
 from drosophilos.connectome.mcns import MCNS
 from drosophilos.connectome.mcns_download import DEFAULT_DIR, path_of
 from drosophilos.lib.netlist import Drive, Netlist
-from drosophilos.protocol.flipflop import BIAS_213HZ_MV, add_flipflop
+from drosophilos.protocol.flipflop import BIAS_213HZ_MV, add_flipflop, add_set_chain
 from drosophilos.protocol.latch import add_edge_relay, add_latch
 from drosophilos.sim.model import Params
 
@@ -85,20 +91,22 @@ def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: i
     return m, idx
 
 
-def chain_toy_netlist(n_pairs: int, kind: str = "ffpair"):
+def chain_toy_netlist(n_pairs: int, kind: str = "ffpair", proxy: bool = False):
     """`n_pairs` flip-flops (or excitatory latches, kind="latch") in a line, each joined to the
     next by one edge relay read off the previous pair's `u` and igniting the next pair's `u`:
     the toy of docs/h1_placement.md "Placing flip-flops". Returns (net, drive, pairs, relays).
     For flip-flops the two edges from `u` into each relay (excitatory, from an inhibitory
-    neuron) cannot be carried by any host: `possible_edges` counts the rest."""
+    neuron) cannot be carried by any host: `possible_edges` counts the rest. With `proxy`, each
+    flip-flop gets its excitatory proxy p and the relay reads p (`ff.rail`) instead of u: every
+    edge is then of a carriable sign."""
     params = Params()
     drive = Drive.from_params(params)
     net = Netlist(params)
     pairs, relays = [], []
     for k in range(n_pairs):
-        pairs.append(add_flipflop(net, drive, f"F{k}") if kind == "ffpair" else add_latch(net, drive, f"L{k}"))
+        pairs.append(add_flipflop(net, drive, f"F{k}", proxy=proxy) if kind == "ffpair" else add_latch(net, drive, f"L{k}"))
         if k:
-            relay = add_edge_relay(net, drive, f"r{k}", pairs[k - 1].u)
+            relay = add_edge_relay(net, drive, f"r{k}", pairs[k - 1].rail if kind == "ffpair" else pairs[k - 1].u)
             net.synapse(relay, pairs[k].u, drive.ignite)
             relays.append(relay)
     return net, drive, pairs, relays
@@ -147,6 +155,68 @@ def synthetic_ff_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors
     df = pd.DataFrame(edges, columns=["pre", "post", "count"]).groupby(["pre", "post"], as_index=False)["count"].sum()
     df = df.sort_values(["pre", "post"])
     neurons = pd.DataFrame({"bodyId": 2000 + np.arange(n), "type": [f"T{i}" for i in range(n)], "superclass": "cb",
+                            "class": None, "somaSide": "R", "nt": nt_list, "nt_conf": 0.9})
+    neurons["sign"] = np.where(neurons["nt"].isin(["gaba", "glutamate", "histamine"]), -1, 1).astype(np.int8)
+    m = MCNS(neurons, df["pre"].to_numpy(np.int32), df["post"].to_numpy(np.int32), df["count"].to_numpy(np.int32), min_syn=1)
+    return m, idx
+
+
+def two_proxied_flipflop_netlist():
+    """F0 (u0, v0, p0) -> [edge relay read off p0: edge, edge_inh] -> F1's set chain (set,
+    set_relay1, set_relay2, three ignite pulses into u1) -> F1 (u1, v1, p1): 11 neurons, 15
+    designed edges, every one of a carriable sign (the readout leaves p, an excitatory neuron)."""
+    params = Params()
+    drive = Drive.from_params(params)
+    net = Netlist(params)
+    f0 = add_flipflop(net, drive, "F0", proxy=True)
+    f1 = add_flipflop(net, drive, "F1", proxy=True)
+    relay = add_edge_relay(net, drive, "r1", f0.rail)
+    trigger = add_set_chain(net, drive, "F1", f1)
+    net.synapse(relay, trigger, drive.ignite)
+    ids = {"u0": f0.u, "v0": f0.v, "p0": f0.p, "u1": f1.u, "v1": f1.v, "p1": f1.p, "edge": relay, "edge_inh": relay + 1,
+           "set": trigger, "set_relay1": trigger + 1, "set_relay2": trigger + 2}
+    assert net.roles[ids["set_relay2"]] == "F1.set_relay2" and net.roles[ids["p0"]] == "F0.p"
+    return net, drive, ids
+
+
+def synthetic_triple_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: int = 80, n_weak: int = 600) -> tuple[MCNS, dict]:
+    """Two planted triples: driven mutual inhibitory pairs (U1, V1) and (U2, V2) with V1 -> P1
+    and V2 -> P2 at the proxy threshold (P1, P2 cholinergic; P2 -> Z its excitatory output), a
+    relay (E, I) read off P1 (P1 -> E, P1 -> I, I -> E), E -> T and the set chain T, R1, R2 into
+    U2. Decoys: an undriven inhibitory pair (PA, PB) with a proxy X1, a driven pair (QA, QB)
+    with no proxy, an excitatory neuron X2 inhibited by a non-pair GABA neuron N, an excitatory
+    mutual pair (XA, XB); random weak wiring around them."""
+    rng = np.random.default_rng(seed)
+    req = policy.req_count
+    names = ["U1", "V1", "P1", "D1", "D2", "E", "I", "T", "R1", "R2", "U2", "V2", "P2", "D3", "D4", "Z",
+             "PA", "PB", "X1", "QA", "QB", "D5", "N", "X2", "XA", "XB"]
+    gaba = {"U1", "V1", "I", "U2", "V2", "PA", "PB", "QA", "QB", "N"}
+    idx = {nm: i for i, nm in enumerate(names)}
+    thr = req(drive.loop)
+    ig, pu = req(drive.ignite), req(drive.pulse)
+    edges = [
+        (idx["U1"], idx["V1"], thr + 3), (idx["V1"], idx["U1"], thr), (idx["D1"], idx["U1"], thr + 2), (idx["D2"], idx["V1"], thr),
+        (idx["V1"], idx["P1"], thr + 1),
+        (idx["P1"], idx["E"], req(drive.relay_in) + 2), (idx["P1"], idx["I"], pu + 1), (idx["I"], idx["E"], req(int(round(2.2 * drive.loop))) + 3),
+        (idx["E"], idx["T"], ig + 1),
+        (idx["T"], idx["U2"], ig + 1), (idx["T"], idx["R1"], pu + 1), (idx["R1"], idx["U2"], ig), (idx["R1"], idx["R2"], pu + 2), (idx["R2"], idx["U2"], ig + 3),
+        (idx["U2"], idx["V2"], thr + 1), (idx["V2"], idx["U2"], thr + 5), (idx["D3"], idx["U2"], thr + 9), (idx["D4"], idx["V2"], thr),
+        (idx["V2"], idx["P2"], thr + 2), (idx["P2"], idx["Z"], thr + 1),
+        (idx["PA"], idx["PB"], thr + 20), (idx["PB"], idx["PA"], thr + 20), (idx["PA"], idx["X1"], thr + 5),  # undriven pair with a proxy
+        (idx["QA"], idx["QB"], thr + 4), (idx["QB"], idx["QA"], thr + 4), (idx["D5"], idx["QA"], thr + 1), (idx["D5"], idx["QB"], thr + 1),  # driven, no proxy
+        (idx["N"], idx["X2"], thr + 3),  # an inhibited excitatory neuron whose inhibitor is in no pair
+        (idx["XA"], idx["XB"], thr + 2), (idx["XB"], idx["XA"], thr + 2),  # excitatory pair
+    ]
+    n0 = len(names)
+    n = n0 + n_distractors
+    nt_list = ["gaba" if nm in gaba else "acetylcholine" for nm in names] + list(rng.choice(["acetylcholine", "gaba", "glutamate"], n_distractors))
+    for _ in range(n_weak):
+        a, b = rng.integers(0, n, 2)
+        if a != b:
+            edges.append((int(a), int(b), int(rng.integers(1, 4))))
+    df = pd.DataFrame(edges, columns=["pre", "post", "count"]).groupby(["pre", "post"], as_index=False)["count"].sum()
+    df = df.sort_values(["pre", "post"])
+    neurons = pd.DataFrame({"bodyId": 3000 + np.arange(n), "type": [f"T{i}" for i in range(n)], "superclass": "cb",
                             "class": None, "somaSide": "R", "nt": nt_list, "nt_conf": 0.9})
     neurons["sign"] = np.where(neurons["nt"].isin(["gaba", "glutamate", "histamine"]), -1, 1).astype(np.int8)
     m = MCNS(neurons, df["pre"].to_numpy(np.int32), df["post"].to_numpy(np.int32), df["count"].to_numpy(np.int32), min_syn=1)
@@ -377,6 +447,143 @@ def test_two_flipflops_with_relay_are_placed_completely_on_synthetic():
     assert A.mutual_inh(thr, driven=False)[0][idx["P"]]
     pl2 = place_netlist(net, m, policy, time_limit_s=20, restarts=2, verbose=False, ff_driver=False)
     assert pl2.carried == 6 and pl2.ffpair_drivers["hosts"] == 4 and 2 <= pl2.ffpair_drivers["with_driver"] <= 4
+
+
+# ----------------------------------------------------------------------------------------
+# flip-flops with a proxy: the fftriple motif
+# ----------------------------------------------------------------------------------------
+def test_fftriple_motifs_are_found_from_structure():
+    net, drive, ids = two_proxied_flipflop_netlist()
+    assert net.n == 11 and net.nnz == 15
+    policy = Policy()
+    D = _Design(net, policy, hub_deg=20)
+    kinds: dict = {}
+    for mo in D.motifs:
+        kinds.setdefault(mo.kind, []).append(mo)
+    assert set(kinds) == {"fftriple", "relay", "single"}, {k: len(v) for k, v in kinds.items()}
+    # nodes ordered (u, v, p): nodes[1] is the member that inhibits the proxy
+    assert sorted(mo.nodes for mo in kinds["fftriple"]) == [(ids["u0"], ids["v0"], ids["p0"]), (ids["u1"], ids["v1"], ids["p1"])]
+    thr = policy.req_count(drive.loop)
+    for mo in kinds["fftriple"]:
+        assert mo.reqs["r_uv"] == mo.reqs["r_vu"] == mo.reqs["r_vp"] == thr and mo.reqs["driver"]
+        assert mo.reqs["bias"] == (BIAS_213HZ_MV, BIAS_213HZ_MV, BIAS_213HZ_MV)
+        u, v, p = mo.nodes
+        assert [(int(D.src[e]), int(D.dst[e])) for e in mo.edges] == [(u, v), (v, u), (v, p)] and all(D.q[e] < 0 for e in mo.edges)
+    assert D.ff_proxy_of == {ids["p0"]: ids["v0"], ids["p1"]: ids["v1"]}
+    assert D.ff_members == {ids["u0"], ids["v0"], ids["u1"], ids["v1"]}
+    # the members are inhibitory, the proxies excitatory (p1 drives nothing and is still excitatory), nothing is mixed
+    assert D.sign[ids["v0"]] == -1 and D.sign[ids["p0"]] == D.sign[ids["p1"]] == 1 and D.mixed == []
+    assert not D.impossible.any() and D.hard.all() and possible_edges(net) == 15
+    # the relay is read off p0: a relay motif whose source is the proxy
+    (relay,) = kinds["relay"]
+    assert relay.nodes == (ids["edge"], ids["edge_inh"]) and relay.reqs["inhibitors"][0][3] == ids["p0"]
+    assert sorted(mo.nodes[0] for mo in kinds["single"]) == sorted([ids["set"], ids["set_relay1"], ids["set_relay2"]])
+    # a flip-flop without a proxy stays an ffpair; one with both proxies is a triple on p plus q as a single;
+    # one with only the CLEAR proxy is a triple whose nodes[1] is u (the member inhibiting q)
+    params = Params()
+    d2 = Drive.from_params(params)
+    net2 = Netlist(params)
+    plain = add_flipflop(net2, d2, "A")
+    both = add_flipflop(net2, d2, "B", proxy=True, clear_proxy=True)
+    clear_only = add_flipflop(net2, d2, "C", clear_proxy=True)
+    D2 = _Design(net2, policy, hub_deg=20)
+    by_kind = {}
+    for mo in D2.motifs:
+        by_kind.setdefault(mo.kind, []).append(mo.nodes)
+    assert by_kind["ffpair"] == [(plain.u, plain.v)]
+    assert sorted(by_kind["fftriple"]) == sorted([(both.u, both.v, both.p), (clear_only.v, clear_only.u, clear_only.q)])
+    assert by_kind["single"] == [(both.q,)]
+    assert D2.ff_proxy_of == {both.p: both.v, both.q: both.u, clear_only.q: clear_only.u}
+
+
+def test_real_triple_hosts():
+    _, drive, _ = two_proxied_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_triple_mcns(policy, drive)
+    A = _Anatomy(m, policy)
+    thr = policy.req_count(drive.loop)
+    has_proxy, proxy = A.proxy_hosts(thr, thr, driven=True)
+    assert {int(x) for x in np.flatnonzero(has_proxy)} == {idx["V1"], idx["V2"]}
+    assert {int(x) for x in np.flatnonzero(proxy)} == {idx["P1"], idx["P2"]}
+    # without the driver requirement the undriven pair's proxy joins the pool; N's target never does
+    has_proxy2, proxy2 = A.proxy_hosts(thr, thr, driven=False)
+    assert {int(x) for x in np.flatnonzero(has_proxy2)} == {idx["V1"], idx["V2"], idx["PA"]}
+    assert {int(x) for x in np.flatnonzero(proxy2)} == {idx["P1"], idx["P2"], idx["X1"]} and not proxy2[idx["X2"]]
+
+
+def test_two_proxied_flipflops_are_placed_completely_including_the_readout():
+    """The p -> relay edges (and everything downstream) are placed: the readout that the
+    pair-only motif reports as "wrong sign" is carried once it leaves the proxy."""
+    net, drive, ids = two_proxied_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_triple_mcns(policy, drive)
+    pl = place_netlist(net, m, policy, time_limit_s=30, restarts=2, verbose=False)
+    assert not pl.unplaced and len(pl.mapping) == net.n == 11
+    want = {"u0": "U1", "v0": "V1", "p0": "P1", "edge": "E", "edge_inh": "I", "set": "T", "set_relay1": "R1", "set_relay2": "R2",
+            "u1": "U2", "v1": "V2", "p1": "P2"}
+    assert {k: pl.mapping[ids[k]] for k in want} == {k: idx[v] for k, v in want.items()}, pl.mapping
+    assert pl.carried == pl.edges == net.nnz == 15 and pl.missing == [], (pl.summary(net), pl.missing)
+    assert pl.motifs == {"fftriple": {"complete": 2}, "relay": {"complete": 1}, "single": {"complete": 3}}
+    assert pl.motifs_search == {"fftriple": {"complete": 2}, "relay": {"complete": 1}, "single": {"complete": 3}}
+    assert pl.ffpair_drivers == {"hosts": 4, "with_driver": 4}
+    assert pl.proxy_readout == {"proxies": 2, "placed": 2, "edges": 2, "carried": 2}
+    s = pl.summary(net)
+    assert s["carried_fraction"] == 1.0 and s["proxies"] == 2 and s["proxy_readout_edges"] == 2 and s["proxy_readout_carried"] == 2
+    # the readout edges themselves, checked against the data
+    counts = {(int(a), int(b)): int(c) for a, b, c in zip(m.pre, m.post, m.count)}
+    for d in ("edge", "edge_inh"):
+        e = [k for k, (s_, d_) in enumerate(zip(net.src, net.dst)) if s_ == ids["p0"] and d_ == ids[d]][0]
+        assert counts[(pl.mapping[ids["p0"]], pl.mapping[ids[d]])] >= policy.req_count(net.quanta[e])
+    # the same two flip-flops read off u instead: the pair-only motif, 2 readout edges impossible
+    net_u, _, ids_u = two_flipflop_netlist()
+    assert possible_edges(net_u) == 6 == net_u.nnz - 2
+    pl_u = place_netlist(net_u, m, policy, time_limit_s=20, restarts=1, verbose=False)
+    assert pl_u.proxy_readout == {} and pl_u.carried <= 6 and pl_u.summary(net_u)["proxies"] == 0
+
+
+def test_triple_without_a_proxy_host_falls_back_to_the_pair():
+    """Remove V2 -> P2: F1's triple has no complete instance (u1 must take U2, the only neuron
+    with three ignite inputs, and V2 inhibits no excitatory neuron). The search must still
+    land F1's pair on the real driven pair, leave p1 unplaced rather than fake it, and place
+    F0's triple and the whole readout as before: 14 of 15."""
+    net, drive, ids = two_proxied_flipflop_netlist()
+    policy = Policy()
+    m, idx = synthetic_triple_mcns(policy, drive)
+    keep = ~((m.pre == idx["V2"]) & (m.post == idx["P2"]))
+    m2 = MCNS(m.neurons, m.pre[keep], m.post[keep], m.count[keep], min_syn=1)
+    pl = place_netlist(net, m2, policy, time_limit_s=30, restarts=2, verbose=False)
+    assert pl.carried == 14 and pl.unplaced == [ids["p1"]], (pl.summary(net), pl.missing)
+    assert pl.missing == [(ids["v1"], ids["p1"], -drive.loop, "endpoint unplaced")]
+    assert pl.mapping[ids["u1"]] == idx["U2"] and pl.mapping[ids["v1"]] == idx["V2"]
+    assert (pl.mapping[ids["u0"]], pl.mapping[ids["v0"]], pl.mapping[ids["p0"]]) == (idx["U1"], idx["V1"], idx["P1"])
+    assert pl.motifs["fftriple"] == {"complete": 1, "partial": 1}
+    assert pl.ffpair_drivers == {"hosts": 4, "with_driver": 4}
+    assert pl.proxy_readout == {"proxies": 2, "placed": 1, "edges": 2, "carried": 2}
+    counts = {(int(a), int(b)): int(c) for a, b, c in zip(m2.pre, m2.post, m2.count)}
+    for s_, d_, q in zip(net.src, net.dst, net.quanta):
+        if s_ in pl.mapping and d_ in pl.mapping:
+            assert counts.get((pl.mapping[s_], pl.mapping[d_]), 0) >= policy.req_count(q), (s_, d_)
+
+
+@pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")
+def test_proxied_flipflop_chain_toy_on_mcns():
+    """The chain toy with proxies at 6 flip-flops: every triple on a real (driven pair, proxy),
+    the proxies' readout edges carried (the 32-pair figures are in docs/h1_placement.md)."""
+    from drosophilos.connectome.mcns import load_mcns
+
+    m = load_mcns()
+    net, _, pairs, relays = chain_toy_netlist(6, "ffpair", proxy=True)
+    assert possible_edges(net) == net.nnz == 6 * 3 + 5 * 4
+    pl = place_netlist(net, m, Policy(), time_limit_s=90, restarts=1, verbose=False)
+    assert pl.motifs.get("fftriple", {}).get("complete", 0) == 6, pl.motifs
+    assert pl.ffpair_drivers["hosts"] == 12 and pl.proxy_readout["proxies"] == 6 and pl.proxy_readout["placed"] == 6
+    assert pl.proxy_readout["edges"] == 10 and pl.proxy_readout["carried"] >= 8, pl.proxy_readout
+    assert pl.carried + len(pl.missing) == pl.edges and pl.carried >= 30
+    # every proxy host is cholinergic and inhibited by its v host at the loop threshold
+    A = _Anatomy(m, Policy())
+    thr = Policy().req_count(Drive.from_params(Params()).loop)
+    for f in pairs:
+        assert A.exc[pl.mapping[f.p]] and A.inh[pl.mapping[f.v]] and A.count(pl.mapping[f.v], pl.mapping[f.p]) >= thr
 
 
 @pytest.mark.skipif(not path_of("weights", DEFAULT_DIR).exists(), reason="MCNS data not downloaded")

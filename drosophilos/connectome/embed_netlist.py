@@ -8,7 +8,10 @@ point, and a motif that cannot be placed whole is placed as well as it can be ra
 dropped.
 
 1. Motifs are read off the netlist's structure: latches (mutual excitatory pairs), flip-flop
-   pairs (mutual inhibitory pairs whose members carry a tonic bias, protocol.flipflop), relays
+   pairs (mutual inhibitory pairs whose members carry a tonic bias, protocol.flipflop), flip-flop
+   triples (a flip-flop pair plus its excitatory proxy p: a biased excitatory neuron whose only
+   designed input is v's inhibition, add_flipflop(proxy=True); p's outputs are ordinary
+   excitatory edges the search carries), relays
    (an excitatory relay plus the inhibitory interneuron(s) that share its source and hold it
    down), delay chains (maximal paths of in-degree-one excitatory neurons), hubs (neurons
    whose out-degree or in-degree exceeds `hub_deg` in that direction; their many edges are
@@ -16,11 +19,14 @@ dropped.
 2. Every designed neuron gets two candidate sets of real neurons. The loose layer: the right
    transmitter, enough strong partners, and membership in a real instance of its own motif
    (a mutual pair -- for a flip-flop a mutual inhibitory pair whose members each have an
-   excitatory driver -- a relay with an inhibitor, a walk long enough for its chain). The strict
+   excitatory driver, for a flip-flop triple such a pair plus an excitatory neuron the member
+   hosting v inhibits at the proxy's threshold -- a relay with an inhibitor, a walk long enough
+   for its chain). The strict
    layer adds the context (a source of k relays needs k real relays; a chain's predecessor a
    walk one edge longer) and arc consistency over the hard edges.
 3. Depth-first search over motifs, most constrained first (fewest strict candidates), each
-   motif assigned as a unit: a latch or flip-flop as a real mutual pair, a relay as a real (E, I) pair, a
+   motif assigned as a unit: a latch or flip-flop as a real mutual pair, a flip-flop triple as a
+   real (pair, proxy), a relay as a real (E, I) pair, a
    chain as a real path found by depth-first search over strong cholinergic edges, a hub by
    coverage of its partners' candidates. Candidates are ranked by a lookahead (does every
    neighbouring motif keep a complete instance? plus hub edges satisfied, minus an isolation
@@ -76,6 +82,7 @@ class Placement:
     exposure: dict = field(default_factory=dict)  # the hosts' anatomical synapses from / to neurons outside the circuit (exact)
     objective: float = 0.0  # carried - isolation_weight * sum over hosts of (log1p(in_ext) + 0.25 * log1p(out_ext)) - cap * unplaced
     ffpair_drivers: dict = field(default_factory=dict)  # flip-flop hosts: {"hosts": placed members, "with_driver": those with an excitatory input >= the loop threshold}
+    proxy_readout: dict = field(default_factory=dict)  # flip-flop proxies: {"proxies": designed, "placed": on a host, "edges": designed edges out of a proxy, "carried": of those carried}
 
     def summary(self, net: Netlist) -> dict:
         ex = self.exposure
@@ -89,7 +96,9 @@ class Placement:
                 "external_in_mean": ex.get("in_mean", 0.0), "external_out_mean": ex.get("out_mean", 0.0),
                 "external_in_max": ex.get("in_max", 0), "external_out_max": ex.get("out_max", 0),
                 "external_in_p90": ex.get("in_p90", 0.0), "external_out_p90": ex.get("out_p90", 0.0),
-                "ffpair_hosts": self.ffpair_drivers.get("hosts", 0), "ffpair_hosts_with_driver": self.ffpair_drivers.get("with_driver", 0)}
+                "ffpair_hosts": self.ffpair_drivers.get("hosts", 0), "ffpair_hosts_with_driver": self.ffpair_drivers.get("with_driver", 0),
+                "proxies": self.proxy_readout.get("proxies", 0), "proxies_placed": self.proxy_readout.get("placed", 0),
+                "proxy_readout_edges": self.proxy_readout.get("edges", 0), "proxy_readout_carried": self.proxy_readout.get("carried", 0)}
 
 
 OUT_EXPOSURE_WEIGHT = 0.25  # outputs into the surround count a quarter of inputs from it (inputs are what floods a host)
@@ -250,6 +259,25 @@ class _Anatomy:
             self._memo[key] = (mask, pairs)
         return self._memo[key]
 
+    def proxy_hosts(self, thr: int, r_vp: int, driven: bool = True):
+        """(mask of pair members that inhibit some excitatory neuron >= r_vp, mask of excitatory
+        neurons so inhibited by a member): the flip-flop triple's hosts for v and p, the pair
+        drawn from mutual_inh(thr, driven) -- bench/h1_inhpairs.py's loose proxy_candidates. The
+        strict variant there (a proxy with an excitatory output >= thr) is what p's own designed
+        outputs impose through the degree masks, so it is not repeated here."""
+        key = ("proxy_hosts", thr, r_vp, driven)
+        if key not in self._memo:
+            mm, _ = self.mutual_inh(thr, driven)
+            VP, _ = self.A(r_vp, "inh", "exc")  # member -> excitatory target
+            members = np.flatnonzero(mm)
+            sub = VP[members]
+            has_proxy = np.zeros(self.n, bool)
+            has_proxy[members[np.diff(sub.indptr) > 0]] = True
+            proxy = np.zeros(self.n, bool)
+            proxy[np.unique(sub.indices)] = True
+            self._memo[key] = (has_proxy, proxy)
+        return self._memo[key]
+
     def relay(self, r_se: int, r_si: int, r_ie: int):
         """Masks (S, E, I) of the real source/relay/inhibitor triples: S -> E >= r_se (exc -> exc),
         S -> I >= r_si (exc -> inh), I -> E >= r_ie (inh -> exc)."""
@@ -296,7 +324,7 @@ class _Anatomy:
 # ----------------------------------------------------------------------------------------
 @dataclass
 class Motif:
-    kind: str  # latch | ffpair | relay | chain | hub | single
+    kind: str  # latch | ffpair | fftriple | relay | chain | hub | single
     nodes: tuple
     edges: list = field(default_factory=list)  # internal hard edge indices
     reqs: dict = field(default_factory=dict)  # kind-specific
@@ -324,6 +352,10 @@ class _Design:
         self.sign = np.where(pos + neg == 0, 0, np.where(pos >= neg, 1, -1)).astype(np.int8)
         self.ff_members = self._ff_members()
         self.sign[list(self.ff_members)] = -1
+        # a flip-flop proxy (biased, excitatory, its only input a member's inhibition) is
+        # excitatory even when it drives nothing yet: its host must be a cholinergic neuron
+        self.ff_proxy_of = self._ff_proxies()
+        self.sign[list(self.ff_proxy_of)] = 1
         self.mixed = [int(d) for d in np.flatnonzero((pos > 0) & (neg > 0))]
         outdeg = np.bincount(self.src, minlength=n)
         indeg = np.bincount(self.dst, minlength=n)
@@ -371,6 +403,20 @@ class _Design:
                 members.add(s); members.add(d)
         return members
 
+    def _ff_proxies(self) -> dict:
+        """Designed proxy -> the member that inhibits it: biased neurons outside the pairs whose
+        only input (raw edges) is an inhibitory synapse from a flip-flop member and whose outputs
+        (if any) are all excitatory -- add_flipflop's p (inhibited by v) or q (inhibited by u)."""
+        n = self.n
+        indeg = np.bincount(self.dst, minlength=n)
+        neg_out = np.bincount(self.src, weights=(self.q < 0), minlength=n)
+        out: dict = {}
+        for e in np.flatnonzero((self.q < 0) & (self.bias[self.dst] != 0)).tolist():
+            s, d = int(self.src[e]), int(self.dst[e])
+            if s in self.ff_members and d not in self.ff_members and indeg[d] == 1 and neg_out[d] == 0:
+                out[d] = s
+        return out
+
     def _find_motifs(self):
         n = self.n
         taken = np.zeros(n, bool)
@@ -398,7 +444,12 @@ class _Design:
         # flip-flop pairs: mutual inhibitory hard pairs between biased neurons (protocol.flipflop);
         # the loop's quanta are whatever the netlist gives (the flip-flop's default is 1.0x loop),
         # the bias is what marks the pair. Placed on real mutual inhibitory pairs whose members
-        # each have an excitatory driver (ff_driver), as a unit like a latch.
+        # each have an excitatory driver (ff_driver), as a unit like a latch. A pair with a proxy
+        # (add_flipflop(proxy=True): p, biased and excitatory, its only input v's inhibition) is
+        # the triple (u, v, p), nodes ordered so that nodes[1] is the member inhibiting p; it is
+        # placed as a unit on a real (driven pair, excitatory neuron the v host inhibits). The
+        # SET proxy p (on v) is preferred when a pair has both p and q; the other stays a single
+        # joined to its member by an ordinary hard edge.
         for u in sorted(self.ff_members):
             if taken[u]:
                 continue
@@ -407,9 +458,25 @@ class _Design:
                 if v > u and not taken[v] and v in self.ff_members and self.q[e] < 0:
                     e2 = self._edge(v, u)
                     if e2 is not None and self.q[e2] < 0:
-                        add("ffpair", (u, v), [e, e2], {"r_uv": int(self.req[e]), "r_vu": int(self.req[e2]),
-                                                         "driver": bool(self.ff_driver),
-                                                         "bias": (float(self.bias[u]), float(self.bias[v]))})
+                        proxy = None
+                        for inhibitor, other, e_ov, e_vo in ((v, u, e, e2), (u, v, e2, e)):
+                            for e3 in self.hard_out[inhibitor]:
+                                p = int(self.dst[e3])
+                                if not taken[p] and self.ff_proxy_of.get(p) == inhibitor and self.q[e3] < 0:
+                                    proxy = (inhibitor, other, e_ov, e_vo, e3, p)
+                                    break
+                            if proxy is not None:
+                                break
+                        if proxy is None:
+                            add("ffpair", (u, v), [e, e2], {"r_uv": int(self.req[e]), "r_vu": int(self.req[e2]),
+                                                             "driver": bool(self.ff_driver),
+                                                             "bias": (float(self.bias[u]), float(self.bias[v]))})
+                        else:
+                            inhibitor, other, e_ov, e_vo, e3, p = proxy
+                            add("fftriple", (other, inhibitor, p), [e_ov, e_vo, e3],
+                                {"r_uv": int(self.req[e_ov]), "r_vu": int(self.req[e_vo]), "r_vp": int(self.req[e3]),
+                                 "driver": bool(self.ff_driver),
+                                 "bias": (float(self.bias[other]), float(self.bias[inhibitor]), float(self.bias[p]))})
                         break
         # relays: excitatory E with inhibitory I whose only hard output is E and that shares a source with E
         for E in range(n):
@@ -521,6 +588,16 @@ class _Search:
                 mm, _ = A.mutual_inh(min(mo.reqs["r_uv"], mo.reqs["r_vu"]), mo.reqs["driver"])
                 for x in mo.nodes:
                     masks[x] &= mm
+            elif mo.kind == "fftriple":
+                # loose: the pair on any real driven pair (a triple that cannot be completed
+                # still lands its pair), p on an excitatory neuron some such member inhibits
+                u, v, pp = mo.nodes
+                thr = min(mo.reqs["r_uv"], mo.reqs["r_vu"])
+                mm, _ = A.mutual_inh(thr, mo.reqs["driver"])
+                _, proxy = A.proxy_hosts(thr, mo.reqs["r_vp"], mo.reqs["driver"])
+                masks[u] &= mm
+                masks[v] &= mm
+                masks[pp] &= proxy
             elif mo.kind == "relay":
                 E = mo.nodes[0]
                 for I, e, r_ie, S, r_se, r_si in mo.reqs["inhibitors"]:
@@ -537,6 +614,10 @@ class _Search:
         # layer 2: the context (a source of k relays needs k real relays, a chain's predecessor a
         # walk one edge longer) and arc consistency over the hard edges; the search proper
         for mo in D.motifs:
+            if mo.kind == "fftriple":  # strict: v on a member that inhibits some excitatory neuron
+                thr = min(mo.reqs["r_uv"], mo.reqs["r_vu"])
+                has_proxy, _ = A.proxy_hosts(thr, mo.reqs["r_vp"], mo.reqs["driver"])
+                masks[mo.nodes[1]] &= has_proxy
             if mo.kind == "chain":
                 L, thr = len(mo.nodes), mo.reqs["thr"]
                 for e in D.hard_in[mo.nodes[0]]:
@@ -665,6 +746,14 @@ class _Search:
                 if bs.size > 1 or (bs.size == 1 and bs[0] != a):
                     return True
             return False
+        if mo.kind == "fftriple":
+            u, v, pp = mo.nodes
+            dp = dn[pp]
+            for a, b in self._pair_instances(dn[u], dn[v], mo.reqs["r_uv"], mo.reqs["r_vu"], self.cand_cap):
+                xs = np.intersect1d(A.row(b, mo.reqs["r_vp"]), dp, assume_unique=True)
+                if xs.size and ((xs != a) & (xs != b)).any():
+                    return True
+            return False
         if mo.kind == "relay":
             E = mo.nodes[0]
             for e_real in dn[E][: self.cand_cap].tolist():
@@ -745,30 +834,65 @@ class _Search:
         return dx[np.argsort(-pri, kind="stable")]
 
     # ---- candidate generators (tier 0: complete instances) -------------------------
+    def _pair_instances(self, du: np.ndarray, dv: np.ndarray, r_uv: int, r_vu: int, cap: int | None = None):
+        """Real (a, b) with a in du, b in dv, a -> b >= r_uv and b -> a >= r_vu, a != b, enumerated
+        from the smaller side (in the order given); at most `cap` outer neurons are tried."""
+        if du.size == 0 or dv.size == 0:
+            return
+        if du.size <= dv.size:
+            for a in (du if cap is None else du[:cap]).tolist():
+                bs = np.intersect1d(self.A.row(a, r_uv), self.A.col(a, r_vu), assume_unique=True)
+                bs = np.intersect1d(bs, dv, assume_unique=True)
+                for b in bs.tolist():
+                    if b != a:
+                        yield a, int(b)
+        else:
+            for b in (dv if cap is None else dv[:cap]).tolist():
+                as_ = np.intersect1d(self.A.col(b, r_uv), self.A.row(b, r_vu), assume_unique=True)
+                as_ = np.intersect1d(as_, du, assume_unique=True)
+                for a in as_.tolist():
+                    if a != b:
+                        yield int(a), b
+
     def cands_latch(self, mo: Motif, doms: list):
         """Real mutual pairs for a latch or a flip-flop pair (the domains are already sign-masked
         and restricted to members of real pairs of the motif's kind)."""
         u, v = mo.nodes
-        r_uv, r_vu = mo.reqs["r_uv"], mo.reqs["r_vu"]
         du, dv = self._free(doms[u]), self._free(doms[v])
         if du.size == 0 or dv.size == 0:
             return []
         du, dv = self._hub_order(u, du), self._hub_order(v, dv)
         out = []
-        if du.size <= dv.size:
-            for a in du.tolist():
-                bs = np.intersect1d(self.A.row(a, r_uv), self.A.col(a, r_vu), assume_unique=True)
-                bs = np.intersect1d(bs, dv, assume_unique=True)
-                out.extend({u: a, v: int(b)} for b in bs.tolist() if b != a)
-                if len(out) >= self.cand_cap:
-                    break
-        else:
-            for b in dv.tolist():
-                as_ = np.intersect1d(self.A.col(b, r_uv), self.A.row(b, r_vu), assume_unique=True)
-                as_ = np.intersect1d(as_, du, assume_unique=True)
-                out.extend({u: int(a), v: b} for a in as_.tolist() if a != b)
-                if len(out) >= self.cand_cap:
-                    break
+        for a, b in self._pair_instances(du, dv, mo.reqs["r_uv"], mo.reqs["r_vu"]):
+            out.append({u: a, v: b})
+            if len(out) >= self.cand_cap:
+                break
+        return self._ranked(out, doms)
+
+    def cands_triple(self, mo: Motif, doms: list):
+        """Real (pair, proxy) instances for a flip-flop triple: a real mutual inhibitory pair
+        (a, b) as cands_latch finds them, b hosting the member that inhibits the proxy, plus an
+        excitatory neuron b inhibits at the proxy's threshold, from p's domain and distinct from
+        both members. Pairs without a proxy in p's (forward-checked) domain are passed over
+        rather than counted against the candidate cap; each pair contributes its few best
+        proxies (as a relay contributes its inhibitors)."""
+        u, v, pp = mo.nodes
+        du, dv, dp = self._free(doms[u]), self._free(doms[v]), self._free(doms[pp])
+        if du.size == 0 or dv.size == 0 or dp.size == 0:
+            return []
+        du, dv = self._hub_order(u, du), self._hub_order(v, dv)
+        r_vp = mo.reqs["r_vp"]
+        per_pair = max(2, self.cand_cap // 8)
+        out = []
+        for a, b in self._pair_instances(du, dv, mo.reqs["r_uv"], mo.reqs["r_vu"], cap=4 * self.cand_cap):
+            xs = np.intersect1d(self.A.row(b, r_vp), dp, assume_unique=True)
+            xs = xs[(xs != a) & (xs != b)]
+            if xs.size == 0:
+                continue
+            xs = self._hub_order(pp, xs)[:per_pair]
+            out.extend({u: a, v: b, pp: int(x)} for x in xs.tolist())
+            if len(out) >= self.cand_cap:
+                break
         return self._ranked(out, doms)
 
     def cands_relay(self, mo: Motif, doms: list):
@@ -929,6 +1053,8 @@ class _Search:
         doms = self.dom if doms is None else doms
         if mo.kind in ("latch", "ffpair"):
             return self.cands_latch(mo, doms)
+        if mo.kind == "fftriple":
+            return self.cands_triple(mo, doms)
         if mo.kind == "relay":
             return self.cands_relay(mo, doms)
         if mo.kind == "chain":
@@ -941,7 +1067,7 @@ class _Search:
         return self.cands_single(mo, doms)
 
     # ---- variable ordering -----------------------------------------------------------
-    KIND_RANK = {"hub": 0, "latch": 1, "ffpair": 1, "relay": 2, "chain": 3, "single": 4}
+    KIND_RANK = {"hub": 0, "latch": 1, "ffpair": 1, "fftriple": 1, "relay": 2, "chain": 3, "single": 4}
 
     def pick_next(self, done: np.ndarray):
         """Most constrained motif first: the one whose tightest node has the fewest free
@@ -1308,15 +1434,23 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
     # bias is a parameter edit and needs none, so this is reported, not required
     ff_hosts, ff_drv = 0, 0
     for mo in D.motifs:
-        if mo.kind != "ffpair":
+        if mo.kind not in ("ffpair", "fftriple"):
             continue
         thr = min(mo.reqs["r_uv"], mo.reqs["r_vu"])
-        for x in mo.nodes:
+        for x in mo.nodes[:2]:
             if real[x] >= 0:
                 ff_hosts += 1
                 ff_drv += int(A.indeg(thr, 1)[int(real[x])] > 0)
     if ff_hosts:
         pl.ffpair_drivers = {"hosts": ff_hosts, "with_driver": ff_drv}
+    # the proxies' readout: every designed edge out of a flip-flop proxy (to its relays, vetoes)
+    # is excitatory from an excitatory neuron, so a host can carry it; how many are carried
+    if D.ff_proxy_of:
+        prox = set(D.ff_proxy_of)
+        n_edges = sum(1 for (s_, _) in pairs if s_ in prox)
+        n_missing = sum(1 for s_, _, _, _ in missing if s_ in prox)
+        pl.proxy_readout = {"proxies": len(prox), "placed": sum(1 for x in prox if real[x] >= 0),
+                            "edges": n_edges, "carried": n_edges - n_missing}
     pl.missing_by_class = {f"{a} -> {b}": v for (a, b), v in sorted(missing_by_class.items(), key=lambda kv: -kv[1][0])}
     return pl
 

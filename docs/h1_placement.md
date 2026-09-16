@@ -698,3 +698,64 @@ host. The next design step is the inhibitory readout the capacity note asked for
 excitatory neuron that `u` silences (fires while CLEAR, stops on SET) or a target `u` holds down
 directly, and a relay reading *that* — then the 62 impossible edges become carriable ones, and the
 comparison above can be rerun on a circuit that could also be simulated.
+
+**With the proxy (`fftriple`).** `add_flipflop(proxy=True)` adds p, a biased *excitatory* neuron
+whose only input is v's inhibition, and readers connect to p (`docs/a1_flipflop.md`). The placer
+now reads that off the netlist as a third flip-flop motif, `fftriple`: the biased mutual inhibitory
+pair plus a biased excitatory neuron whose only designed input is an inhibitory edge from one
+member (a pair without a proxy stays `ffpair`; a pair with both p and q is a triple on p, q a
+single joined by its ordinary hard edge). It is placed as a unit on a real **(driven mutual
+inhibitory pair, excitatory neuron the v host inhibits ≥ the proxy's threshold)** — the loose
+`proxy_readout` pool of `bench/h1_inhpairs.py` (700 of the 729 driven pairs have such a proxy at
+`k_max = 4`; 358 disjoint triples by MILP); the strict variant's "proxy with an excitatory output"
+is what p's own designed outputs impose through the degree masks. p's outgoing edges (to its edge
+relay, a veto) are excitatory from an excitatory neuron: ordinary hard edges the search carries,
+and the relay read off p is a real `relay` motif whose source is p. The loose layer keeps the
+proxy requirement off the pair (a triple that cannot be completed still lands its pair on a real
+driven pair and leaves p unplaced rather than faking it, `tests/test_embed_netlist.py`); the strict
+layer restricts v to members that inhibit some excitatory neuron. The image needs nothing new:
+every biased designed neuron's bias goes onto its host as before, p's included (six bias edits for
+two proxied flip-flops, `tests/test_embed_image.py`). The audit adds `Placement.proxy_readout`
+(proxies designed / placed, designed edges out of a proxy / carried) and `summary()` reports it.
+
+The same 32-flip-flop toy, each relay now read off the previous flip-flop's p (`chain_toy_netlist(32,
+"ffpair", proxy=True)`: 158 neurons, 220 edges, every one of a carriable sign), against the pair-only
+toy above. Real MCNS, `k_max = 4`, two restarts, seed 0; the times are `place_netlist` alone (the
+~28 s quoted above included loading the connectome):
+
+| netlist | objective | carried / carriable / designed | pairs or triples complete | relays complete | proxy readout `p -> edge`, `p -> edge_inh` carried | hosts' external input synapses: mean / p90 / max | pair members: mean / median | proxies: mean / median | hosts with a driver | parasitic to zero | search |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 32 flip-flops, pair only | coverage (w = 0) | 126 / 126 / 188 (67 %) | 32 / 32 | 31 / 31 (E, I singles) | — (62 wrong sign) | 3,708 / 7,303 / 14,403 | 3,626 / 2,587 | — | 64 / 64 | 314 | 2.1 s |
+| 32 flip-flops with proxies | coverage (w = 0) | **219 / 220 / 220 (99.5 %)** | **32 / 32** | 31 / 31 | **62 / 62** | 6,546 / 11,405 / 40,517 | 7,651 / 7,415 | 4,922 / 5,135 | 64 / 64 | 1,883 | 3.3 s |
+| 32 flip-flops, pair only | quiet hosts (w = 2) | 104 / 126 / 188 | 19 / 32 (13 partial) | 31 / 31 | — | 2,061 / 3,760 / 13,004 | 1,412 / 1,201 | — | 59 / 64 | 335 | 2.5 s |
+| 32 flip-flops with proxies | quiet hosts (w = 2) | 115 / 220 / 220 | 3 / 32 (29 partial) | 14 / 31 | 31 / 62 | 2,497 / 6,002 / 17,475 | 2,227 / 1,651 | 1,144 / 554 | 49 / 64 | 572 | 3.5 s |
+
+The 62 edges the pair-only toy could never carry are carried: every one of the 32 triples lands
+on a real driven pair with a cholinergic proxy the v host inhibits, all 31 relays read off those
+proxies are complete, and the one missing edge in 220 is a single `edge -> u` (one relay's ignite
+into the next pair's u; the hub-first restart found this placement after 31 backtracks, the
+hub-last one stalled at 208 with one triple and two relays partial). Carried fraction 67 % → 99.5 %.
+
+The price is exposure: the (pair, proxy) pool is a different, better-connected part of the wiring
+than the driven pairs alone. Pair members take **7,651** input synapses from the rest of the brain
+against 3,626 in the pair-only toy (2.1×; the driven disjoint pool's own mean is 6,677, and the
+`proxy_readout` packing's pairs 6,712, so the pair-only search was landing on the *quiet* half of
+the driven pool and the triple constraint takes that freedom away), the proxies 4,922 (the
+packing's quietest-proxy re-assignment reaches 1,782 — the search takes the first proxy that
+completes the triple in context, not the quietest), and the parasitic edges to zero go from 314
+to 1,883. The hosts: nerve-cord interneurons for the pair (`IN13A001`, `IN19A005`, `IN19A001`)
+and ascending / nerve-cord neurons for p (`INXXX466`, `AN19B009`, `IN03A004`). Under the
+quiet-host objective (w = 2) both toys give up their loops, and the proxied one gives up more: the
+repair breaks 26 of 32 `v -> p` edges and 22 of 31 `p -> edge` edges for proxies on sensory
+neurons (`SNpp52`, `SNpp45`; median 554 input synapses) — at a weight of 2 a triple's three edges
+are worth less than the log-exposure gap between a nerve-cord interneuron and a sensory afferent.
+The weight was calibrated for the adder (above); a flip-flop circuit wants a smaller one, or the
+quietest-proxy re-assignment the bench does after the pairs are fixed.
+
+**What it says now.** The flip-flop is placeable as a *source* as well as a rail: 32 of 32 triples
+on real (driven pair, proxy) instances, the readout edges carried, biases carried as parameter
+edits, and every edge of the chain but one Profile 2 — a circuit that could also be simulated
+(`tests/test_embed_netlist.py::test_two_proxied_flipflops_are_placed_completely_including_the_readout`
+places two proxied flip-flops joined by an edge relay from p into the second's three-pulse set
+chain, 15 of 15 edges, on a synthetic connectome with a planted triple). What it costs is a
+noisier host set than the pair alone, which is the next thing to trade off.
