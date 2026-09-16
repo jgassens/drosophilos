@@ -388,17 +388,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
-        # The start pulse re-lights a request's false rail ~55 ms after that rail's own kill
-        # train (lit by the request 12 hops earlier) hyperpolarised both members: one ignite
-        # pulse whose loop then has to catch on a still-recovering partner. At a 3 sigma
-        # corner of one latch's loop, kill, threshold and bias the loop does not catch, the
-        # pair is dark, and the row's next IDLE starts it with no request (`pb` has nothing
-        # to veto), samples the producer's next word early and replays it when the real
-        # request arrives: the perspective duplicate (a3_kernels §10.5). ACT^d, the same
-        # pulse 11 hops later, re-lights the same rails ~110 ms after the kill, twice the
-        # measured boundary; when the first ignition worked it re-ignites a lit rail.
-        for l in [c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
-            net.synapse(act_d, l.u, drive.ignite)
+        # (§10.5's remedy — ACT^d re-igniting each request's false rail and IDLE — is not here:
+        # it removed the perspective duplicates but stalled copies in every block under mix B
+        # and was reverted, like §10.4. See docs/a3_kernels.md §10.5.)
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name

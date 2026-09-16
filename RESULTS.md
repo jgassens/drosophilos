@@ -927,7 +927,11 @@ ready" flag replayed after a two-order guard's doublet) is fixed with end-to-end
 final guard; rerun on the fix: tick 1,598 / 1,600 and fan-out 795 / 800 with no wrong values,
 render unchanged at 799 / 800, and the 16-bit perspective kernel unchanged at 760 / 800 — its
 duplicate has another cause. A second remedy (one-hot request guards with wider margins)
-stalled copies under noise and was reverted; the perspective duplicate stays open. (The first campaign's large "missing"
+stalled copies under noise and was reverted. The duplicate was then localized from a spike
+dump to a request rail left dark by a failed re-ignition (§10.5); the third remedy, re-igniting
+it from the row's own `ACT^d` pulse, removed every perspective duplicate (714 / 800, 0 wrong)
+but stalled copies in all four blocks and corrupted a tick state, and was reverted too. The
+perspective duplicate stays open, with its mechanism known. (The first campaign's large "missing"
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 

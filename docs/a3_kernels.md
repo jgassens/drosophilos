@@ -575,6 +575,28 @@ rise killed it); its failure would open a request-less commit at the reader's ne
 which the reference showed as a stall, not a duplicate, and is left for the 100-copy rerun
 to weigh.
 
+**Outcome (Juno 408540, the same 100-copy mix-B campaigns, 90 s): the remedy was reverted.**
+The re-light does what it was built for — perspective **0 wrong** (against 7 duplicates in
+every earlier campaign) — and costs more than it saves everywhere else:
+
+| block | §10.3 alone (407450) | with the `ACT^d` re-light (408540) |
+|---|---|---|
+| fan-out | 795 / 800, 0 wrong | 768 / 800, 0 wrong, 32 missing in 7 copies |
+| render | 799 / 800, 1 wrong | 773 / 800, 0 wrong, 27 missing in 5 copies |
+| tick | 1,598 / 1,600, 2 wrong | 1,471 / 1,600, **5 wrong**, 124 missing in 17 copies |
+| perspective | 760 / 800, 7 wrong, 33 missing | 714 / 800, **0 wrong**, 86 missing in 14 copies |
+
+The stalls are the §10.4 shape (a copy stops after its first, third or fifth token and never
+resumes), and tick copy 77 shows a shape the earlier campaigns never had: `25, 30, 24, 24,
+64, 104, 0` and `88, 86, 84, 82, 80, 82, 80` — one update applied twice and the state
+corrupted from there, i.e. a replay *created* by re-igniting a rail that had been killed on
+purpose. One synapse per rail with no new margin analysis was the same wager as §10.4: it
+passes every unperturbed test and loses under 4 % weight noise. `lib/kernel.py` is back at
+the §10.3 state, the reproduction above is an expected failure, and the dark-rail mechanism
+stands as the localization. What the next attempt needs is a re-ignition that cannot land
+on a rail the kill train is meant to keep dark — gated by the request's own true rail, or a
+longer-recovery kill pair — and the 100-copy campaign before it is believed.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
