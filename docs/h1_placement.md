@@ -443,3 +443,29 @@ The next placement objective is therefore not coverage alone: the hosts' externa
 the surround's response to their outputs) must be part of the score, and the whole-brain LIF at
 these weights is itself a storm under the 2 Hz drive — the "background-input envelope" a Profile 2
 circuit must tolerate is set by that, not by the circuit.
+
+## Placing for quiet hosts
+
+Tool: `place_netlist(..., isolation_weight=w)` and `bench/h1_isolation.py`; data: `docs/h1_isolation.json`.
+Every candidate ranking (domain order, lookahead, hub coverage, repair) now subtracts
+`w · (log(1 + inputs) + 0.25 · log(1 + outputs))`, the host's synapses from and to the rest of the
+brain; an unplaced neuron is charged the noisiest neuron's penalty so the weight never rewards
+leaving one out. The 4-bit adder, `k_max = 4`, four restarts, seed 0:
+
+| w | carried | hard | hub | placed | hosts' external input synapses: mean / p90 / max | external input edges | Profile 3 edges A needs | A | B |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 690 / 1,144 (60 %) | 659 / 878 | 32 / 268 | 613 | 5,459 / 10,793 / 47,712 | 315,326 | 453 | 20/20 | 0/20 |
+| 0.5 | 587 (51 %) | 558 | 29 | 612 | 3,166 / 7,132 / 39,246 | 215,864 | 559 | 20/20 | 0/20 |
+| 1 | 535 (47 %) | 526 | 9 | 610 | 3,216 / 8,382 / 50,448 | 192,076 | 609 | 20/20 | 0/20 |
+| 2 | 469 (41 %) | 466 | 3 | 604 | 2,966 / 6,647 / 45,638 | 190,789 | 677 | 20/20 | 0/20 |
+| 4 | 460 (40 %) | 452 | 8 | 607 | 3,218 / 7,604 / 45,918 | 206,277 | 686 | 20/20 | 0/20 |
+
+The trade is poor. Between `w = 0` and `w = 2` the hosts' external input synapses fall by 45 % (a
+mean of 5,459 to 2,966 per host — still thousands) while the carried edges fall from 60 % to 41 %
+and the hubs are lost entirely; past `w = 2` nothing improves. The reason is structural: a neuron
+that can carry a latch loop needs a reciprocal partner at ≥ 57 synapses, and in MCNS such neurons
+are the brain's hubs — antennal-lobe local neurons, gnathal and nerve-cord interneurons with
+thousands of inputs — so "strong enough to be a latch" and "quiet" pull in opposite directions.
+The mapping saved as `docs/h1_placement_mapping_isolated.json` (`w = 2`) is the quietest that
+still computes in isolation; its whole-brain run is in §The placed adder inside the whole brain's
+follow-up below when it lands.
