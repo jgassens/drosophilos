@@ -71,7 +71,7 @@ stray_input_tolerance:
     2.5x clears 4 of 12 phases, 3.0x 8 of 12
   measured_on: the consumer register alone, RefSim, phases 0..44 step 4 (12 phases)
     unless stated
-campaign: null
+campaign: 'mix_B_10000_transfers (2026-09-16, laptop, RefSim) - non_ok 48 / 10000 (timeout 43, no_accept 4, no_ready 1), wrong_value 0, non_ok_upper_95 0.0061, silent_wrong_upper_95 0.0003, accept_latency_ms mean 154.3 p99 170.9 max 389.5'
 timing_assumptions:
 - READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
   reset settling (~21 ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x
@@ -90,7 +90,7 @@ notes:
   per rail, which cannot set a flip-flop'
 - 'activity counts include the CLEAR-side v members: one member of every flip-flop
   fires at 213 Hz at all times, so an idle register costs 8 x 213 Hz'
-- 'status: measured 2026-09-16, not frozen; mix-B campaign pending (cluster)'
+- 'status: measured 2026-09-16, not frozen; mix-B campaign: 0.48 % fail-stop, 0 wrong in 10,000 (the latch channel: ~1e-5)'
 reset_latency:
   clear_ms_mean: 5.9
   clear_ms_max: 6.3
@@ -132,5 +132,6 @@ error_rate:
     decoded_errors: 0
     upper_95: 0.014867039231272054
     test: tests/test_ffregister.py::test_flipflop_register_200_random_transfers
-  mix_B_10000: 'pending: tests/test_ffregister.py::test_mix_b_10000_transfers (slow,
-    cluster)'
+  mix_B_10000: '0.0048 non-ok in 10,000 (43 timeouts, 4 no ACCEPT, 1 no READY; all fail-stop),
+    0 wrong values (upper 95 % 3.0e-4); measured 2026-09-16, laptop reference simulator;
+    tests/test_ffregister.py::test_mix_b_10000_transfers'

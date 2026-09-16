@@ -190,10 +190,12 @@ have a strong driver and a strong inhibitory readout, is 707 / 3,904 / 12,557 at
 16, of which **358 / 1,105 / 3,717 are disjoint**: about the same as the excitatory pairs, on
 different neurons, so the two kinds add: **~700 / ~2,150 / ~6,600 latches** in all. At k_max 16
 that is, for the first time, more than one pixel kernel's ~5,300 — in count. Two things about
-*which* neurons: at the H0 bound the driven inhibitory pairs are quiet (a mean of 66 external
-input synapses per member, against ~3,000 for the adder's excitatory hosts; ellipsoid-body ring
-neurons ER4m/ER4d and nerve-cord interneurons), which is exactly what the whole-brain runs
-found decisive; and at k_max 16 the supply lives in the optic lobe — 3,592 of 7,434 members
+*which* neurons: the driven inhibitory pairs are not quiet either — a mean of 6,677 external
+input synapses per member at the H0 bound (ellipsoid-body ring neurons ER4m/ER4d and
+nerve-cord interneurons), 4,247 at k_max 8 and 2,137 at k_max 16, against ~3,000–5,500 for the
+adder's excitatory hosts — so the whole-brain exposure problem is the same for them (an
+earlier draft of this paragraph read a truncated figure as 66; the JSON says 6,677.2); and at
+k_max 16 the supply lives in the optic lobe — 3,592 of 7,434 members
 are optic-lobe intrinsic, led by the medulla's Mi4 and Mi9 (1,147 disjoint pairs, one per
 column) — so the visual system, useless to the excitatory design (§Is the fly's visual system
 involved), is where an inhibition-based latch would go. No such latch exists in this repo: a

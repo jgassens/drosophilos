@@ -871,7 +871,8 @@ the real edges drops it to 44 %; and permuting the transmitter labels *raises* i
 because many of the fly's strongest reciprocal pairs are inhibitory and useless to an
 excitatory latch (`docs/h1_placement.md`, shuffled controls). Counting those inhibitory pairs
 as flip-flop latches instead — 358 / 1,105 / 3,717 disjoint driven pairs at ×4 / ×8 / ×16, on
-quiet neurons at the H0 bound and in the optic lobe's medulla columns at ×16 — would roughly
+hub neurons too (a mean of 6,677 external input synapses at the H0 bound, 2,137 at ×16) and in
+the optic lobe's medulla columns at ×16 — would roughly
 double the supply, to about one pixel kernel's worth at ×16. **That latch now exists**
 (`protocol/flipflop.py`, `docs/a1_flipflop.md`, `docs/contracts/flipflop.yaml`): two inhibitory
 neurons on a 58 mV bias in mutual inhibition, the firing member at 212.8 Hz — the excitatory
