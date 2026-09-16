@@ -423,6 +423,18 @@ The fix is local to that permission boundary:
    veto-recovery tail, with about 10 ms of clean-model margin.
 
 Two deterministic CPU-reference regressions retain the failure and the fix in one run each.
+
+**Outcome (Juno 408086, the same 100-copy mix-B campaigns): the remedy was reverted.** With
+the one-hot guards, the four-pulse arbitration and the 14/22-hop paths, copies *stall*:
+fan-out 737 / 800 (63 missing in 11 copies, against 795 / 800 after §10.3 alone), render
+725 / 800 (75 missing, 12 copies, against 799), tick 1,171 / 1,600 (429 missing, 40 copies,
+against 1,598), and perspective 470 / 800 with its 7 duplicates still there. The margins pass
+every unperturbed slow test and fail under noise — the wider veto sets and longer paths are a
+liability at 4 % weight noise, not a margin. `lib/kernel.py` is back at the §10.3 state; the
+analysis above stands as a hypothesis, its two reproductions stay as expected failures, and
+the campaign runner's `--dump-node` / `--dump-roles` / `--dump-out` spike dump (added in the
+same round) is how the perspective copy's handshake will be captured on the cluster for the
+next attempt.
 They use two copies and remove exactly the new self-false veto synapse on copy 1 to reconstruct
 the old guard. A timed injection holds the losing REQ rail across evaluation — the deterministic
 postcondition of the rare mix-B transition, rather than a random search. The fixed copy rejects
