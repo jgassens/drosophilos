@@ -69,6 +69,7 @@ class Netlist:
     quanta: list = field(default_factory=list)
     delay: list = field(default_factory=list)
     groups: dict = field(default_factory=dict)
+    bias: list = field(default_factory=list)  # mV added to each neuron's resting potential; parallel to `roles`
 
     @property
     def n(self) -> int:
@@ -78,9 +79,15 @@ class Netlist:
     def nnz(self) -> int:
         return len(self.src)
 
-    def neuron(self, role: str) -> int:
+    def neuron(self, role: str, bias: float = 0.0) -> int:
+        """A neuron with only a role and, optionally, a tonic `bias` in mV above rest (a
+        Profile 2 parameter edit: the flip-flop latch's members are driven this way)."""
         self.roles.append(role)
+        self.bias.append(float(bias))
         return len(self.roles) - 1
+
+    def set_bias(self, i: int, mv: float) -> None:
+        self.bias[int(i)] = float(mv)
 
     def synapse(self, pre: int, post: int, quanta: int, delay_steps: int | None = None) -> None:
         self.src.append(int(pre))
@@ -92,7 +99,8 @@ class Netlist:
         self.groups[name] = [int(x) for x in neurons]
 
     def topology(self) -> Topology:
-        return Topology.from_edges(self.n, self.src, self.dst, self.quanta, self.delay)
+        return Topology.from_edges(self.n, self.src, self.dst, self.quanta, self.delay,
+                                   bias=self.bias if any(self.bias) else None)
 
     def summary(self) -> dict:
         q = np.asarray(self.quanta)
@@ -102,6 +110,7 @@ class Netlist:
             "excitatory_synapses": int((q > 0).sum()),
             "inhibitory_synapses": int((q < 0).sum()),
             "total_abs_quanta": int(np.abs(q).sum()),
+            "biased_neurons": int(sum(1 for b in self.bias if b != 0.0)),
         }
 
     # ------------------------------------------------------------------------------------
@@ -116,7 +125,7 @@ class Netlist:
         A neuron with more than `max_fanout` outgoing synapses keeps its first `max_fanout`
         (in synapse order) and hands the rest, in slices of `max_fanout`, to new neurons
         `<role>.c1`, `.c2`, ... Each copy has the original's physics (the Netlist's neurons
-        share `params`; `roles` is the only per-neuron field) and a duplicate of every
+        share `params`; `roles` and `bias` are the per-neuron fields) and a duplicate of every
         incoming synapse (same pre, quanta, delay), so it receives exactly what the original
         receives and spikes exactly when the original spikes: no hop is added, and every
         target still sees its input at the designed time. The original synapses keep their
@@ -150,6 +159,7 @@ class Netlist:
         # dry-run on copies of the lists so a rejected cycle leaves the netlist untouched
         src, dst, quanta, delay = list(self.src), list(self.dst), list(self.quanta), list(self.delay)
         new_roles = list(self.roles)
+        new_bias = list(self.bias)
         root: dict[int, int] = {}  # copy -> the neuron it descends from
         copies: dict[int, list[int]] = {}
         made: dict[int, int] = {}  # neuron -> copies it has spawned so far (a neuron can be split
@@ -183,6 +193,7 @@ class Netlist:
                 c = len(new_roles)
                 made[x] = made.get(x, 0) + 1
                 new_roles.append(f"{base_role}.c{made[x]}")
+                new_bias.append(new_bias[x])
                 out.append([])
                 inc.append([])
                 root[c] = rx
@@ -212,4 +223,5 @@ class Netlist:
         if not copies:
             return {}
         self.roles, self.src, self.dst, self.quanta, self.delay = new_roles, src, dst, quanta, delay
+        self.bias = new_bias
         return copies

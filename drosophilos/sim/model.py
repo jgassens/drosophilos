@@ -62,6 +62,12 @@ class Topology:
 
     Arrays are aligned per synapse: `src[k] -> dst[k]` carries `quanta[k]` quanta with a
     delay of `delay[k]` steps. Sorted by (src, dst, delay); `indptr` indexes by source.
+
+    `bias` is the only per-neuron parameter a netlist carries: mV added to the resting
+    potential (a tonic drive; the flip-flop latch needs it). None means 0 everywhere, and
+    `from_edges` stores None whenever every entry is 0, so a topology without biases is
+    exactly what it was before the field existed. A simulator built from a topology reads
+    it through `sim_bias`.
     """
 
     n: int
@@ -70,6 +76,7 @@ class Topology:
     quanta: np.ndarray
     delay: np.ndarray
     indptr: np.ndarray
+    bias: np.ndarray | None = None
 
     @classmethod
     def from_edges(
@@ -79,6 +86,7 @@ class Topology:
         dst,
         quanta,
         delay,
+        bias=None,
     ) -> "Topology":
         src = np.asarray(src, dtype=np.int32)
         dst = np.asarray(dst, dtype=np.int32)
@@ -96,7 +104,15 @@ class Topology:
         counts = np.bincount(src, minlength=n).astype(np.int64)
         indptr = np.zeros(n + 1, dtype=np.int64)
         np.cumsum(counts, out=indptr[1:])
-        return cls(n=n, src=src, dst=dst, quanta=quanta, delay=delay, indptr=indptr)
+        if bias is not None:
+            bias = np.asarray(bias, dtype=np.float64)
+            if bias.shape != (n,):
+                raise ValueError(f"bias must have shape ({n},), got {bias.shape}")
+            if not np.any(bias):
+                bias = None
+            else:
+                bias = bias.copy()
+        return cls(n=n, src=src, dst=dst, quanta=quanta, delay=delay, indptr=indptr, bias=bias)
 
     @classmethod
     def empty(cls, n: int) -> "Topology":
@@ -112,6 +128,18 @@ class Topology:
     def out_degree(self) -> np.ndarray:
         return np.diff(self.indptr)
 
+    def sim_bias(self, bias=None):
+        """The per-neuron bias a simulator should use: the caller's `bias` when it gives one,
+        else this topology's, else 0.0 (the simulators' own default, so a topology without
+        biases changes nothing)."""
+        if bias is not None:
+            return bias
+        return 0.0 if self.bias is None else self.bias
+
+    def biased_neurons(self) -> np.ndarray:
+        """Indices of the neurons whose bias is not 0."""
+        return np.empty(0, dtype=np.int64) if self.bias is None else np.nonzero(self.bias)[0]
+
     def with_added(self, src, dst, quanta, delay) -> "Topology":
         """Profile 3 only: a new topology with extra synapses (logged by the caller)."""
         return Topology.from_edges(
@@ -120,6 +148,7 @@ class Topology:
             np.concatenate([self.dst, np.asarray(dst, np.int32)]),
             np.concatenate([self.quanta, np.asarray(quanta, np.int32)]),
             np.concatenate([self.delay, np.asarray(delay, np.int32)]),
+            bias=self.bias,
         )
 
 

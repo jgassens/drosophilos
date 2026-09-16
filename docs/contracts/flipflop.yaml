@@ -1,0 +1,93 @@
+primitive: flipflop_latch
+profile: 3
+model:
+  dt_ms: 0.1
+  tau_m_ms: 20.0
+  tau_s_ms: 5.0
+  delay_ms: 1.8
+  w_syn_mv: 0.275
+  t_ref_ms: 2.2
+drive_quanta:
+  single_need: 2586.0434707264194
+  rate_need: 382.8363636363636
+  loop: 3621
+  pulse: 3621
+  reset: -5432
+  loop_period_steps: 47
+  ignite: 4655
+design:
+  members: 2 inhibitory neurons u (fires while SET) and v (fires while CLEAR)
+  bias_mv_per_member: 58.0
+  mutual_inhibition_quanta_per_spike: 3621  # 1.0x loop, each direction
+  bistable_from_quanta: 2900                # 0.8x loop holds; 0.75x does not (silent member escapes, both fire ~123 Hz)
+  parked_member_mv_below_threshold: ~15     # mean, at 1.0x loop; ripple ~1 mV
+resources:
+  neurons: 2
+  synapses: 2
+  excitatory_synapses: 0
+  inhibitory_synapses: 2
+  total_abs_quanta: 7242
+  biased_neurons: 2
+  set_chain_adapter_neurons: 3              # add_set_chain: one ignite pulse -> three into u
+  clear_chain_neurons: 4                    # add_clear_chain, shareable across flip-flops
+tonic_rate_vs_bias_hz:                      # lone biased neuron, RefSim, 400 ms
+  7.5: 17.5
+  8: 22.5
+  10: 40.0
+  20: 92.5
+  40: 165.0
+  50: 192.5
+  55: 205.0
+  58: 212.5                                 # period 47 steps: the excitatory latch's loop period exactly
+  60: 217.5
+  65: 227.5
+  70: 232.5
+  80: 250.0
+activity:
+  member_rate_hz_while_holding: 212.8
+  isi_steps_while_holding: 47
+  rate_hz_first_50ms_after_set: 200 (train) / 220 (single 3x pulse)
+  first_isi_after_set_ms: 3.7-4.8 (no doublet)
+  duty_cycle: one member fires continuously in EITHER state (SET and CLEAR cost the same)
+switching:                                  # all-phase minima: every one of the 47 phases of the running member
+  set_single_pulse_into_u_min: 2.25x ignite (10474 quanta); 2.0x switches 36 % of phases; 1.0x (the latch's ignition) 0 %
+  set_train_into_u_min: 3 x 0.75 ignite, 53 steps apart; 2 x 1.25 ignite; 4 x 0.6 ignite
+  set_pair_min: 1.5x ignite into u + 1.5x loop into v at the same step
+  clear_single_pulse_into_u_min: 4.0x loop (14484 quanta); 3.0x switches 71 %
+  clear_train_into_u_min: 3 x 1.0 loop, 53 steps apart; 2 x 1.5 loop; 4 x 0.75 loop (the standard reset train, 0.7 switches 75 %)
+  clear_pair_min: 1.5x loop into u + 1.5x ignite into v at the same step
+  defaults:
+    set_pulse: 3 x 1.0 ignite, 53 steps apart (or one 3x ignite pulse)
+    clear_pulse: 3 x drive.reset (-1.5x loop), 53 steps apart (or one 5x loop pulse)
+  switching_time_ms:
+    set_train: u's first spike 6.0-6.5 after the first pulse; v's last spike <= 12.6
+    set_single: u's first spike 1.4-1.7; v's last spike <= 6.8
+    clear: u stops at once (no spike after the first pulse lands); v's first spike 9.4-14.0
+hold:
+  both_states_ms: 2000 with no input, 425 spikes each (212.5 Hz), RefSim
+power_on:
+  without_a_pulse: both members fire together from 2.5 ms on and stay in LOCKSTEP (~100 Hz each at 1.0x loop), a stable third state; an edge relay on u then fires spuriously at 4.9 ms
+  power_on_pulse: one 1.0x loop inhibitory pulse into u at step 0 -> CLEAR, u never fires
+  lockstep_recovery: a clear train into u (3 x 1.0 loop) resolves lockstep to CLEAR
+noise_margin:                               # largest single stray pulse that never flips it, all 47 phases
+  stray_excitatory_into_silent_member: 1.8x ignite (8379 quanta, ~22.7 mV); 1.9x flips 8 %, 2.0x 33 %
+  stray_inhibitory_into_firing_member: 2.25x loop (8147 quanta); 2.5x flips 38 %, 3.0x 71 %
+  excitatory_latch_for_comparison:
+    stray_excitatory_into_silent_latch: ignites at 1.1x need (2845 quanta, ~7.7 mV); 1.0x does not
+    stray_inhibitory_into_one_member: survives 2.0x loop; 3.0x kills 79 % of phases
+primitive_compatibility:                    # measured directly, RefSim
+  add_edge_relay_on_u: fires exactly once per SET, ~4.5 ms after u's first spike, never on the tonic train (3 of 3 cycles); fires once at power-on if the power-on pulse is omitted
+  add_veto_relay_with_u_as_veto: holds the relay and target while SET; a re-drive 50 ms after CLEAR fires the relay and ignites the target, 40 ms does not (the 55 ms rule holds; u stops at once on CLEAR)
+  add_veto_relay_target_or_celement_ignite_from: DOES NOT WORK - their single ignite pulse into .u never sets it (0 of 47 phases); route the pulse through add_set_chain instead
+  add_reset_on_members: DOES NOT WORK - a train into both members (4 x 0.75 or 3 x 1.5 loop) leaves the flip-flop where it was (SET stays SET, 12 of 12); add_clear_chain aims the same train at u only
+  kill_train_into_u: 3 x 1.0 loop clears at every phase; the standard 4 x 0.75 loop clears too with ~7 % margin
+  single_ignition_pulse: does not set it (see above)
+  weight_noise: not measured under perturbation; the bistability floor is 20-25 % below the default inhibition
+timing_assumptions:
+- both members must be biased identically (58 mV); a bias difference is not a usable symmetry breaker (lockstep persists up to +10 mV at 1.0x loop; +15 mV resolves it but leaves the v member unparked)
+- the switching train's pulses are 53 steps apart (the reset controller's relay hop); a SET source must be one-shot (an edge relay) into add_set_chain
+- a veto rail from u is established >= 15 ms before its driver rises, as for a latch
+- power-on pulse (or a clear train) before any edge relay on u is trusted
+notes:
+- bias is a per-neuron Netlist/Topology parameter (Netlist.neuron(bias=), Topology.bias, Topology.sim_bias()); the simulators are given it by the caller
+- measured in this run's scratch scripts (RefSim, < 200 neurons, <= 2.1 s each); regression in tests/test_flipflop.py
