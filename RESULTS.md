@@ -853,8 +853,13 @@ Inside the whole simulated brain (166,702 neurons, `bench/h1_fullgraph.py`, Juno
 computes 10 / 10 additions only when the hosts' 327,497 inputs from the rest of the brain are
 silenced; with them live it computes 0 / 30 under a silent, a 2 Hz Poisson or a burst surround —
 its own output spikes wake 24,000 surround neurons, and 20,000–45,000 spikes per millisecond come
-back into hosts that average ~530 external inputs. Stage H0's circuit survived the same surround
-on 15 hosts chosen for isolation; the placement search must score isolation too.
+back into hosts that average ~530 external inputs. With the hosts' outputs into the brain
+silenced instead (302,263 edges) and nothing outside driven, it computes 10 / 10: in a quiet
+brain the storm is the circuit's own echo. Scoring quietness in the placement search cut the
+hosts' exposure only 45 % at a cost of a third of the coverage (latch-capable neurons are the
+brain's hubs), and that mapping still computes 0 / 20 in the whole brain. The simulated brain
+under a 2 Hz sensory drive storms on its own at these parameters (~1.9 M spikes per 1.2 s);
+Stage H0's 15 quiet hosts survived it, 614 hubs do not.
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

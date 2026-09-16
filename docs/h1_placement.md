@@ -467,5 +467,20 @@ that can carry a latch loop needs a reciprocal partner at ≥ 57 synapses, and i
 are the brain's hubs — antennal-lobe local neurons, gnathal and nerve-cord interneurons with
 thousands of inputs — so "strong enough to be a latch" and "quiet" pull in opposite directions.
 The mapping saved as `docs/h1_placement_mapping_isolated.json` (`w = 2`) is the quietest that
-still computes in isolation; its whole-brain run is in §The placed adder inside the whole brain's
-follow-up below when it lands.
+still computes in isolation. In the whole brain (Juno 406188) it computes nothing either: silent
+surround 0 / 20 (14 no ACCEPT, 5 timeouts, 1 fault), 2 Hz Poisson 0 / 20 — the flood halves
+(12,800 excitatory spikes per ms at the hosts instead of 28,000) and the channel now stalls
+instead of double-railing, but stalls all the same.
+
+**The control that locates the cause.** With the hosts' *outputs* into the brain silenced (302,263
+edges for the coverage placement, 188,031 for the quiet one) and nothing outside driven, both
+mappings compute **10 / 10** — so in a silent brain the storm is the circuit's own doing: its
+latches fire at 213 Hz, their spikes leave through the hosts' anatomical outputs at full weight,
+24,000 neurons wake and ~20,000 spikes per ms come back. Silencing the outputs is a smaller and
+cleaner documented edit than silencing the inputs (the circuit is forbidden to disturb the brain,
+rather than deafened to it), and under it the adder is a Profile 2 circuit *in a quiet brain*. It
+does not survive the 2 Hz sensory drive (0 / 10 in the first run's outputs-zeroed Poisson
+condition): under that drive the simulated brain fires ~1.9 M spikes per 1.2 s on its own, and
+45,000 spikes per ms reach hosts with thousands of inputs each. Whether a fly brain at these LIF
+parameters is really that excitable is a question about the model's surround, not the circuit —
+H0's envelope was measured for 15 quiet hosts, and it does not transfer to 614 hubs.
