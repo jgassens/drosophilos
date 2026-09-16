@@ -140,3 +140,28 @@ def add_clear_chain(net: Netlist, drive: Drive, name: str, flipflops: list[FlipF
     for f in flipflops:
         net.synapse(inh, f.u, q)
     return trigger, inh
+
+
+def connect_clear(net: Netlist, drive: Drive, inh: int, flipflops: list[FlipFlop], strength: float = 1.5) -> None:
+    """Aim an existing inhibitory train neuron (a register's reset controller `inh`, which
+    fires once per reset relay) at the flip-flops' u members only, `strength` x loop per
+    spike. This is add_clear_chain without its own controller: the register's reset train
+    (4 pulses) delivers 4 x 1.5x loop into u, above the 3 x 1.0x all-phase minimum, and
+    nothing into v (a train into both members leaves the flip-flop where it was)."""
+    q = -int(round(strength * drive.loop))
+    for f in flipflops:
+        net.synapse(inh, f.u, q)
+
+
+def flipflop_taps(net: Netlist) -> list[int]:
+    """The u members of every flip-flop in the netlist: biased neurons whose role ends in
+    `.u` (add_flipflop names them so; nothing else in the library carries a bias)."""
+    return [i for i, (role, b) in enumerate(zip(net.roles, net.bias)) if b != 0.0 and role.endswith(".u")]
+
+
+def power_on_events(net: Netlist, drive: Drive, at_step: int = 0) -> list[tuple[int, int, int]]:
+    """What a harness injects when it loads an image: one loop-strength inhibitory pulse into
+    every flip-flop's u at `at_step`, so each starts CLEAR instead of in lockstep (see
+    power_on_pulse). Returns (step, neuron, quanta) triples; `schedule`-compatible after
+    subtracting `at_step`, or fed straight to `sim.add_events`."""
+    return [(at_step, u, -drive.loop) for u in flipflop_taps(net)]

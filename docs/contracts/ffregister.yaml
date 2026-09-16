@@ -1,0 +1,136 @@
+primitive: ffregister_4bit
+profile: 3
+model:
+  dt_ms: 0.1
+  tau_m_ms: 20.0
+  tau_s_ms: 5.0
+  delay_ms: 1.8
+  w_syn_mv: 0.275
+drive_quanta:
+  single_need: 2586.0434707264194
+  rate_need: 382.8363636363636
+  loop: 3621
+  pulse: 3621
+  and_in: 249
+  or_in: 766
+  reset: -5432
+  loop_period_steps: 47
+  ignite: 4655
+  relay_in: 4655
+resources:
+  neurons: 225
+  synapses: 427
+  excitatory_synapses: 274
+  inhibitory_synapses: 153
+  total_abs_quanta: 1664393
+  biased_neurons: 16
+  consumer_neurons_excluding_reset_ready: 86
+  rail_storage_neurons_per_bit: 10.0
+  latch_register_neurons: 201
+  latch_register_rail_storage_neurons_per_bit: 4.0
+  latch_register_consumer_neurons_excluding_reset_ready: 62
+latency:
+  accept_ms_mean: 152.3
+  accept_ms_max: 155.1
+initiation_interval:
+  cycle_ms_mean: 330.3
+  cycle_ms_max: 333.1
+activity:
+  spikes_per_transaction_total: 2102.7
+  spikes_per_transaction_by_class:
+    latch: 1343.8
+    gate: 70.7
+    control: 688.2
+  output_port_spikes_per_transaction: 224.8
+  latch_member_rate_hz_while_holding: 212.8
+  sustained_duty_cycle: a held latch fires continuously at the rate above until reset
+  quiescent_spikes_between_ready_and_next_load: 0
+  v_member_spikes_between_ready_and_next_load: 0 (the harness loads at READY, so the
+    gap is empty; a CLEAR rail's v fires at 213 Hz whenever the register is idle)
+reset_energy:
+  producer:
+    pulses: 4
+    quanta_per_pulse: 48888
+    quanta_per_reset: 195552
+    mv_equivalent_per_reset: 3361.1
+  consumer:
+    pulses: 4
+    quanta_per_pulse: 111356
+    quanta_per_reset: 445424
+    mv_equivalent_per_reset: 7655.7
+delay_jitter_tolerance: 'not measured: per-synapse delays are shared topology in this
+  backend'
+stray_input_tolerance:
+  single_excitatory_pulse_into_parked_rail_u: 1.1x ignite (5,120 q) never changes
+    it; >= 1.15x drops the pair into LOCKSTEP (both ~105 Hz) at every phase, healed
+    by the next reset; 2.0x SETs it at ~50 % of phases
+  single_excitatory_pulse_into_set_trigger: '0.55x ignite (2,560 q, ~1.0x single need)
+    never fires it; 0.6x fires the chain and SETs the rail at every phase: the register''s
+    stray margin is the trigger''s, the same as a latch''s u (1.1x need)'
+  single_inhibitory_pulse_into_a_set_rail_u: 2.25x loop (8,147 q) never clears it;
+    2.5x clears 4 of 12 phases, 3.0x 8 of 12
+  measured_on: the consumer register alone, RefSim, phases 0..44 step 4 (12 phases)
+    unless stated
+campaign: null
+timing_assumptions:
+- READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed
+  reset settling (~21 ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x
+  loop of inhibition on top of v's park
+- 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s
+  pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence'
+- 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3
+  ms apart into u; u''s first spike ~6 ms after the first pulse'
+- 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u with the
+  image (Channel.power_on_events); without it a pair fires in lockstep for ever'
+- loads (upstream DATA) arrive only after READY
+notes:
+- 4-bit transport channel, consumer rails on flip-flops (storage='flipflop'), flags
+  (valid, tree, completion, fault) on latches by measurement, watchdog 55 hops
+- 'producer is the latch register: every harness loads it with one ignition pulse
+  per rail, which cannot set a flip-flop'
+- 'activity counts include the CLEAR-side v members: one member of every flip-flop
+  fires at 213 Hz at all times, so an idle register costs 8 x 213 Hz'
+- 'status: measured 2026-09-16, not frozen; mix-B campaign pending (cluster)'
+reset_latency:
+  clear_ms_mean: 5.9
+  clear_ms_max: 6.3
+  ready_after_reset_trigger_ms: 84.8
+  set_train_ms: u's first spike 6.0-6.5 ms after the set trigger's pulse (docs/a1_flipflop.md)
+arrival_jitter_tolerance:
+  bits_up_to_10_ms_apart:
+    transfers: 5
+    correct: 5
+    accept_after_last_bit: true
+  bits_up_to_40_ms_apart:
+    transfers: 5
+    correct: 5
+    accept_after_last_bit: true
+  bits_up_to_100_ms_apart:
+    transfers: 5
+    correct: 5
+    accept_after_last_bit: true
+retention:
+  hold_s: 2.0
+  decoded_after_hold: the loaded word, valid
+  rate_hz_while_holding: 212.5
+  period_steps: 47
+  measured_by: tests/test_ffregister.py::test_register_clears_at_every_phase_and_holds_two_seconds
+reset_at_every_phase:
+  phases: all 47 measured; the fast test checks every second one
+  train: 4 x 1.5x loop into u only (the reset controller's inh)
+  lockstep_resolved: 'yes: tests/test_ffregister.py::test_stray_lockstep_is_healed_by_the_next_reset'
+fan_in_out:
+  rail_u_fan_out:
+  - 3
+  set_trigger_fan_in: 1
+  reset_inh_fan_out: 33
+  fan_out_tolerated: 'unbounded by the model: a presynaptic spike costs the source
+    nothing (no load); measured on the real connectome as isolation cost instead (H0)'
+error_rate:
+  fast:
+    transfers: 200
+    decoded_errors: 0
+    upper_95: 0.014867039231272054
+    test: tests/test_ffregister.py::test_flipflop_register_200_random_transfers
+  mix_B_10000: 'pending: tests/test_ffregister.py::test_mix_b_10000_transfers (slow,
+    cluster)'

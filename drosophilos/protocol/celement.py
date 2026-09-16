@@ -13,34 +13,56 @@ the state-holding element: set when all inputs agree (all valid), cleared only b
 from __future__ import annotations
 
 from ..lib.netlist import Drive, Netlist
+from .flipflop import FlipFlop, add_flipflop, add_set_chain
 from .latch import Latch, add_edge_relay, add_latch
 
 
-def _ignite_from(net: Netlist, drive: Drive, name: str, gate: int, latch: Latch) -> None:
+def add_state(net: Netlist, drive: Drive, name: str, storage: str = "latch"):
+    """A one-bit state element by `storage`: "latch" (the excitatory two-neuron loop, ignited
+    by one pulse) or "flipflop" (two biased inhibitory neurons, set by a train through
+    add_set_chain). Both expose `.u`, a 213 Hz train while set, so every reader is the same."""
+    if storage == "latch":
+        return add_latch(net, drive, name)
+    if storage == "flipflop":
+        return add_flipflop(net, drive, name)
+    raise ValueError(f"unknown storage {storage!r}: 'latch' or 'flipflop'")
+
+
+def set_input(net: Netlist, drive: Drive, name: str, state) -> int:
+    """The neuron one ignition pulse goes into to set `state`: a latch's own `u`; for a
+    flip-flop the trigger of a fresh set chain (three pulses into u), since one pulse into
+    its u never sets it (docs/a1_flipflop.md)."""
+    if isinstance(state, FlipFlop):
+        return add_set_chain(net, drive, name, state)
+    return state.u
+
+
+def _ignite_from(net: Netlist, drive: Drive, name: str, gate: int, latch) -> None:
     """Gate -> latch through an edge relay: one ignition pulse per gate activation. A gate
     that kept pulsing the latch would add a second drive on top of the loop and let the
     latch ride through the reset train (observed on valid and tree latches). The ignited
     latch's train holds the relay down (hold_from): a gate source is too slow to do that
-    itself, and a re-firing relay re-ignites the latch every ~43 ms (see add_edge_relay)."""
+    itself, and a re-firing relay re-ignites the latch every ~43 ms (see add_edge_relay).
+    A flip-flop target takes the pulse through its set chain (set_input)."""
     relay = add_edge_relay(net, drive, f"{name}.ign", gate, hold_from=[latch.u])
-    net.synapse(relay, latch.u, drive.ignite)
+    net.synapse(relay, set_input(net, drive, name, latch), drive.ignite)
 
 
-def add_or_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) -> tuple[int, Latch]:
+def add_or_latched(net: Netlist, drive: Drive, name: str, inputs: list[int], storage: str = "latch") -> tuple[int, Latch]:
     g = net.neuron(f"{name}.or")
     for x in inputs:
         net.synapse(x, g, drive.or_in)
-    l = add_latch(net, drive, f"{name}.L")
+    l = add_state(net, drive, f"{name}.L", storage)
     _ignite_from(net, drive, name, g, l)
     return g, l
 
 
-def add_and_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) -> tuple[int, Latch]:
+def add_and_latched(net: Netlist, drive: Drive, name: str, inputs: list[int], storage: str = "latch") -> tuple[int, Latch]:
     assert len(inputs) == 2, "rate-mode AND with margin is a 2-input gate; build a tree"
     g = net.neuron(f"{name}.and")
     for x in inputs:
         net.synapse(x, g, drive.and_in)
-    l = add_latch(net, drive, f"{name}.L")
+    l = add_state(net, drive, f"{name}.L", storage)
     _ignite_from(net, drive, name, g, l)
     return g, l
 
@@ -57,7 +79,8 @@ def add_and_gate(net: Netlist, drive: Drive, name: str, inputs: list[int], fract
     return g
 
 
-def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: list[Latch]) -> tuple[Latch, list[Latch]]:
+def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: list[Latch],
+                        storage: str = "latch") -> tuple[Latch, list[Latch]]:
     """Binary tree of latched 2-input ANDs. Returns (root latch, all internal latches)."""
     level = list(valid_latches)
     internal: list[Latch] = []
@@ -65,7 +88,7 @@ def add_completion_tree(net: Netlist, drive: Drive, name: str, valid_latches: li
     while len(level) > 1:
         nxt = []
         for k in range(0, len(level) - 1, 2):
-            _, l = add_and_latched(net, drive, f"{name}.c{depth}_{k // 2}", [level[k].u, level[k + 1].u])
+            _, l = add_and_latched(net, drive, f"{name}.c{depth}_{k // 2}", [level[k].u, level[k + 1].u], storage)
             internal.append(l)
             nxt.append(l)
         if len(level) % 2:
@@ -109,7 +132,7 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
         net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
     for v in veto_neurons:
         net.synapse(v, relay, -int(round(veto_strength * drive.loop)))
-    net.synapse(relay, target.u, drive.ignite)
+    net.synapse(relay, set_input(net, drive, name, target), drive.ignite)  # a flip-flop target gets a set chain
     return relay
 
 
