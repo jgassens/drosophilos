@@ -204,7 +204,6 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     assert [len(x) for x in starts] == [1, 2]
 
 
-@pytest.mark.xfail(strict=False, reason="§10.5's remedy (ACT^d re-lights the request and IDLE rails) removed the perspective duplicates but stalled copies in every block under mix B and was reverted; this reproduction records the failure it was written against")
 def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     """§10.5: a request's false rail re-lit by the start pulse ~55 ms after its own kill train
     can fail to catch; the dark pair lets the row's next IDLE start it with no request, and the
@@ -226,11 +225,11 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     topo = pl.net.topology()
     u, v = req[0].u, req[0].v
     k1_inh = roles.index("m.r2.req.m.r1.k1.inh")
-    act_d = roles.index("m.r2.actd.d10")
+    relay = roles.index("m.r2.relight.m.r1.edge")
     trigger = roles.index("m.r2.trigger.m.r1")
     loop = ((topo.src == u) & (topo.dst == v)) | ((topo.src == v) & (topo.dst == u))
     kill = (topo.src == k1_inh) & ((topo.dst == u) | (topo.dst == v))
-    relight = (topo.src == act_d) & (topo.dst == u)
+    relight = (topo.src == relay) & (topo.dst == u)  # the veto-gated re-light relay's ignition
     assert loop.sum() == 2 and kill.sum() == 2 and relight.sum() == 1
     quanta = np.broadcast_to(topo.quanta, (2, topo.nnz)).astype(np.float64).copy()
     quanta[:, loop] *= 0.88

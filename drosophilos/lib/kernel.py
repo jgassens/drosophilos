@@ -388,9 +388,20 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
-        # (§10.5's remedy — ACT^d re-igniting each request's false rail and IDLE — is not here:
-        # it removed the perspective duplicates but stalled copies in every block under mix B
-        # and was reverted, like §10.4. See docs/a3_kernels.md §10.5.)
+        # §10.5: the start pulse re-lights a request's false rail ~55 ms after that rail's own
+        # kill train; at a 3 sigma corner of the pair the loop does not catch, the pair is dark,
+        # and the row's next IDLE starts it with no request and replays the next word (the
+        # perspective duplicate). An unconditional re-light from ACT^d fixed that and stalled
+        # copies under mix B (a DONE landing between the start and ACT^d had REQ true lit when
+        # the re-light landed). This one is gated: a veto relay driven ~74 ms after the start
+        # (ACT^d + 3 hops, past the veto's 55 ms recovery from the start's kill of REQ true)
+        # re-ignites REQ false only while REQ true is dark -- the (dark, dark) failure -- and is
+        # vetoed by a pending request. Ordering: the earliest legitimate re-rise of REQ true is
+        # the producer's free -> commit guard -> master reset -> done, >= ~150 ms after the
+        # start; one drive per start, >= a cell cycle apart. (Kimi review run-20260916-150155.)
+        relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
+        for src, pr in c.reqs.items():
+            add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u], pr[0])
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name

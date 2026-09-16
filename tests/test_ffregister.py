@@ -339,7 +339,7 @@ def measure_ffregister_contract(rail_proxy: bool = True) -> dict:
                          timing_assumptions=[
                              "READY/CLEARED = 15-hop delay chain (~80 ms) after the reset trigger; must exceed reset settling (~21 ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x loop of inhibition on top of v's park",
                              "edge relays: relay fires ~1.8 ms after the source's first spike, its inhibitor's pulse lands ~5.3 ms after; a relay re-arms only after ~50 ms of source silence",
-                             "SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3 ms apart into u; u's first spike ~6 ms after the first pulse"
+                             "SET is a train: data relay -> set trigger -> three relays, four ignite pulses 5.3 ms apart into u (three until the lockstep fix); u's first spike ~6 ms after the first pulse"
                              + (", p's (what the readers see) ~19-23 ms after it: one park recovery (docs/contracts/flipflop.yaml)" if rail_proxy else ""),
                              "power-on: one loop-strength inhibitory pulse into every flip-flop's u" + (" and p" if rail_proxy else "")
                              + " with the image (Channel.power_on_events); without it a pair fires in lockstep for ever",

@@ -18,8 +18,8 @@ drive_quanta:
   ignite: 4655
   relay_in: 4655
 resources:
-  neurons: 225
-  synapses: 427
+  neurons: 233  # four-pulse SET train (225 with three)
+  synapses: 443  # (427 with three)
   excitatory_synapses: 274
   inhibitory_synapses: 153
   total_abs_quanta: 1664393
@@ -77,8 +77,8 @@ timing_assumptions:
   ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x loop of inhibition on top of v's park
 - 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s pulse lands ~5.3
   ms after; a relay re-arms only after ~50 ms of source silence'
-- 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3 ms apart into u; u''s
-  first spike ~6 ms after the first pulse'
+- 'SET is a train: data relay -> set trigger -> three relays, four ignite pulses 5.3 ms apart into u (three
+  until the lockstep fix, docs/a1_flipflop.md); u''s first spike ~6 ms after the first pulse'
 - 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u with the image (Channel.power_on_events);
   without it a pair fires in lockstep for ever'
 - loads (upstream DATA) arrive only after READY
@@ -160,8 +160,8 @@ proxy_readout:
     ignite: 4655
     relay_in: 4655
   resources:
-    neurons: 233
-    synapses: 435
+    neurons: 241  # four-pulse SET train (233 with three)
+    synapses: 451  # (435 with three)
     excitatory_synapses: 274
     inhibitory_synapses: 161
     total_abs_quanta: 1693361
@@ -228,8 +228,8 @@ proxy_readout:
     ms, 4 pulses) plus the flip-flop's u recovery from 4 x 1.5x loop of inhibition on top of v's park
   - 'edge relays: relay fires ~1.8 ms after the source''s first spike, its inhibitor''s pulse lands ~5.3
     ms after; a relay re-arms only after ~50 ms of source silence'
-  - 'SET is a train: data relay -> set trigger -> two relays, three ignite pulses 5.3 ms apart into u;
-    u''s first spike ~6 ms after the first pulse, p''s (what the readers see) ~19-23 ms after it: one
+  - 'SET is a train: data relay -> set trigger -> three relays, four ignite pulses 5.3 ms apart into u
+    (three until the lockstep fix, docs/a1_flipflop.md); u''s first spike ~6 ms after the first pulse, p''s (what the readers see) ~19-23 ms after it: one
     park recovery (docs/contracts/flipflop.yaml)'
   - 'power-on: one loop-strength inhibitory pulse into every flip-flop''s u and p with the image (Channel.power_on_events);
     without it a pair fires in lockstep for ever'

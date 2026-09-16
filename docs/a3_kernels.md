@@ -597,6 +597,18 @@ stands as the localization. What the next attempt needs is a re-ignition that ca
 on a rail the kill train is meant to keep dark — gated by the request's own true rail, or a
 longer-recovery kill pair — and the 100-copy campaign before it is believed.
 
+**Third remedy, gated (Kimi review run-20260916-150155; campaign pending).** A veto relay per
+request (`{cell}.relight.{src}`), driven by `ACT^d` delayed three more hops (~74 ms after the
+start, past the veto's 55 ms recovery from the start's kill of `REQ` true), vetoed by `REQ`
+true, igniting `REQ` false: it re-lights the false rail only in the (dark, dark) state the 3 σ
+failure leaves, and a pending request — the case that corrupted tick copy 77 under the
+unconditional re-light — vetoes it. `IDLE` is not re-lit. Ordering assumptions: the earliest
+legitimate re-rise of `REQ` true after a start is the producer's free → commit guard → master
+reset → done chain, ≥ ~150 ms; one drive per start, ≥ a cell cycle apart. The §10.5
+reproduction now zeroes this relay's ignition on its second copy and passes (`[9, 15, 6]`
+against `[9, 15, 15]`). The 100-copy mix-B campaigns (Juno, `kc_<block>_B90s106.json`) decide
+it, against §10.3's 795 / 799 / 1,598 / 760 (7 wrong).
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
@@ -727,27 +739,34 @@ same exposure with a longer drain; a one-inner-loop program under neural pacing 
 `bench/render_game.py --pacing neural`) needs either a host barrier on the frame's first
 token or a third phase. The fast test deals each frame behind the previous tick's output.
 
-### 11.2 One token in flight: the pipelined multiplier is the wrong multiplier (2026-09-16)
+### 11.2 The pipelined multiplier doubles the cost of a Doom pixel — cause not identified (2026-09-16)
 
 Three H200 runs of `doom4.c` (the chasing thing, 245 cells) measured the same thing twice.
 With the array multiplier (Juno 405517: 40 × 25, 8 copies × 1.47 M neurons, ALU counter) a
 pixel cost ~30 s of neural time; with the pipelined multiplier (406972: 32 × 20, 16 copies ×
 2.10 M, neural pacing; 408444: the same under **host** pacing) a pixel cost **63 s** in both
 runs, output for output, and neither could finish inside its limit (36 h; 16 pixels an hour
-against 2,880 outputs). Pacing made no difference because under both the pass's tokens go
-one at a time: host pacing deals the next token only after the previous output, and the
-ring's phase gate lets one token per stream through. A pixel's cost is therefore the pixel
-kernel's *latency*, and the pipelined multiplier's latency is its sixteen row handshakes
-(~20 s at 16 bits, §4) against the array's 6.6 s — its 1.7 s throughput never sees two tokens.
-`doom4.c`'s pixel pass has two products (the wall's texture row and the sprite's), so ~40 s
-of its 63 s is multiplier latency. `bench/render_doom.py` now defaults to `--mul array`; the
-40 × 25 ring rerun of `doom2.c` (408524, pipelined) was stopped at ~10 s per output, above the
-ALU counter's 7 s, and resubmitted with the array (408916) so that the ring is compared on
-the same multiplier; `doom4.c` runs at 24 × 15 × 2 frames on the array (408917). The
-pipelined multiplier earns its area only where the compiler lets several tokens of one
-stream overlap, which the phase order of §11 forbids by design: the next step for
-throughput is a pass whose tokens pipeline *within* a phase, with the ring counting dones,
-not starts.
+against 2,880 outputs). `bench/render_doom.py` therefore defaults to `--mul array` again, and
+the 40 × 25 ring rerun of `doom2.c` (408524, pipelined, ~10 s per output against the ALU
+counter's 7 s) was stopped and resubmitted with the array (408916) so that the ring is compared
+on the same multiplier; `doom4.c` runs at 24 × 15 × 2 frames on the array (408917).
+
+The first explanation written here — that both pacings let one token of a stream through at a
+time, so a pixel costs the pipelined multiplier's sixteen-row *latency* (~20 s) instead of its
+1.7 s throughput — is **wrong**, as the independent review (Kimi, run-20260916-150155) showed
+from the code: the phase OK pair stays lit for the whole K-token phase (`lib/kernel.py`
+`add_pacing_ring`), the pixel register commits the next token as soon as its two head cells
+have started on the previous one (~1 s), and host pacing's barrier (`render_doom.py`, `owed`)
+is per stream-phase, not per token; §11.1's own measurement has commits 750–1,000 ms apart
+inside a frame and `test_pacing_ring_wraps_every_k_tokens` asserts it. Tokens of one stream do
+overlap in the pass and inside the multiplier's rows. Why the pipelined multiplier still costs
+twice the array per pixel at the doom4 scale is therefore open. Candidates, none measured: the
+sixteen row cells' commit gating against the pass's shared write ports (§7) throttling the
+stream to a fraction of the row cycle; the two products in the pixel pass being in series, so
+the pass's throughput is bounded by a full-latency dependency rather than a row cycle; or the
+host runner's READY accounting. The 24 × 15 doom4 run records every output's step
+(`docs/a2/doom4_24na_h200.json`), which gives the inter-commit intervals directly; the same
+program on the pipelined multiplier at that size is the comparison to schedule.
 
 ## 8. What it is not yet
 

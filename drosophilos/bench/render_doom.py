@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--pacing", default="host", choices=["host", "neural"], help="neural: phase gates in the substrate, the host deals tokens in order with no barrier")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--progress", type=float, default=300, help="seconds between progress lines (0 disables)")
-    ap.add_argument("--mul", default="array", choices=["array", "pipelined"], help="multiplier cells: both pacings run one token at a time per stream, so a pixel costs the pipelined multiplier's ~20 s latency (16 rows) against the array's 6.6 s (a3_kernels §11.2); the pipelined one only pays with several tokens in flight")
+    ap.add_argument("--mul", default="array", choices=["array", "pipelined"], help="multiplier cells: measured on doom4 at the H200, a pixel costs ~63 s of neural time with the pipelined multiplier against ~30 s with the array, under either pacing (a3_kernels §11.2; the cause is not identified)")
     ap.add_argument("--pixel-stream", default="p", help="the inner stream whose tokens are row<<8|col pixel addresses")
     ap.add_argument("--tick-stream", default="f", help="the outer (frame) loop's induction variable")
     ap.add_argument("--params", default=None, help="JSON dict overriding the prologue's derived initial state, e.g. per-variable")
