@@ -355,6 +355,14 @@ output is wrong and nothing detects it (copy 0: `25, 25, 30, 30, 19, 33, 30, 59`
 27, 27, 67, 107, 0`). Whether the guard fix above removes the stalls as well as the duplicates is
 the question the fixed campaign answers.
 
+**After the fix** (Juno 407450, the same 100 copies, seeds and 90 s): fan-out **795 / 800, 0
+wrong** (one copy stalled at its fourth token); tick **1,598 / 1,600, 2 wrong, 0 missing, one
+copy** — the stalls were the same stale-guard replay, now gone; render 799 / 800 (the same single
+case); perspective **unchanged to the digit**, 760 / 7 / 33 in the same seven copies, and the
+eight-copy seed-0 rerun still duplicates the fifth value. So the multi-pair guard was the fan-out
+and state kernels' whole problem, and the pipelined multiplier's duplicate — and the ROM reader's
+single case — come from somewhere else (§10.4 when found).
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

@@ -902,7 +902,9 @@ fan-out 775 / 800, perspective 760 / 800 — and the tick state kernel 666 / 1,6
 copies failing, a third of them stalling at their second token, and every duplicated run of a
 state cell leaving the state silently wrong from then on. The mechanism (a cached "both sources
 ready" flag replayed after a two-order guard's doublet) is fixed with end-to-end vetoes on the
-final guard; the campaigns are being rerun on the fix. (The first campaign's large "missing"
+final guard; rerun on the fix: tick 1,598 / 1,600 and fan-out 795 / 800 with no wrong values,
+render unchanged at 799 / 800, and the 16-bit perspective kernel unchanged at 760 / 800 — its
+duplicate has another cause, under diagnosis. (The first campaign's large "missing"
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 
