@@ -62,14 +62,11 @@ def make_perturbed_sim(topo, params: Params, B: int, pert: Perturbation, rng, n_
     q = np.rint(base_q[None, :] * np.exp(rng.normal(0, pert.weight_sigma, size=(B, topo.nnz)))).astype(np.int32)
     vth = params.V_th + rng.normal(0, pert.th_sigma_mv, size=(B, topo.n))
     bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n))
-    sim = TorchSim(topo, params, n_nodes=B, V_th=vth, bias=bias, quanta=q, device=device, dtype=dtype)
-    if pert.stray_rate_hz > 0:
-        p = pert.stray_rate_hz * params.dt / 1000.0
-        for b in range(B):
-            n_ev = rng.binomial(n_steps * topo.n, p)
-            sim.add_events(b, rng.integers(0, n_steps, size=n_ev).tolist(), rng.integers(0, topo.n, size=n_ev).tolist(),
-                           [pert.stray_quanta] * n_ev)
-    return sim
+    # the stray Poisson input is drawn on the device as the simulation runs (TorchSim's
+    # stray_rate_hz: a Bernoulli(rate * dt) draw per neuron per step, the same law as the
+    # pre-drawn events it replaces); `n_steps` is kept for the signature and no longer bounds it
+    return TorchSim(topo, params, n_nodes=B, V_th=vth, bias=bias, quanta=q, device=device, dtype=dtype,
+                    stray_rate_hz=pert.stray_rate_hz, stray_quanta=pert.stray_quanta, stray_seed=int(rng.integers(2**31 - 1)))
 
 
 def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None,

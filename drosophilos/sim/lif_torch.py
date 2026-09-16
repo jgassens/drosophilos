@@ -31,6 +31,9 @@ class TorchSim:
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
         record: list[tuple[int, int]] | None = None,
+        stray_rate_hz: float = 0.0,
+        stray_quanta: int = 0,
+        stray_seed: int | None = None,
     ):
         self.topo = topo
         self.params = params
@@ -73,6 +76,16 @@ class TorchSim:
         self.g = torch.zeros((B, n), device=dev, dtype=dtype)
         self.r = torch.zeros((B, n), device=dev, dtype=torch.int32)
         self.ring = torch.zeros((self.L, B, n), device=dev, dtype=torch.int64)
+        # stray background input: every neuron of every node receives `stray_quanta` with
+        # probability rate * dt each step, drawn on the device as the step runs (the campaigns'
+        # mix; pre-drawing the events as lists for 100 copies over a minute of neural time was
+        # 10^8-10^9 Python objects and hours before the first step)
+        self.stray_p = float(stray_rate_hz) * params.dt / 1000.0
+        self.stray_q = int(stray_quanta)
+        self._stray_gen = None
+        if self.stray_p > 0.0:
+            self._stray_gen = torch.Generator(device=dev)
+            self._stray_gen.manual_seed(int(stray_seed if stray_seed is not None else 0))
         self.step_index = 0
 
         self._events: dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = defaultdict(list)
@@ -149,6 +162,9 @@ class TorchSim:
             slot_t = torch.full_like(node_t, slot)
             self.ring.index_put_((slot_t, node_t, neur_t), q_t, accumulate=True)
         due = self.ring[slot]
+        if self.stray_p > 0.0:
+            hit = torch.rand((self.B, self.n), device=self.device, generator=self._stray_gen) < self.stray_p
+            due = due + hit.to(due.dtype) * self.stray_q
         g = g + self.w_unit * self.gain * due.to(self.dtype)
         self.ring[slot] = 0
         g = torch.where(self.silenced, torch.zeros_like(g), g)

@@ -859,7 +859,11 @@ brain the storm is the circuit's own echo. Scoring quietness in the placement se
 hosts' exposure only 45 % at a cost of a third of the coverage (latch-capable neurons are the
 brain's hubs), and that mapping still computes 0 / 20 in the whole brain. The simulated brain
 under a 2 Hz sensory drive storms on its own at these parameters (~1.9 M spikes per 1.2 s);
-Stage H0's 15 quiet hosts survived it, 614 hubs do not.
+Stage H0's 15 quiet hosts survived it, 614 hubs do not. And the ceiling: MCNS has only 343
+*disjoint* reciprocal pairs strong enough for a latch at the H0 weight bound (1,047 at ×8,
+2,896 at ×16); one 8-bit kernel cell needs 375, the pixel kernel ~5,300, the three Doom
+kernels ~35,000. On the fly's own synapses, one neuron per designed neuron, the wiring holds
+about one cell (`docs/capacity_doom.md` §5, "The ceiling").
 
 Beside it, the Doom-shaped program grew textures (`examples/doom2.c`) and one sprite thing,
 occluded by nearer walls (`examples/doom3.c`, four kernels, 1.31 M neurons per copy) that

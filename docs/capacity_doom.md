@@ -147,8 +147,31 @@ best carries 5), and a tree of 38 real neurons that would cover 85 of them has n
 designed trigger can drive. So what a Profile 2 adder still needs from Profile 3 is specific:
 the broadcast fan-outs (or local resets), one relay fan-out node (`actd.d10`, 10 of 16 edges),
 and about 30 relay-inhibitor edges. The circuit landed in the antennal lobe, the gnathal
-ganglion and the nerve cord; one optic-lobe neuron. Not done: hub splitting applied to the
-mapping, a simulation of the placed circuit, and the ~1,300-latch cell target.
+ganglion and the nerve cord; one optic-lobe neuron. Since then (`docs/h1_placement.md`, the
+later sections): the placed adder computes in isolation with the missing edges added and the
+parasitic edges zeroed, and inside the whole brain only with its outputs to the brain silenced;
+splitting the broadcast neurons and scoring quiet hosts each help a little and do not add up;
+and one 8-bit kernel cell (3,170 neurons, 375 latches) places at 53 %.
+
+**The ceiling.** A one-neuron-per-role placement can use only *disjoint* reciprocal pairs, and
+the maximum matching of MCNS's mutual cholinergic pairs is small (`bench/h1_cell.py`,
+`latch_capacity`):
+
+| weight bound k_max | loop needs ≥ synapses | mutual pairs | distinct members | **disjoint pairs (max matching)** | strong-edge core |
+|---|---|---|---|---|---|
+| 4 (H0 policy) | 57 | 1,223 | 771 | **343** | 3,197 |
+| 8 | 29 | 4,292 | 2,432 | **1,047** | 10,131 |
+| 16 | 15 | 12,315 | 6,979 | **2,896** | 22,347 |
+
+One 8-bit cell needs 375 latches, the 16-cell pixel kernel ~5,300, the three Doom kernels
+together ~35,000 (443k neurons at ~13 neurons per latch-equivalent). So under the H0 bound
+the fly's wiring can host *one cell's* latches (nearly: 343 of 375); at sixteen times the
+anatomical weight it can host about half of one pixel kernel; and no bound tested reaches a
+Doom kernel, let alone three. That is the measured capacity statement for Profile 2 with one
+real neuron per designed neuron: a Doom-shaped engine on the fly's own synapses needs either
+time-multiplexing (the sequencer's few-hundred-latch machine, at ~1/30 the speed of the
+kernels), or latches built from something other than reciprocal pairs (a longer cycle, or a
+population), or the Profile 3 label.
 
 **Is the fly's visual system involved? No, and it would be a poor host.** Of the 166,700
 loaded neurons, 105,265 (63 %) are visual-system neurons (optic-lobe intrinsic, visual

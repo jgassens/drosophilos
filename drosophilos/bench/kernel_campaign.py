@@ -63,7 +63,7 @@ def main():
     ap.add_argument("--copies", type=int, default=100)
     ap.add_argument("--mix", default="B")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--max-ms", type=float, default=90000)
+    ap.add_argument("--max-ms", type=float, default=30000, help="ceiling on the neural time (the run stops when every copy has delivered)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
