@@ -39,7 +39,7 @@ def rail_of(state) -> int:
 
 def set_input(net: Netlist, drive: Drive, name: str, state) -> int:
     """The neuron one ignition pulse goes into to set `state`: a latch's own `u`; for a
-    flip-flop the trigger of a fresh set chain (three pulses into u), since one pulse into
+    flip-flop the trigger of a fresh set chain (a train of SET_TRAIN_PULSES pulses into u, four since the lockstep fix), since one pulse into
     its u never sets it (docs/a1_flipflop.md)."""
     if isinstance(state, FlipFlop):
         return add_set_chain(net, drive, name, state)

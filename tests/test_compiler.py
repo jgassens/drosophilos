@@ -66,7 +66,7 @@ def test_neural_machine_runs_compiled_program():
     gold = _expected_state(prog, inputs)
     dmem = {prog.ports["in"]: inputs[0]}
     ref = reference_run(words, m.n, m.a, dmem, max_steps=2000)
-    run, sim = run_machine(m, PARAMS, words, dmem, max_ms=1000 * (len(ref["trace"]) + 4))
+    run, sim = run_machine(m, PARAMS, words, dmem, max_ms=1400 * (len(ref["trace"]) + 4))  # the cycle is ~1.17 s since the 09-14 review fixes (commit guard, fetch at +166 ms); 1,000 ms per instruction cut the run two instructions short
     got = [v for _, v in run.commits]
     exp = [v for _, v in ref["trace"]]
     assert got == exp, (got[:20], exp[:20], run.faults, run.timeouts)
@@ -133,7 +133,7 @@ def test_neural_machine_runs_array_program():
     m = build_machine(PARAMS, n=prog.width, n_prog=n_prog, n_data=n_data, x_word=prog.ports["x"])
     dmem = {prog.variables[f"a[{k}]"]: v for k, v in enumerate((3, 1, 4, 1))}
     ref = reference_run(words, m.n, m.a, dmem, max_steps=3000, x_word=prog.ports["x"])
-    run, sim = run_machine(m, PARAMS, words, dmem, max_ms=1100 * (len(ref["trace"]) + 4))
+    run, sim = run_machine(m, PARAMS, words, dmem, max_ms=1500 * (len(ref["trace"]) + 4))  # see above: the indexed cycle is longer still
     assert [v for _, v in run.commits] == [v for _, v in ref["trace"]], (run.faults, run.timeouts)
     final = dict(dmem)
     for _, k, v in run.writes:

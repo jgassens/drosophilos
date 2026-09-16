@@ -171,7 +171,7 @@ def two_proxied_flipflop_netlist():
     f0 = add_flipflop(net, drive, "F0", proxy=True)
     f1 = add_flipflop(net, drive, "F1", proxy=True)
     relay = add_edge_relay(net, drive, "r1", f0.rail)
-    trigger = add_set_chain(net, drive, "F1", f1)
+    trigger = add_set_chain(net, drive, "F1", f1, pulses=3)  # the synthetic connectome plants a 3-relay chain (T, R1, R2); the default train is 4 pulses since the lockstep fix
     net.synapse(relay, trigger, drive.ignite)
     ids = {"u0": f0.u, "v0": f0.v, "p0": f0.p, "u1": f1.u, "v1": f1.v, "p1": f1.p, "edge": relay, "edge_inh": relay + 1,
            "set": trigger, "set_relay1": trigger + 1, "set_relay2": trigger + 2}

@@ -116,7 +116,8 @@ def test_register_clears_at_every_phase_and_holds_two_seconds():
         train = _spikes(sim, n, 6000, 26000)
         assert abs(len(train) / 2.0 - 213) < 5 and set(np.diff(train).tolist()) == {drive.loop_period_steps}
     tu, tp = _spikes(sim, R.rails[1][1].u, 6000, 26000), _spikes(sim, R.rails[1][1].p, 6000, 26000)
-    assert len(tu) == len(tp) and len(set((tp - tu).tolist())) == 1 and 0 <= int(tp[0] - tu[0]) < drive.loop_period_steps
+    k = min(len(tu), len(tp))  # p lags u by a few ms, so the window's edge can hold one u spike whose p spike is outside it
+    assert abs(len(tu) - len(tp)) <= 1 and len(set((tp[:k] - tu[:k]).tolist())) == 1 and 0 <= int(tp[0] - tu[0]) < drive.loop_period_steps
     for ph in range(0, 47, 2):
         t = 3000 + ph
         sim = run(load + [(t, R.reset_trigger, drive.ignite)], 420)
