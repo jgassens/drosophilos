@@ -515,9 +515,11 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
             spec.stream_keys[ivar] = key
     spec.phases = None
     if pacing == "neural":
-        # Stage F2, first step: a wrapping counter per inner stream (cnt = cnt == K-1 ? 0 : cnt + 1,
-        # requested by the pass's output cell), the phases in program order, the tick last.
-        # `counts[stream]` is the number of tokens of that stream per frame on this copy.
+        # Stage F2, first step: a one-hot ring counter per inner stream (a RING pseudo-cell: K
+        # lines advanced one per done of each trigger cell, wrapping every K tokens; it is no
+        # reader of the triggers, so it holds none of their commits — `lib.kernel.add_pacing_ring`),
+        # the phases in program order, the tick last. `counts[stream]` is the number of tokens of
+        # that stream per frame on this copy: an image constant, as the ring's K lines are.
         phases = []
         for idx, (_, ib, ivar, _, _) in enumerate(inners):
             key = "input" if idx == 0 else f"input:{ivar}"
@@ -531,13 +533,8 @@ def compile_program(prog: Program, params: dict | None = None, fn: str = "main",
             # later pass writing the same word would otherwise overlap or overtake it (review 10.2)
             trig = [out_cell] + [c["name"] for c in spec.cells if c["stream"] == key and c["op"] == "STORE" and c["name"] != out_cell]
             pfx = f"ph{idx}_"
-            spec.consts[f"k{K - 1}"] = K - 1
-            spec.consts["k1"] = 1
-            spec.consts["k0"] = 0
-            spec.cells.append({"name": f"{pfx}xor", "op": "XOR", "a": f"{pfx}cnt", "b": ("const", f"k{K - 1}"), "stream": key, "trigger": trig})
-            spec.cells.append({"name": f"{pfx}add", "op": "ADD", "a": f"{pfx}cnt", "b": ("const", "k1"), "stream": key, "trigger": trig})
-            spec.cells.append({"name": f"{pfx}cnt", "op": "SEL", "a": f"{pfx}add", "b": ("const", "k0"), "c": f"{pfx}xor", "stream": key, "init": 0})
-            phases.append((kname, f"{pfx}cnt", "wrap"))
+            spec.cells.append({"name": f"{pfx}ring", "op": "RING", "k": K, "stream": key, "trigger": trig})
+            phases.append((kname, f"{pfx}ring", "wrap"))
         # the tick phase ends when the tick kernel's last state carrier has landed (its done), or
         # at the token's done if the tick kernel has no cells
         tick_cells = [c["name"] for c in spec.cells if c["stream"] == okey]
@@ -590,7 +587,7 @@ def kernel_outputs(spec: KernelSpec, tokens: list[int]) -> list[list[int]]:
             return prev[s_]  # a feedback read: the previous token's value
 
         for c in spec.cells:
-            if c.get("stream", "input") != key:
+            if c.get("stream", "input") != key or c["op"] == "RING":  # a pacing ring carries no value
                 continue
             if c["op"] == "LOAD":
                 m = spec.mems[c["mem"]]

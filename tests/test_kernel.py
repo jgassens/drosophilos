@@ -614,14 +614,107 @@ def test_compiler_rejects_what_the_kernels_cannot_carry():
     assert "SEL" in [c["op"] for c in ks.cells]
 
 
+def test_neural_pacing_compiles_a_ring_per_pass():
+    """The phase counter is a RING pseudo-cell (K lines, advanced by the pass's last output and
+    every STORE), not the three ALU cells of the first step: no cell of the pass gets a reader,
+    so commit gating holds nothing back for the count. The reference skips the rings."""
+    from drosophilos.compiler.kernel import compile_program, kernel_outputs
+    prog = compile_c(TWO_PASS)
+    host = compile_program(prog, params={"heading": 1})
+    ks = compile_program(prog, params={"heading": 1}, pacing="neural", counts={"input": 4, "p": 8})
+    rings = [c for c in ks.cells if c["op"] == "RING"]
+    assert [(c["name"], c["k"], c["stream"], c["trigger"]) for c in rings] == [("ph0_ring", 4, "input", ["c3_store"]), ("ph1_ring", 8, "input:p", ["c1_3_add"])]
+    assert ks.phases == [("input", "ph0_ring", "wrap"), ("p", "ph1_ring", "wrap"), ("f", "f0_add", "each")]
+    assert [c for c in ks.cells if c["op"] != "RING"] == host.cells and ks.consts == host.consts  # the pass itself is untouched
+    assert not [c for c in ks.cells if c["name"].startswith("ph") and c["op"] in ("XOR", "ADD", "SEL")]
+    for c in ks.cells:  # a ring is nobody's source: no cell reads it, so no commit waits on it
+        assert all(c.get(k) not in ("ph0_ring", "ph1_ring") for k in ("a", "b", "c"))
+    pix = [(r << 2) | c for r in range(2) for c in range(4)]
+    sched, _ = two_pass_schedule(ks, 2, range(4), pix)
+    assert kernel_outputs(ks, [(s, v) for s, v, _ in sched]) == kernel_outputs(host, [(s, v) for s, v, _ in sched])
+    with pytest.raises(NotAKernel):
+        compile_program(prog, params={"heading": 1}, pacing="neural", counts={"input": 4})  # every inner stream needs its count
+
+
+def test_pacing_ring_wraps_every_k_tokens():
+    """A two-cell pass (K = 3) and a one-cell tick, built by hand: the ring advances at every
+    done of its trigger and wraps at the third, the wrap closes the pass's phase and opens the
+    tick's, the tick's done reopens the pass's; the register's commits run at the pipeline's own
+    pace (the ring holds no commit). One trigger for the pass; the tick's is 'each'."""
+    from drosophilos.sim.ref64 import RefSim
+    K, n, frames = 3, 4, 3
+    spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "k1"), "stream": "input"},
+            {"name": "c2", "op": "XOR", "a": "c1", "b": ("const", "k3"), "stream": "input"},
+            {"name": "f1", "op": "MOV", "a": "input:f", "b": "input:f", "stream": "input:f"},
+            {"name": "ph0_ring", "op": "RING", "k": K, "stream": "input", "trigger": ["c2"]}]
+    pl = build_pipeline(PARAMS, n, spec, consts={"k1": 1, "k3": 3}, outputs=["c2", "f1"], streams=["input", "f"],
+                        phases=[("input", "ph0_ring", "wrap"), ("f", "f1", "each")])
+    assert pl.net.n < 6000, pl.net.n
+    lines = pl.rings["input"][0]
+    watch = {"wrap": pl.phase_ends["input"], "done": pl.cells[1].reg.done_relay, "commit": pl.net.roles.index("input.commit_pulse"),
+             "ok_in": pl.phase_ok["input"][1].u, "ok_f": pl.phase_ok["f"][1].u, **{f"l{k}": lines[k][1].u for k in range(K)}}
+
+    class Watched(RefSim):  # the runner trims old spikes; keep these neurons' rises
+        def __init__(self):
+            super().__init__(pl.net.topology(), PARAMS)
+            self.rec = {u: [] for u in watch.values()}
+
+        def step(self):
+            b = len(self._spk_step)
+            super().step()
+            for k in range(b, len(self._spk_step)):
+                for u in self._spk_neuron[k].tolist():
+                    if u in self.rec:
+                        self.rec[u].append(int(self._spk_step[k][0]))
+
+    # the host deals each frame behind the previous frame's tick output (a two-phase schedule
+    # has no held token to stop it dealing the next frame's tokens into the open, draining pass)
+    sched = []
+    for f in range(frames):
+        sched += [("input", K * f + i, f * (K + 1) if i == 0 else 0) for i in range(K)] + [("f", f, 0)]
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=40000, expect_outputs=frames * (K + 1), sim=Watched())
+    assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0, st
+    assert [v for _, v in st["outputs_by_cell"]["c2"]] == [((K * f + i + 1) ^ 3) & 15 for f in range(frames) for i in range(K)]
+    order = [c for _, c in sorted((s, c) for c, lst in st["outputs_by_cell"].items() for s, _ in lst)]
+    assert order == (["c2"] * K + ["f1"]) * frames, order  # the tick waits for the wrap, the next frame for the tick
+
+    def rises(u, gap_ms=300):
+        out, last = [], -10**9
+        for s in sim.rec[u]:
+            if s - last > gap_ms / PARAMS.dt:
+                out.append(s * PARAMS.dt)
+            last = s
+        return out
+
+    done, wrap = rises(watch["done"]), rises(watch["wrap"])
+    assert len(done) == K * frames and len(wrap) == frames, (done, wrap)
+    for f, w in enumerate(wrap):  # one wrap per K dones, within 50 ms of the K-th (the old counter: ~5 s)
+        assert 0 < w - done[K * f + K - 1] < 50, (f, w, done)
+    for k in range(K):  # line k lights at the k-th done of every frame (line 0: by the image, then at each wrap)
+        lit = rises(watch[f"l{k}"])
+        if k == 0:
+            assert lit[0] < 10 and lit[1:] == wrap, (lit, wrap)
+        else:
+            assert len(lit) == frames and all(0 <= lit[f] - done[K * f + k - 1] < 50 for f in range(frames)), (k, lit, done)
+    ok_in, ok_f = rises(watch["ok_in"]), rises(watch["ok_f"])
+    assert len(ok_f) == frames and all(0 <= o - w < 20 for o, w in zip(ok_f, wrap)), (ok_f, wrap)  # the wrap opens the tick's phase
+    assert ok_in[0] < 10 and len(ok_in) == frames and all(o > w for o, w in zip(ok_in[1:], wrap)), (ok_in, wrap)  # and the tick reopens the pass's (the run ends at the last tick's output, before it does)
+    starts = rises(watch["commit"])  # the register's commit pulses: one per token
+    assert len(starts) == K * frames
+    within = [b - a for a, b in zip(starts, starts[1:]) if b - a < 3000]  # the gaps inside a frame (between frames: the host's barrier)
+    assert len(within) == frames * (K - 1) and max(within) < 1500, within  # the pass runs at its own pace, no commit waits for the count
+
+
 @pytest.mark.slow
 def test_neural_pacing_replaces_the_host_barriers():
     """Stage F2, first step: the phase order (columns, pixels, tick) is enforced by phase gates in
-    the substrate; the host deals the tokens in program order with no barrier at all."""
+    the substrate; the host deals the tokens in program order with no barrier at all. The phase
+    counters are one-hot rings (24,721 neurons; the three-cell ALU counters made it 36,880)."""
     from drosophilos.compiler.kernel import compile_program, kernel_outputs
     prog = compile_c(TWO_PASS)
     ks = compile_program(prog, params={"heading": 1}, pacing="neural", counts={"input": 4, "p": 8})
-    assert ks.phases == [("input", "ph0_cnt", "wrap"), ("p", "ph1_cnt", "wrap"), ("f", "f0_add", "each")]
+    assert ks.phases == [("input", "ph0_ring", "wrap"), ("p", "ph1_ring", "wrap"), ("f", "f0_add", "each")]
+    assert len(ks.cells) == 11  # nine cells and two rings
     pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs, streams=ks.streams, phases=ks.phases)
     pix = [(r << 2) | c for r in range(2) for c in range(4)]
     sched = []

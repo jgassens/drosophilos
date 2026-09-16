@@ -178,6 +178,68 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
     guarded_pulse(net, drive, f"{name}.g", cur, always, target)
 
 
+def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulses: list[int], image: list) -> tuple[list, int]:
+    """A one-hot ring counter of K lines per advance source, and one wrap pulse.
+
+    Neural pacing counts a phase's tokens; the count was a state cell fed back through an
+    adder and a compare (three handshakes per token), and as a *reader* of the pass's output
+    cells it held their commits until it had started, so every token waited for its loop
+    (measured: ~7 s of neural time per token against ~1.5-3 s host-paced). A ring holds no
+    datapath and no commit: the count is which line is lit. Each line is a kill pair [dark,
+    lit]; line 0 is lit at power-up, the others dark (the image). One advance pulse (a done
+    relay's spike) drives K veto relays at once, `inc{k}` vetoed by line k's dark rail, so only
+    the lit line's relay passes: it ignites line k+1's lit rail and line k's dark rail (each
+    pair's own kill train clears the other rail). `inc{K-1}` also fires the wrap. A line's
+    dark rail is a level established >= ~300 ms before the next advance (a cell's cycle), which
+    is the veto relay's ordering assumption; a relay vetoed at one advance is driven again
+    >= 300 ms later, past its 55 ms recovery.
+
+    Every source gets a ring of its own: the sources (a pass's last output and every STORE
+    of the pass) fire once per token each but can run several tokens apart in a deep
+    dataflow, and a ring shared through one pulse neuron would lose two dones that fall within
+    one hop. With one ring per source no two advances of a ring are closer than the source
+    cell's own cycle. The phase's wrap is the join of the rings' wraps: each sets a kill pair
+    [not wrapped, wrapped], a chained guard pulses the wrap when all are set, and that pulse
+    clears them. A ring cannot lap another before the join fires: the phase's gate closes at
+    the wrap and the host deals the next frame's tokens of this stream only after the other
+    phases' tokens. Returns (lines, wrap): `lines[j][k]` is the k-th pair of source j's ring."""
+    rings, wraps = [], []
+    for j, src in enumerate(advance_pulses):
+        pre = f"{name}.s{j}"
+        lines = [add_kill_pair(net, drive, f"{pre}.l{k}") for k in range(K)]
+        image.append(lines[0][1])
+        image.extend(l[0] for l in lines[1:])
+        adv = net.neuron(f"{pre}.adv")
+        net.synapse(src, adv, drive.relay_in)
+        wrap = net.neuron(f"{pre}.wrap")
+        for k, line in enumerate(lines):
+            nxt = lines[(k + 1) % K]
+            relay = add_veto_relay(net, drive, f"{pre}.inc{k}", adv, [line[0].u], nxt[1])
+            if K > 1:  # K == 1: the line stays lit (re-ignition is harmless) and every advance wraps
+                net.synapse(relay, line[0].u, drive.ignite)
+            if k == K - 1:
+                net.synapse(relay, wrap, drive.ignite)
+        rings.append(lines)
+        wraps.append(wrap)
+    if len(wraps) == 1:
+        return rings, wraps[0]
+    wrapped = []
+    for j, w in enumerate(wraps):
+        pr = add_kill_pair(net, drive, f"{name}.s{j}.wrapped")  # [not wrapped this frame, wrapped]
+        net.synapse(w, pr[1].u, drive.ignite)
+        image.append(pr[0])
+        wrapped.append(pr)
+    pulse = net.neuron(f"{name}.join.pulse")
+    _chain_true(net, drive, f"{name}.join", wrapped, pulse, image, pulse)
+    for pr in wrapped:
+        net.synapse(pulse, pr[0].u, drive.ignite)
+    add_kill_train(net, drive, f"{name}.join.kill", pulse, [pr[1] for pr in wrapped])
+    # the chained guard's two paths (and a passed pair's) can each fire: measured, three sources
+    # 100 ms apart gave three pulses over 18 ms; the relay makes the wrap one pulse (the pair
+    # resets above take the repeats as one event, as a commit pulse's consumers do)
+    return rings, add_edge_relay(net, drive, f"{name}.wrap", pulse, fast_inhibitor=True)
+
+
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
@@ -186,12 +248,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
     stream names (default ["input"]; a stream NAME is the source "input:NAME"). `phases`:
-    neural pacing (Stage F2's first step) — [(stream, counter cell or None), ...] in the order
-    the phases run each frame: a stream's register commits only while its phase's OK pair is
-    true; the pair is set by the previous phase's end and cleared by this phase's end, where a
-    phase ends when its counter cell (a wrapping count of the phase's tokens, built by the
-    compiler) returns to zero, or, with no counter, at each token's done. The host then only
-    deals tokens in program order; the phase order is the substrate's."""
+    neural pacing (Stage F2's first step) — [(stream, name, mode), ...] in the order the phases
+    run each frame: a stream's register commits only while its phase's OK pair is true; the
+    pair is set by the previous phase's end and cleared by this phase's end. Mode "wrap": the
+    name is a RING pseudo-cell of `spec` ({"name", "op": "RING", "k", "trigger", "stream"}, the
+    compiler's per-stream token count K and the cells whose dones count a token) and the phase
+    ends when its ring (`add_pacing_ring`) wraps, every K tokens; mode "each": the phase ends at
+    every done of the named cell (None: of the stream's register). The host then only deals
+    tokens in program order; the phase order is the substrate's."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
@@ -240,7 +304,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     cells: dict[str, Cell] = {}
     order: list[Cell] = []
     expanded = []
+    ring_specs = {cs["name"]: cs for cs in spec if cs["op"] == "RING"}  # pacing rings: no cell, built with the phases
     for cs in spec:
+        if cs["op"] == "RING":
+            continue
         if cs["op"] == "MULP":  # a pipelined multiplier: n row cells, the last one named as the cell
             assert cs.get("init") is None, "a MULP cell cannot carry state"
             for j in range(n):
@@ -528,26 +595,27 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
 
     for c in order:
         c.commit_pulse = gate_commit(c.name, c.creq, c.reg.commit_in, [r for r in order if c.name in r.reqs])
-    ok_pairs = {}
+    ok_pairs, rings, phase_ends = {}, {}, {}
     if phases:
         for ph in phases:
             ok_pairs[ph[0]] = add_kill_pair(net, drive, f"PHASE.{ph[0]}.ok")  # [not this phase, this phase]
         image.append(ok_pairs[phases[0][0]][1])  # the first phase is open at power-up
         for k, ph in enumerate(phases):
-            st, counter, mode = (ph + ("wrap",))[:3]
+            st, name_, mode = (ph + ("wrap",))[:3]
             nxt = phases[(k + 1) % len(phases)][0]
-            # the phase's end pulse: "wrap" — the counter's done delayed 6 hops (its master's Z
-            # rail is established by then), vetoed by Z0 (count != 0); "each" — every done of the
-            # named cell (a tick phase ends when the tick kernel's state has landed, not when the
-            # tick token did: measured, the next frame's columns read the old heading otherwise)
-            cc = cells[counter] if counter is not None else None
-            if cc is not None and mode == "wrap":
-                drv = add_delay_chain(net, drive, f"PHASE.{st}.endd", cc.reg.done_relay, 6)
-                end = net.neuron(f"PHASE.{st}.end")
-                add_veto_relay(net, drive, f"PHASE.{st}.wrap", drv, [cc.master.rails[n + 1][0].u], _N(end))
+            # the phase's end pulse: "wrap" — the ring's wrap, every K tokens, the ring advanced by
+            # the trigger cells' done relays (which hold no commit: the pass pipelines at full
+            # speed; the cells' own readers are unchanged); "each" — every done of the named cell
+            # (a tick phase ends when the tick kernel's state has landed, not when the tick token
+            # did: measured, the next frame's columns read the old heading otherwise)
+            if mode == "wrap":
+                rs = ring_specs[name_]
+                advs = [cells[t].reg.done_relay for t in rs["trigger"]]
+                rings[st], end = add_pacing_ring(net, drive, f"PHASE.{st}.ring", rs["k"], advs, image)
             else:
-                src_done = cc.reg.done_relay if cc is not None else inputs[st][0].done_relay
+                src_done = cells[name_].reg.done_relay if name_ is not None else inputs[st][0].done_relay
                 end = add_delay_chain(net, drive, f"PHASE.{st}.endd", src_done, 6)
+            phase_ends[st] = end
             for pr, r in ((ok_pairs[st], 0), (ok_pairs[nxt], 1)):  # this phase closes, the next opens
                 net.synapse(end, pr[r].u, drive.ignite)
             add_kill_train(net, drive, f"PHASE.{st}.kill", end, [ok_pairs[st][1], ok_pairs[nxt][0]])
@@ -571,6 +639,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()})
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
+    pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 
 

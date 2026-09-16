@@ -486,28 +486,91 @@ plane). Now the order is the substrate's. Each phase has an OK pair (a kill pair
 is open"); a stream's input register commits a token only while its phase is open (the pair
 joins the register's commit chain like a reader's "free" rail). A phase ends with a pulse
 that closes its pair and opens the next one: for a pass of K tokens per frame, the compiler
-adds a wrapping counter (three cells: `cnt = cnt == K−1 ? 0 : cnt + 1`, requested by the
-pass's output cell) and the end pulse is the counter's done, delayed 32 ms, vetoed by the
-count's "not zero" rail; the tick phase ends at the tick kernel's state landing (its state
-carrier's done — measured: ending it at the tick *token's* landing let the next frame's
-columns read the old heading). The first phase is open at power-up.
+adds a one-hot ring counter (§11.1) whose wrap, every K tokens, is the end pulse; the tick
+phase ends at the tick kernel's state landing (its state carrier's done — measured: ending
+it at the tick *token's* landing let the next frame's columns read the old heading). The
+first phase is open at power-up.
 
 The host then only deals tokens in program order, as fast as each register's READY allows;
 tokens for a closed phase wait in their register's stage. Measured on the two-pass renderer
-(three kernels, 36,880 neurons with the two counters): two frames, sixteen pixels and two
-frame records equal to the interpreter's, no fault, with a barrier-free schedule
+(three kernels, 36,880 neurons with the two ALU counters of the first step; 24,721 with the
+rings): two frames, sixteen pixels and two frame records equal to the interpreter's, no
+fault, with a barrier-free schedule
 (`tests/test_kernel.py::test_neural_pacing_replaces_the_host_barriers`). What stays with
 the host: dealing tokens to copies, the per-copy token counts (image constants), and the
 tick's *input* (the game's controls, which are input by definition). The benchmark label
 for the frame loop's ordering moves from *hybrid* to *neural*; the dealing stays hybrid.
 Both drivers take `--pacing neural` (`bench/render_doom.py` deals columns,
 `bench/render_game.py` pixels); the per-copy counts are image constants, so the columns or
-pixels must divide evenly across the copies. The phase counter is requested by every STORE
-of the pass as well as its last output (a STORE deeper in the dataflow than the last output
-would otherwise land after its phase had ended; the review of §10.1's round found it).
-Measured on the Doom-shaped program itself (`doom1.c`, 93 cells with the two counters,
+pixels must divide evenly across the copies. The phase counter counts every STORE of the
+pass as well as its last output (a STORE deeper in the dataflow than the last output would
+otherwise land after its phase had ended; the review of §10.1's round found it).
+Measured on the Doom-shaped program itself (`doom1.c`, 93 cells with the two ALU counters,
 482,596 neurons, one CPU copy on Juno): two frames of a 4 × 3 sample under neural pacing,
 every pixel equal to the reference, no fault, 279 s of neural time (job 405122).
+
+### 11.1 The counter is a ring, not a datapath (2026-09-16)
+
+The first step's counter was three cells, `xor` (cnt == K−1), `add` (cnt + 1) and `cnt` (a
+select with state), and it cost the pass its speed: a pass ran at ~7 s of neural time per
+token under neural pacing (doom2 on the H200: 1,932 s for 260 tokens per copy; doom1 at 4 × 3:
+279 s for 26 tokens) against ~1.5–3 s per token host-paced, for the same kernels. Two
+reasons, both structural. The count was a state cell fed back through the other two, so each
+token's count was a three-handshake round trip (~5 s); and the counter was a *reader* of the
+pass's output cell and STOREs, so commit gating (§2: a producer rewrites its master only once
+every reader has started on the previous value) made those cells wait for the counter to
+start before each rewrite. Every token of the pass waited for the counter's loop, and the tick
+kernel was gated the same way.
+
+Now the count is a one-hot ring (`lib/kernel.add_pacing_ring`): K lines, each a kill pair
+[dark, lit], line 0 lit at power-up like the machine's PC ring. One advance pulse — the
+trigger cell's done relay — drives K veto relays at once, `inc k` vetoed by line k's dark
+rail, so only the lit line's relay passes: it ignites line k+1's lit rail and line k's dark
+rail (each pair's own kill train clears the other rail), and `inc K−1` also fires the wrap.
+The ring has no datapath and holds no commit: its relays listen to the done rails the way a
+request pair does, but no cell's commit guard waits on them, so the pass pipelines at its own
+speed. A line's dark rail is a level that stands for the whole of a cell's cycle (≥ 300 ms)
+before the next advance, which is the veto relay's ordering assumption (§2), and a relay
+vetoed at one advance is driven again ≥ 300 ms later, past its 55 ms recovery.
+
+Every trigger cell gets a ring of its own. The triggers (the pass's last output and every
+STORE) each fire once per token but can run several tokens apart in a deep dataflow, and a
+ring shared through one advance neuron would lose two dones that fell within one hop; with one
+ring per trigger no two advances of a ring are closer than the cell's own cycle. The phase's
+end is the join of the rings' wraps: each wrap sets a kill pair [not wrapped, wrapped], the
+chained guard of §2 pulses when all are set, and that pulse clears them (measured: three rings
+wrapping 100 ms apart gave three guard pulses over 18 ms — the two paths of the guard and a
+passed pair — so the end passes through an edge relay and is one pulse). A ring cannot lap
+another before the join fires: the phase's gate closes at the wrap, and the host deals the
+next frame's tokens of this stream only after the other phases' tokens, which wait one per
+register stage. The compiler emits the ring as a `RING` pseudo-cell (`{pfx}ring`: K, the
+trigger cells, the stream); it is nobody's source, the reference skips it, and K stays an
+image constant (the ring has K lines). Cost: ~17 neurons and ~30 synapses per line (a kill
+pair, a veto relay, its kill train), 4,400 neurons for doom2's 260-token pixel ring against
+the 12,000 the two ALU counters cost the two-pass renderer.
+
+Measured on the tiny pass of `test_pacing_ring_wraps_every_k_tokens` (two cells, K = 3, a
+one-cell tick, 5,546 neurons, RefSim): the ring advances 4 ms after every done of its trigger
+and wraps 13 ms after the third, sixth and ninth; the wrap opens the tick's phase within 4 ms,
+the tick's done reopens the pass's; the register commits every 750–1,000 ms inside a frame,
+which is the two-cell pass's own pace (the ALU counter's phase end came ~5 s after the K-th
+done). With both cells as triggers (the join) the wrap comes 146 ms after the later ring's.
+The two-pass renderer compiles to nine cells and two rings (`ph0_ring`, K = 4, on the column
+STORE; `ph1_ring`, K = 8, on the pixel output); 24,721 neurons where the counters made it
+36,880. Per-token figure on the cluster, before → after: **TODO (orchestrator: fill in from
+the cluster run of doom1 4 × 3 and doom2 on the H200; before: 279 s / 26 tokens = 10.7 s,
+1,932 s / 260 tokens = 7.4 s).**
+
+One caveat the tiny test exposed, and it is the host's, not the ring's: with a program of
+one inner loop and the tick (two phases), the host deals the next frame's first pass token
+right after the tick token, while the pass's phase is still open draining its last token —
+nothing holds that token back, since the tick's register takes its one token into its stage
+and lights READY for the pass again. The token commits before the tick has landed and reads
+the old parameter. The three-phase renderers cannot do this (the next phase's register holds
+its first token and its READY stays dark until that phase opens), and the ALU counter had the
+same exposure with a longer drain; a one-inner-loop program under neural pacing (`game.c`,
+`bench/render_game.py --pacing neural`) needs either a host barrier on the frame's first
+token or a third phase. The fast test deals each frame behind the previous tick's output.
 
 ## 8. What it is not yet
 
