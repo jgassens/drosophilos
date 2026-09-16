@@ -4,7 +4,7 @@ model; `docs/capacity_doom.md` §3).
 A pipeline is a graph of cells. Every cell owns a master register (its output value, a
 level) and a datapath on the levels of its sources:
 
-    requests (one kill pair per source: its done pulse) + IDLE -> start pulse -> ACT, ACT^d
+    requests (one dual-rail pair per source: its done pulse) + IDLE -> start pulse -> ACT, ACT^d
     -> operand gates sample the sources -> ALU / RAM read / select -> stage -> commit
     request -> commit once every consumer has started on the previous value -> master
     rewritten -> done pulse -> the consumers' requests
@@ -78,7 +78,7 @@ class Cell:
     master: Register | None = None
     act: Latch | None = None
     stage: Register | None = None
-    reqs: dict = field(default_factory=dict)  # source name -> kill pair [no request, pending]
+    reqs: dict = field(default_factory=dict)  # source name -> rail pair [no request, pending]
     idle: list = None
     creq: list = None
     start: int = -1
@@ -255,7 +255,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     compiler's per-stream token count K and the cells whose dones count a token) and the phase
     ends when its ring (`add_pacing_ring`) wraps, every K tokens; mode "each": the phase ends at
     every done of the named cell (None: of the stream's register). The host then only deals
-    tokens in program order; the phase order is the substrate's."""
+    tokens in program order; the phase order is the substrate's. `relight_requests` opts into
+    request-priority pairs and a delayed repair of dark no-request rails (see §10.5); False
+    retains the original kill pairs and netlist."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
@@ -367,11 +369,25 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     built = set()
     for c in order:
         for src in c.request_sources:
-            pair = add_kill_pair(net, drive, f"{c.name}.req.{src}")
+            req_name = f"{c.name}.req.{src}"
+            if relight_requests:
+                # Request-priority storage: only START may clear a pending request. A
+                # repair of false must NEVER launch the opposite rail's kill train.
+                pair = [add_latch(net, drive, f"{req_name}r{r}") for r in (0, 1)]
+            else:
+                pair = add_kill_pair(net, drive, req_name)
             c.reqs[src] = pair
             trig = net.neuron(f"{c.name}.trigger.{src}")
             net.synapse(done_of(src), trig, drive.relay_in)
             net.synapse(trig, pair[1].u, drive.ignite)
+            if relight_requests:
+                # Match the true rail's one ignition hop, but do not drive k1 from its
+                # sustained train: after START, a new DONE can arrive before that train's
+                # edge detector has had ~86 ms of silence. Distinct DONE pulses themselves
+                # are a source cycle apart (>86 ms), so this clear is ready for each one.
+                received = net.neuron(f"{req_name}.received")
+                net.synapse(trig, received, drive.ignite)
+                add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]])
             if stream_of(src) is None and src not in built:  # feedback: the state is there at power-up
                 c.feedback.add(src)
                 image.append(pair[1])
@@ -381,29 +397,25 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
         for l in [c.act, c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
             net.synapse(c.start, l.u, drive.ignite)
-        # The pair's own kill (r0's rise kills r1) is a relay driven by r0's train, and r0 was
-        # silent for only ~60 ms (killed by the request, re-lit by the start), inside its ~86 ms
-        # recovery: the request rail survived (measured). The start pulse kills them itself.
+        # A standard pair's r0-driven kill may not recover during r0's ~60 ms silence
+        # (<86 ms), so START must clear true explicitly. In request-priority pairs it is
+        # the ONLY clear of true: neither the false rail nor its repair can consume a token.
         add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()])
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
-        # §10.5: the start pulse re-lights a request's false rail ~55 ms after that rail's own
-        # kill train; at a 3 sigma corner of the pair the loop does not catch, the pair is dark,
-        # and the row's next IDLE starts it with no request and replays the next word (the
-        # perspective duplicate). An unconditional re-light from ACT^d fixed that and stalled
-        # copies under mix B (a DONE landing between the start and ACT^d had REQ true lit when
-        # the re-light landed). This one is gated: a veto relay driven ~74 ms after the start
-        # (ACT^d + 3 hops, past the veto's 55 ms recovery from the start's kill of REQ true)
-        # re-ignites REQ false only while REQ true is dark -- the (dark, dark) failure -- and is
-        # vetoed by a pending request. Ordering: the earliest legitimate re-rise of REQ true is
-        # the producer's free -> commit guard -> master reset -> done, >= ~150 ms after the
-        # start; one drive per start, >= a cell cycle apart. (Kimi review run-20260916-150155.)
-        # Off by default: the 100-copy mix-B campaign (Juno 408987) gave 0 wrong values in every
-        # block for the first time, but the tick state kernel stalled 22 copies (1,396 / 1,600
-        # against 1,598) and fan-out / render lost a few each — the ordering assumption above
-        # does not hold where a source's done can land within ~74 ms of the reader's start.
-        # `relight_requests=True` keeps the mechanism buildable for the §10.5 reproduction.
+        # §10.5, fourth remedy (opt-in): default tap T = START + (11+3)*5.3 ~= 74 ms,
+        # after the old true rail's kill and the veto's ~55 ms recovery. A true rail live
+        # by T-15 ms vetoes the repair. A later rise need NOT veto it: false has no kill
+        # path to true, and the independent DONE clear above kills false regardless of
+        # the true rail's edge-relay recovery. Its three pulses span ~11 ms and arrive
+        # ~10..22 ms after true's rise; their recovery tail covers a repair landing
+        # within ~15 ms of T. A still later DONE simply clears the already-repaired false.
+        # Thus there is no request-arrival exclusion window around T. Bounded-delay
+        # prerequisites: normal kill/ignite margins, source cycles >86 ms, and IDLE
+        # remains false during this repair/clear interval. As in the original handshake,
+        # a new request must survive the preceding START clear; no repair protects a
+        # request injected into that clear. Custom hop counts must retain these margins.
         if relight_requests:
             relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
             for src, pr in c.reqs.items():

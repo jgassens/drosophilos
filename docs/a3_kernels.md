@@ -632,6 +632,91 @@ attempt needs is an evaluation that cannot straddle a rising `REQ` true: an igni
 the veto's establishment time (a two-stage relay whose second stage is vetoed by the same
 rail 15 ms later), or a tap placed by the source's done rather than the reader's start.
 
+#### Fourth remedy: DONE clears false; only START clears true
+
+`relight_requests=True` now changes the per-source request pair's **clear ownership**.
+The repair still uses the third remedy's single veto relay at `ACT^d + 3` hops: with the
+default 11-hop ACT delay, its tap T is START + 14 × 5.3 ≈ 74 ms. The false rail no longer
+drives a kill train into true. START already has its own explicit kill train into true;
+that is now the only circuit allowed to clear a pending request. A repair can consequently
+never kill true, even if its veto misses a rising request.
+
+The other half matters too. Merely removing false's kill leaves a possible both-live pair:
+true's old kill relay may still be recovering from its preceding sustained train. Its
+~86 ms silence requirement is not met by a new request ~60 ms after START. Instead the
+source's trigger drives a separate one-neuron `req.{src}.received` pulse with the same
+ignite weight as true's ignition. That pulse drives the existing three-pulse `k1` clear of
+false. This preserves the nominal one-hop timing of true's rise without holding the clear's
+edge inhibitor for the duration of the request. Distinct source DONEs are a source cycle
+apart, comfortably beyond 86 ms; the clear is ready even when the stored true rail has only
+just been consumed. Feedback requests initially supplied by the image need no such clear:
+their false rail is not lit by the image.
+
+The candidates and their timing obligations are:
+
+| candidate | assessment |
+|---|---|
+| (a) Two veto evaluations | Four more hops buy ~21 ms: a rise just before T is established at the second evaluation near START + 95 ms. But a rise 5–10 ms before that **second** tap has the same race. The first relay's inhibitor controls repeated firing; it provides no information about a request arriving after the first evaluation. An arrival exclusion or a request-priority clear is still needed. Three hops (~16 ms) have the same problem with less margin. |
+| (b) Harmless repair, selected | Remove the false-to-true kill entirely and retain START's explicit clear. Move true-to-false clearing onto the independent, one-hop DONE receipt pulse. Thus a late repair has no path that can kill a request; DONE's three-pulse clear also prevents a missed veto from leaving false live. Gating the old false-to-true kill by another ordinary veto would merely relocate its ≥15 ms establishment requirement. Re-igniting both latch members as a power-up image would still raise false and launch that old kill. |
+| (c) A source-relative tap | A fixed N-hop delay from DONE gives a known age for that request, but not for its consumption: a join or busy reader can postpone START arbitrarily. At 14 hops (~74 ms) the current request can still be pending; a vetoed repair then cannot fix a later failed START ignition. Increasing N can straddle a subsequent DONE. This needs an additional consumption handshake or an arrival bound that feedback cells do not supply. |
+
+**Bounded-delay argument.** Assume the normal three-pulse kill and sustaining-loop margins,
+distinct source events more than ~86 ms apart, and IDLE false throughout this early part of
+the current run. A new accepted request must survive the preceding START clear, as in the
+existing handshake; requests delivered into that clear are outside this repair's guarantee.
+No minimum distance between DONE and T is assumed. Custom ACT delays must preserve the
+following recovery and busy-period margins.
+
+* True established by T − 15 ms vetoes the repair. The previous request has died roughly
+  10 ms after START, leaving about 64 ms before T, beyond the veto's ~55 ms recovery.
+* If true rises within the establishment window, the repair may fire. Its ignition reaches
+  false within approximately 15 ms of T. The independent receipt clear delivers three
+  pulses approximately 10–22 ms after true's rise, spanning two ~5.3 ms hops. The repair
+  either overlaps this clear or falls inside false's post-kill recovery (even the nominal
+  rail does not recover in the intervening ~10–20 ms; the measured 3 σ corner needs much
+  longer). False cannot sustain after this clear. Any transient false spike has no kill
+  connection to true.
+* If DONE comes after repair, it clears the repaired false rail in the ordinary way. True
+  stays pending until a legitimate START consumes it. The current run's IDLE-false level
+  prevents another START during the repair/clear interval. The producer's next stage also
+  cannot complete within this short interval after its own DONE; a transient false pulse
+  is not permission to publish a second word before the request is consumed.
+
+This removes the dangerous arbitration, rather than assuming the veto always wins it.
+There is no extra delay in sampling, starting, or committing, and no change to IDLE or to
+the default `relight_requests=False` netlist.
+
+**Deterministic evidence.** The original three-token 4-bit MULP reproduction passes with
+its assertions unchanged: the fixed corner produces `[9, 15, 6]`, and zeroing just its
+repair ignition still produces `[9, 15, 15]` with four starts. The added
+`test_request_rising_inside_relight_veto_window_is_not_lost` uses a one-bit MOV, 965 neurons
+per copy including disconnected legacy wiring, two RefSim copies, and 3 s of neural time
+(about 3 s wall). Both copies suppress START's false ignition to impose the dark-rail
+postcondition. They also share a deterministic 3 σ relay corner: veto input/output weights
+×0.88, repair drive ×1.12, and veto-neuron threshold +0.4 mV/bias −0.4 mV. This makes the
+single fresh veto spike insufficient, without relying on random perturbations.
+
+The timed input targets the actual request trigger, 62 ms after the first START. True rises
+5.3 ms before the 74.2 ms tap, and **both** copies' repair relays fire. Copy 0 retains the
+request through IDLE and starts exactly once more, producing two zero-valued MOV results.
+Copy 1 restores the old symmetric pair and its train-driven `k1`: that clear has not
+recovered, the repair raises false, false's kill takes true, and only the first result
+completes. Assertions check the arrival window, both repair firings, the clear's presence
+or absence, the pending true rail at IDLE, and the exact start/output counts. The separate
+MULP regression supplies the physical six-parameter dark-rail failure; this smaller test
+isolates the subsequent lost-request race.
+
+The default one-bit MOV remains **958 neurons / 1,644 synapses** (asserted in the regression);
+the default four-bit MULP remains **7,108 / 12,400**, measured before and after the change.
+The existing pacing-ring test now uses two two-token frames and a 9.9 s ceiling, preserving
+wrap/reopen/reuse checks while keeping the non-slow suite within the neural-time limit.
+The non-slow kernel suite passes (17 passed, the two expected §10.4 xfails); no slow tests
+were run. In the isolated macOS worktree the C golden references needed `TMPDIR` set to
+the worktree, the Command Line Tools `usr/bin` first on `PATH`, and `SDKROOT` set to
+`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`.
+The Juno 100-copy mix-B campaign remains the statistical confirmation; no campaign result
+is claimed for this remedy, and the flag remains off by default.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

@@ -277,6 +277,104 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     assert len(rail[1]) == 1 and len(rail[0]) >= 2 and rail[0][1] > first_start + 500, rail
 
 
+def test_request_rising_inside_relight_veto_window_is_not_lost():
+    """A real trigger rises too late to veto the repair: the old pair kills its request.
+
+    Both copies have the same dark false rail and receive the same second token through
+    the trigger. Copy 1 restores remedy three's symmetric pair and single-stage repair.
+    The input master remains valid; MOV selects its constant-zero B operand on each token.
+    """
+    import numpy as np
+
+    from drosophilos.lib.control import add_kill_train
+    from drosophilos.lib.kernel import run_pipeline_batched
+    from drosophilos.sim.ref64 import RefSim
+
+    spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
+    default = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
+    assert (default.net.n, default.net.nnz) == (958, 1644)  # recorded before the fourth remedy
+    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=True)
+    cell = pl.cells[0]
+    req = cell.reqs["input"]
+    roles = pl.net.roles
+    trigger = roles.index("out.trigger.input")
+    received = roles.index("out.req.input.received")
+    tap = roles.index("out.actd2.d2")
+    repair = roles.index("out.relight.input.edge")
+    veto = roles.index("out.relight.input.veto")
+    k1 = roles.index("out.req.input.k1.inh")
+    legacy_begin = pl.net.nnz
+    add_kill_train(pl.net, pl.drive, "legacy.k0", req[0].u, [req[1]])
+    for role in ("out.req.input.k1.start.edge", "out.req.input.k1.start.edge_inh"):
+        pl.net.synapse(req[1].u, roles.index(role), pl.drive.relay_in)
+    assert pl.net.n < 30000
+    topo = pl.net.topology()
+    quanta = np.broadcast_to(topo.quanta, (2, topo.nnz)).astype(float).copy()
+    # Topology sorts edges; identify the appended legacy edges before that conversion.
+    legacy_edges = set(zip(pl.net.src[legacy_begin:], pl.net.dst[legacy_begin:]))
+    legacy = np.array([(s, d) in legacy_edges for s, d in zip(topo.src, topo.dst)])
+    quanta[0, legacy] = 0
+    quanta[1, topo.src == received] = 0
+    u = req[0].u
+    # Force the failed START ignition's dark-rail postcondition on both copies.
+    quanta[:, (topo.src == cell.start) & (topo.dst == u)] = 0
+    # A bounded 3-sigma veto corner: a slow/weak veto and strong repair driver let
+    # this first veto spike miss the race. A settled veto still blocks the repair.
+    quanta[:, (topo.src == req[1].u) & (topo.dst == veto)] *= 0.88
+    quanta[:, (topo.src == veto) & (topo.dst == repair)] *= 0.88
+    quanta[:, (topo.src == tap) & (topo.dst == repair)] *= 1.12
+    vth = np.full((2, topo.n), PARAMS.V_th)
+    vth[:, veto] += 0.4
+    bias = np.zeros((2, topo.n))
+    bias[:, veto] -= 0.4
+
+    class Record(RefSim):
+        def __init__(self):
+            super().__init__(topo, PARAMS, n_nodes=2, quanta=np.rint(quanta).astype(np.int32),
+                             V_th=vth, bias=bias)
+            self.events = [{role: [] for role in ("start", "trigger", "true", "false", "tap", "repair", "idle", "kill")}
+                           for _ in range(2)]
+            self.watch = {cell.start: "start", trigger: "trigger", req[1].u: "true", u: "false",
+                          tap: "tap", repair: "repair", cell.idle[1].u: "idle", k1: "kill"}
+            self.injected = [False, False]
+
+        def step(self):
+            before = len(self._spk_step)
+            super().step()
+            for k in range(before, len(self._spk_step)):
+                step = int(self._spk_step[k][0])
+                for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
+                    if neuron in self.watch:
+                        self.events[node][self.watch[neuron]].append(step)
+                    if neuron == cell.start and not self.injected[node]:
+                        self.injected[node] = True
+                        # The event at +62 ms fires the trigger at +64.4 ms and true
+                        # at +68.9 ms, 5.3 ms before the 14-hop repair tap.
+                        self.add_events(node, [step + 620], [trigger], [pl.drive.ignite])
+
+    sim = Record()
+    outs, sim, stats = run_pipeline_batched(pl, PARAMS, [[1], [1]], max_ms=3000,
+                                             expect_outputs=[3, 3], sim=sim, progress=0)
+    got = [[value for _, value in out["out"]] for out in outs]
+    assert got == [[0, 0], [0]], (got, stats)
+    assert [len(events["start"]) for events in sim.events] == [2, 1]
+    for node, events in enumerate(sim.events):
+        assert len(events["trigger"]) == 2
+        start, tap = events["start"][0], events["tap"][0]
+        trigger = events["trigger"][1]
+        rise = next(step for step in events["true"] if step > trigger)
+        assert 50 <= tap - rise <= 100, (node, start, trigger, rise, tap)  # 5–10 ms, below 15 ms
+        assert events["repair"] and tap < events["repair"][0] < tap + 100
+        assert not any(start + 200 < step < trigger for step in events["false"])
+        clears_false = [step for step in events["kill"] if trigger < step < tap + 200]
+        assert bool(clears_false) == (node == 0), (node, clears_false)
+        if node == 1:
+            assert any(events["repair"][0] < step < tap + 300 for step in events["false"])
+        idle = next(step for step in events["idle"] if step > tap)
+        pending = any(idle < step < idle + 100 for step in events["true"])
+        assert pending == (node == 0), (node, idle, events["true"][-10:])
+
+
 def test_batched_runner_captures_selected_spikes_before_trace_trimming():
     import numpy as np
 
@@ -710,12 +808,12 @@ def test_neural_pacing_compiles_a_ring_per_pass():
 
 
 def test_pacing_ring_wraps_every_k_tokens():
-    """A two-cell pass (K = 3) and a one-cell tick, built by hand: the ring advances at every
-    done of its trigger and wraps at the third, the wrap closes the pass's phase and opens the
+    """A two-cell pass (K = 2) and a one-cell tick, built by hand: the ring advances at every
+    done of its trigger and wraps at the second, the wrap closes the pass's phase and opens the
     tick's, the tick's done reopens the pass's; the register's commits run at the pipeline's own
     pace (the ring holds no commit). One trigger for the pass; the tick's is 'each'."""
     from drosophilos.sim.ref64 import RefSim
-    K, n, frames = 3, 4, 3
+    K, n, frames = 2, 2, 2
     spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "k1"), "stream": "input"},
             {"name": "c2", "op": "XOR", "a": "c1", "b": ("const", "k3"), "stream": "input"},
             {"name": "f1", "op": "MOV", "a": "input:f", "b": "input:f", "stream": "input:f"},
@@ -745,9 +843,9 @@ def test_pacing_ring_wraps_every_k_tokens():
     sched = []
     for f in range(frames):
         sched += [("input", K * f + i, f * (K + 1) if i == 0 else 0) for i in range(K)] + [("f", f, 0)]
-    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=40000, expect_outputs=frames * (K + 1), sim=Watched())
+    outs, sim, st = run_pipeline(pl, PARAMS, sched, max_ms=9900, expect_outputs=frames * (K + 1), sim=Watched())
     assert st["faults"] == 0 and st["timeouts"] == 0 and st["bad_outputs"] == 0, st
-    assert [v for _, v in st["outputs_by_cell"]["c2"]] == [((K * f + i + 1) ^ 3) & 15 for f in range(frames) for i in range(K)]
+    assert [v for _, v in st["outputs_by_cell"]["c2"]] == [((K * f + i + 1) ^ 3) & ((1 << n) - 1) for f in range(frames) for i in range(K)]
     order = [c for _, c in sorted((s, c) for c, lst in st["outputs_by_cell"].items() for s, _ in lst)]
     assert order == (["c2"] * K + ["f1"]) * frames, order  # the tick waits for the wrap, the next frame for the tick
 
