@@ -727,6 +727,28 @@ same exposure with a longer drain; a one-inner-loop program under neural pacing 
 `bench/render_game.py --pacing neural`) needs either a host barrier on the frame's first
 token or a third phase. The fast test deals each frame behind the previous tick's output.
 
+### 11.2 One token in flight: the pipelined multiplier is the wrong multiplier (2026-09-16)
+
+Three H200 runs of `doom4.c` (the chasing thing, 245 cells) measured the same thing twice.
+With the array multiplier (Juno 405517: 40 × 25, 8 copies × 1.47 M neurons, ALU counter) a
+pixel cost ~30 s of neural time; with the pipelined multiplier (406972: 32 × 20, 16 copies ×
+2.10 M, neural pacing; 408444: the same under **host** pacing) a pixel cost **63 s** in both
+runs, output for output, and neither could finish inside its limit (36 h; 16 pixels an hour
+against 2,880 outputs). Pacing made no difference because under both the pass's tokens go
+one at a time: host pacing deals the next token only after the previous output, and the
+ring's phase gate lets one token per stream through. A pixel's cost is therefore the pixel
+kernel's *latency*, and the pipelined multiplier's latency is its sixteen row handshakes
+(~20 s at 16 bits, §4) against the array's 6.6 s — its 1.7 s throughput never sees two tokens.
+`doom4.c`'s pixel pass has two products (the wall's texture row and the sprite's), so ~40 s
+of its 63 s is multiplier latency. `bench/render_doom.py` now defaults to `--mul array`; the
+40 × 25 ring rerun of `doom2.c` (408524, pipelined) was stopped at ~10 s per output, above the
+ALU counter's 7 s, and resubmitted with the array (408916) so that the ring is compared on
+the same multiplier; `doom4.c` runs at 24 × 15 × 2 frames on the array (408917). The
+pipelined multiplier earns its area only where the compiler lets several tokens of one
+stream overlap, which the phase order of §11 forbids by design: the next step for
+throughput is a pass whose tokens pipeline *within* a phase, with the ring counting dones,
+not starts.
+
 ## 8. What it is not yet
 
 - Loops inside a body (a while inside the tick) are not kernels yet; a nested loop is a kernel
