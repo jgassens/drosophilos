@@ -45,8 +45,10 @@ the input. Four failures, each measured on the renderer's column loop (four cell
    safe: a 990 ms run followed by an 873 ms upstream run re-triggered the second cell 11 ms
    after its done pulse, inside its reset train's paralysis; a fault, and the token was lost.
 
-So the cells carry the handshake themselves, from three kill pairs per cell (a two-rail bit
-whose rails kill each other at their rise, `control.add_kill_pair`):
+So the cells carry the handshake themselves with dual-rail pairs. IDLE and CREQ use kill
+pairs (rails kill each other at their rise, `control.add_kill_pair`); per-source REQ uses
+request-priority pairs with live-rail-vetoed repair (§10.5) in the standard build.
+`relight_requests=False` selects the §10.3 REQ kill pairs:
 
 | pair | true means | set by | cleared by |
 |---|---|---|---|
@@ -626,8 +628,8 @@ source's done can land inside the 15 ms the veto needs to establish before the ~
 the relay then re-lights `REQ` false with `REQ` true already rising, the pair's own kill
 takes the true rail, and the request is lost. Trading 10 wrong in 4,000 outputs for 249
 stalls is not a trade the machine can take (a frame of a thousand tokens never finishes), so
-`build_pipeline(relight_requests=False)` is the default — `lib/kernel.py` is functionally at
-the §10.3 state — and the mechanism stays buildable for the reproduction. What the next
+`build_pipeline(relight_requests=False)` remained the default at that stage, using
+the §10.3 pairs. The accepted fourth remedy below supersedes this decision. What the next
 attempt needs is an evaluation that cannot straddle a rising `REQ` true: an ignition held for
 the veto's establishment time (a two-stage relay whose second stage is vetoed by the same
 rail 15 ms later), or a tap placed by the source's done rather than the reader's start.
@@ -684,7 +686,7 @@ following recovery and busy-period margins.
 
 This removes the dangerous arbitration, rather than assuming the veto always wins it.
 There is no extra delay in sampling, starting, or committing, and no change to IDLE or to
-the default `relight_requests=False` netlist.
+the §10.3 `relight_requests=False` netlist.
 
 **Deterministic evidence.** The original three-token 4-bit MULP reproduction passes with
 its assertions unchanged: the fixed corner produces `[9, 15, 6]`, and zeroing just its
@@ -706,16 +708,16 @@ or absence, the pending true rail at IDLE, and the exact start/output counts. Th
 MULP regression supplies the physical six-parameter dark-rail failure; this smaller test
 isolates the subsequent lost-request race.
 
-The default one-bit MOV remains **958 neurons / 1,644 synapses** (asserted in the regression);
-the default four-bit MULP remains **7,108 / 12,400**, measured before and after the change.
+The §10.3 one-bit MOV (`relight_requests=False`) remains **958 neurons / 1,644 synapses** (asserted in the regression);
+the §10.3 four-bit MULP remains **7,108 / 12,400**, measured before and after the change.
 The existing pacing-ring test now uses two two-token frames and a 9.9 s ceiling, preserving
 wrap/reopen/reuse checks while keeping the non-slow suite within the neural-time limit.
 The non-slow kernel suite passes (17 passed, the two expected §10.4 xfails); no slow tests
 were run. In the isolated macOS worktree the C golden references needed `TMPDIR` set to
 the worktree, the Command Line Tools `usr/bin` first on `PATH`, and `SDKROOT` set to
 `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`.
-The Juno 100-copy mix-B campaign remains the statistical confirmation; no campaign result
-is claimed for this remedy, and the flag remains off by default.
+At this stage the Juno 100-copy mix-B campaign was still pending, and the flag remained
+off by default; the accepted outcome below changes the default.
 
 **Outcome (Juno 409138, the 100-copy mix-B campaigns, 90 s; `relight_requests=True` patched
 in): stays off.** Perspective 764 / 800, **0 wrong**, 36 missing (8 copies); fan-out 765 / 800,
@@ -725,7 +727,7 @@ duplicate like the gated relay did, but the tick state kernel stalls a fifth of 
 again and fan-out now shows wrong values it never had. The stall is therefore not the lost
 request the third remedy's analysis named — that path no longer exists — and its cause is
 unmeasured. Both mix-B failures of this remedy need a spike dump of a stalled tick copy
-(`--dump-node`) before a fifth attempt; until then `lib/kernel.py` computes with the §10.3
+(`--dump-node`) before a fifth attempt; at that stage `lib/kernel.py` still used the §10.3
 pairs (795 / 799 / 1,598 / 760, 10 wrong in 4,000).
 
 **Fourth remedy, the tick stall measured.** [Copy 18's complete handshake timeline](a2/tick_s107_node18_analysis.md)
@@ -734,13 +736,13 @@ localizes the first missing second START to `c2_sel`: its `req.c0_addr0.u` (neur
 re-ignites this already-live false latch, changing its persistent period from 43 to
 34 steps; the clear at 79,310 / 79,354 / 79,398 only slows it, leaving the join vetoed.
 Both second requests arrive and IDLE is true; the output at 102,409 and later enabled
-work do not unblock the join. The opt-in repair now vetoes on **false as well
+work do not unblock the join. The repair now vetoes on **false as well
 as true**, preserving a working false rail. A two-copy RefSim regression (2,590 neurons
 total, 7.9 s) reproduces live repair → failed clear → stalled join at a selected bounded
 corner; only the copy with this veto completes both transactions. Its rail periods differ
-from the dump's, so it verifies the mechanism, not the full perturbed copy. The default
-4-bit MULP is byte-identical at 7,108 neurons / 12,400 synapses; the non-slow kernel suite
-passes (18 passed, two expected §10.4 xfails). The flag stays off pending the campaign
+from the dump's, so it verifies the mechanism, not the full perturbed copy. The §10.3
+4-bit MULP (`relight_requests=False`) is byte-identical at 7,108 neurons / 12,400 synapses; the non-slow kernel suite
+passes (18 passed, two expected §10.4 xfails). The flag stayed off pending the campaign
 rerun; this measurement does not localize the fan-out wrong values.
 
 **Outcome (Juno 409236, the 100-copy mix-B campaigns, 90 s): the first campaign with no wrong
@@ -759,6 +761,12 @@ the state kernel (five copies), which the host's timeout sees. A silent wrong va
 kernel corrupts every later output (§10.3), so the trade is the right one for the machine:
 `build_pipeline(relight_requests=True)` is now the default, and the §10.3 pairs stay available
 with `relight_requests=False`. The five stalled tick copies are the next dump.
+
+The standard one-bit MOV is now **960 neurons / 1,645 synapses**, and the four-bit MULP
+is **7,116 / 12,404**. The added receipt/repair circuitry adds neurons but no hops to
+the cell's start, operand-sample, or commit path. The copy-18 analysis linked above is a
+historical snapshot: its “default” counts refer to the §10.3 build, now selected explicitly
+with `relight_requests=False`.
 
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 

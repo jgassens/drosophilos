@@ -181,7 +181,7 @@ def _run_request_ambiguity_reproduction(pl, cell_name, source, token, max_ms):
 def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
     """Shape A: one stale row request adds a second product without another input token."""
     pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3})
+                        consts={"k": 3}, relight_requests=False)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "m.r1", "m.r0", 3, 8000)
     assert got == [[9], [9, 9]], (got, starts, stats)
@@ -197,7 +197,8 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     mem2 = {i: (i * 3) & 15 for i in range(16)}
     spec = [{"name": "a", "op": "LOAD", "a": "input", "mem": "m1"},
             {"name": "out", "op": "LOAD", "a": "a", "mem": "m2"}]
-    pl = build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)})
+    pl = build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)},
+                        relight_requests=False)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "out", "a", 2, 5000)
     assert got == [[9], [9, 9]], (got, starts, stats)
@@ -209,8 +210,9 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     can fail to catch; the dark pair lets the row's next IDLE start it with no request, and the
     real request then replays the word. Both copies carry the same 3 sigma corner on one rail
     (`m.r2.req.m.r1r0`: loop -12 %, kill +12 %, V_th +0.4 mV, bias -0.4 mV); copy 1 also has the
-    ACT^d re-light synapse zeroed, which is the pre-fix circuit. Three tokens 1.4 s apart, the
-    perspective pipeline's regime (token interval longer than a row's cycle)."""
+    ACT^d re-light synapse zeroed, disabling repair while retaining request-priority pairs.
+    Three tokens 1.4 s apart, the perspective pipeline's regime (token interval longer than
+    a row's cycle)."""
     import numpy as np
 
     from drosophilos.lib.kernel import run_pipeline_batched
@@ -291,9 +293,9 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     from drosophilos.sim.ref64 import RefSim
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
-    default = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
-    assert (default.net.n, default.net.nnz) == (958, 1644)  # recorded before the fourth remedy
-    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=True)
+    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
+    assert (legacy.net.n, legacy.net.nnz) == (958, 1644)  # recorded before the fourth remedy
+    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
     cell = pl.cells[0]
     req = cell.reqs["input"]
     roles = pl.net.roles
@@ -390,13 +392,13 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     from drosophilos.lib.kernel import load_pipeline_image
     from drosophilos.sim.ref64 import RefSim
 
-    default = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                             consts={"k": 3})
-    assert (default.net.n, default.net.nnz) == (7108, 12400)
+    legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                            consts={"k": 3}, relight_requests=False)  # §10.3 count control
+    assert (legacy.net.n, legacy.net.nnz) == (7108, 12400)
     pl = build_pipeline(PARAMS, 1,
                         [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                           "trigger": ["input", "input:other"]}],
-                        consts={"zero": 0}, streams=["input", "other"], relight_requests=True)
+                        consts={"zero": 0}, streams=["input", "other"])
     assert 2 * pl.net.n < 30000
     cell = pl.cells[0]
     req = cell.reqs["input"]

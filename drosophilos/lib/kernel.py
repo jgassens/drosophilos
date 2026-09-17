@@ -4,7 +4,7 @@ model; `docs/capacity_doom.md` §3).
 A pipeline is a graph of cells. Every cell owns a master register (its output value, a
 level) and a datapath on the levels of its sources:
 
-    requests (one dual-rail pair per source: its done pulse) + IDLE -> start pulse -> ACT, ACT^d
+    requests (one request-priority pair per source: its done pulse) + IDLE -> start pulse -> ACT, ACT^d
     -> operand gates sample the sources -> ALU / RAM read / select -> stage -> commit
     request -> commit once every consumer has started on the previous value -> master
     rewritten -> done pulse -> the consumers' requests
@@ -34,6 +34,9 @@ reader's request for it is asserted by the image, and the cell carries `init`, t
 value at power-up. A cell listing "input" in `trigger` is requested by every input token
 even if it does not read it (a state update paced by the tick). `outputs` names the cells
 the host decodes at each completion (default: the last cell).
+
+The standard build repairs dark no-request rails with a live-rail veto (§10.5).
+`relight_requests=False` selects the §10.3 request kill pairs.
 
 No fetch, no decode, no PC: the kernel is the program. `docs/a3_kernels.md`.
 """
@@ -133,7 +136,7 @@ class _N:
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
                   extra_vetoes: tuple[int, ...] = ()) -> None:
     """One pulse on `target` when A and B are both true, issued at the later of their rises: A
-    and B are kill pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
+    and B are dual-rail pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
     d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
     rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
     ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
@@ -243,7 +246,7 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
-                   phases: list | None = None, relight_requests: bool = False) -> Pipeline:
+                   phases: list | None = None, relight_requests: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -255,9 +258,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     compiler's per-stream token count K and the cells whose dones count a token) and the phase
     ends when its ring (`add_pacing_ring`) wraps, every K tokens; mode "each": the phase ends at
     every done of the named cell (None: of the stream's register). The host then only deals
-    tokens in program order; the phase order is the substrate's. `relight_requests` opts into
-    request-priority pairs and a delayed repair of dark no-request rails (see §10.5); False
-    retains the original kill pairs and netlist."""
+    tokens in program order; the phase order is the substrate's. `relight_requests=True`
+    is the standard build: request-priority pairs and delayed, live-rail-vetoed repair of
+    dark no-request rails (§10.5). False selects the §10.3 request kill pairs and netlist."""
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
@@ -397,14 +400,15 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
         for l in [c.act, c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
             net.synapse(c.start, l.u, drive.ignite)
-        # A standard pair's r0-driven kill may not recover during r0's ~60 ms silence
+        # A §10.3 kill pair's r0-driven kill may not recover during r0's ~60 ms silence
         # (<86 ms), so START must clear true explicitly. In request-priority pairs it is
         # the ONLY clear of true: neither the false rail nor its repair can consume a token.
         add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()])
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
-        # §10.5, fourth remedy (opt-in): default tap T = START + (11+3)*5.3 ~= 74 ms,
+        # §10.5, standard build (relight_requests=False selects §10.3 kill pairs):
+        # default tap T = START + (11+3)*5.3 ~= 74 ms,
         # after the old true rail's kill and the veto's ~55 ms recovery. A true rail live
         # by T-15 ms vetoes the repair. A later rise need NOT veto it: false has no kill
         # path to true, and the independent DONE clear above kills false regardless of
