@@ -743,6 +743,23 @@ from the dump's, so it verifies the mechanism, not the full perturbed copy. The 
 passes (18 passed, two expected §10.4 xfails). The flag stays off pending the campaign
 rerun; this measurement does not localize the fan-out wrong values.
 
+**Outcome (Juno 409236, the 100-copy mix-B campaigns, 90 s): the first campaign with no wrong
+value and no stall regression worth the name — this becomes the default.**
+
+| block | §10.3 pairs (407450) | request-priority pairs + live-rail veto (409236) |
+|---|---|---|
+| perspective | 760 / 800, 7 wrong, 33 missing | **768 / 800, 0 wrong**, 32 missing (5 copies) |
+| fan-out | 795 / 800, 0 wrong, 5 missing | 791 / 800, 0 wrong, 9 missing (3 copies) |
+| render | 799 / 800, 1 wrong | **800 / 800** |
+| tick | 1,598 / 1,600, 2 wrong, 0 missing | 1,569 / 1,600, **0 wrong**, 31 missing (5 copies) |
+| all | 3,952 / 4,000, **10 wrong**, 38 missing | 3,928 / 4,000, **0 wrong**, 72 missing |
+
+Ten silent wrong values in 4,000 outputs become none; the price is 34 more fail-stops, all in
+the state kernel (five copies), which the host's timeout sees. A silent wrong value in a state
+kernel corrupts every later output (§10.3), so the trade is the right one for the machine:
+`build_pipeline(relight_requests=True)` is now the default, and the §10.3 pairs stay available
+with `relight_requests=False`. The five stalled tick copies are the next dump.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

@@ -942,8 +942,11 @@ re-lighting the rail only while no request is pending) gave the first campaign w
 in any block (perspective 779 / 800) but stalled 22 of the tick kernel's 100 copies, and is kept
 buildable but off; a fifth, request-priority pair (only the start clears a pending request) also
 removed the duplicate and also stalled the tick kernel (1,411 / 1,600) and added 3 wrong fan-out
-values, and is off too (`docs/a3_kernels.md` §10.5). The stalls of both need a spike dump before
-another attempt. (The first campaign's large "missing"
+values. A spike dump of a stalled tick copy showed the repair re-igniting a rail that was still
+lit, which made it too strong for its clear; with the repair vetoed on that rail as well, the
+100-copy campaigns gave **no wrong value in any block** for the first time (render 800 / 800,
+perspective 768 / 800, fan-out 791 / 800, tick 1,569 / 1,600 with 31 fail-stops in 5 copies) —
+now the default (`docs/a3_kernels.md` §10.5, `docs/a2/tick_s107_node18_analysis.md`). (The first campaign's large "missing"
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 
