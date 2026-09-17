@@ -728,6 +728,21 @@ unmeasured. Both mix-B failures of this remedy need a spike dump of a stalled ti
 (`--dump-node`) before a fifth attempt; until then `lib/kernel.py` computes with the §10.3
 pairs (795 / 799 / 1,598 / 760, 10 wrong in 4,000).
 
+**Fourth remedy, the tick stall measured.** [Copy 18's complete handshake timeline](a2/tick_s107_node18_analysis.md)
+localizes the first missing second START to `c2_sel`: its `req.c0_addr0.u` (neuron
+11828) remains lit alongside true after the next DONE clear. At step 37,674 the repair
+re-ignites this already-live false latch, changing its persistent period from 43 to
+34 steps; the clear at 79,310 / 79,354 / 79,398 only slows it, leaving the join vetoed.
+Both second requests arrive and IDLE is true; the output at 102,409 and later enabled
+work do not unblock the join. The opt-in repair now vetoes on **false as well
+as true**, preserving a working false rail. A two-copy RefSim regression (2,590 neurons
+total, 7.9 s) reproduces live repair → failed clear → stalled join at a selected bounded
+corner; only the copy with this veto completes both transactions. Its rail periods differ
+from the dump's, so it verifies the mechanism, not the full perturbed copy. The default
+4-bit MULP is byte-identical at 7,108 neurons / 12,400 synapses; the non-slow kernel suite
+passes (18 passed, two expected §10.4 xfails). The flag stays off pending the campaign
+rerun; this measurement does not localize the fan-out wrong values.
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column

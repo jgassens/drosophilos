@@ -375,6 +375,115 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
         assert pending == (node == 0), (node, idle, events["true"][-10:])
 
 
+def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear():
+    """Tick copy 18: a repair of live false left a fast train that survived the next DONE.
+
+    Replay the two sources' measured DONE spacing on a small two-request MOV. Both
+    copies have the same bounded false-latch corner; copy 1 omits only false's repair veto.
+    The repair tap is injected at the measured START + 716 steps, independently of
+    this smaller datapath's timing. This corner's periods are 41 -> 40 steps (the
+    dump's are 43 -> 34); both reproduce live repair -> persistent acceleration ->
+    failed DONE clear -> both-live request -> missing second START.
+    """
+    import numpy as np
+
+    from drosophilos.lib.kernel import load_pipeline_image
+    from drosophilos.sim.ref64 import RefSim
+
+    default = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                             consts={"k": 3})
+    assert (default.net.n, default.net.nnz) == (7108, 12400)
+    pl = build_pipeline(PARAMS, 1,
+                        [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
+                          "trigger": ["input", "input:other"]}],
+                        consts={"zero": 0}, streams=["input", "other"], relight_requests=True)
+    assert 2 * pl.net.n < 30000
+    cell = pl.cells[0]
+    req = cell.reqs["input"]
+    u, v = req[0].members
+    roles = pl.net.roles
+    tap = roles.index("out.actd2.d2")
+    repair = roles.index("out.relight.input.edge")
+    veto = roles.index("out.relight.input.veto")
+    kill = roles.index("out.req.input.k1.inh")
+    topo = pl.net.topology()
+    quanta = np.broadcast_to(topo.quanta, (2, topo.nnz)).copy()
+
+    def weight(src, dst, value):
+        mask = (topo.src == src) & (topo.dst == dst)
+        assert mask.sum() == 1
+        quanta[:, mask] = value
+
+    # Loop +12%, kill magnitudes -3.1%/-4.0%, START/repair ignitions -3.2%/-5.3%,
+    # V_th -0.4 mV and bias +0.4 mV on the false members only. These are selected
+    # bounded perturbations, not recovered campaign parameters (absent from the dump).
+    for src, dst, value in [(v, u, 4056), (u, v, 4056), (kill, u, -2631), (kill, v, -2608),
+                            (cell.start, u, 4507), (repair, u, 4408)]:
+        weight(src, dst, value)
+    vth = np.full((2, topo.n), PARAMS.V_th)
+    bias = np.zeros((2, topo.n))
+    vth[:, [u, v]] -= 0.4
+    bias[:, [u, v]] += 0.4
+    false_veto = (topo.src == u) & (topo.dst == veto)
+    assert false_veto.sum() == 1
+    quanta[1, false_veto] = 0  # fourth remedy before the fix
+    quanta[:, topo.dst == tap] = 0  # supply the measured tap timing below
+    received = roles.index("out.req.input.received")
+
+    class Record(RefSim):
+        def __init__(self):
+            super().__init__(topo, PARAMS, n_nodes=2, quanta=quanta, V_th=vth, bias=bias)
+            self.watch = {cell.start: "start", u: "false", req[1].u: "true", repair: "repair",
+                          tap: "tap", kill: "kill", cell.reg.done_relay: "done", received: "received",
+                          cell.stage.fault_latch.u: "fault"}
+            self.events = [{what: [] for what in self.watch.values()} for _ in range(2)]
+
+        def step(self):
+            before = len(self._spk_step)
+            super().step()
+            for k in range(before, len(self._spk_step)):
+                step = int(self._spk_step[k][0])
+                for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
+                    if neuron in self.watch:
+                        self.events[node][self.watch[neuron]].append(step)
+                    if neuron == cell.start:
+                        self.add_events(node, [step + 692], [tap], [pl.drive.ignite])
+            if self.step_index % 1000 == 0:
+                self._spk_step.clear()
+                self._spk_node.clear()
+                self._spk_neuron.clear()
+
+    sim = Record()
+    for node in range(2):
+        load_pipeline_image(sim, pl, node=node)
+        # Original DONE steps 23,881 / 34,924, then 79,134 / 90,332; shift by
+        # 20,881 to keep the replay under 8 s. These are external ignition times.
+        sim.add_events(node, [3000, 14043, 58253, 69451],
+                       [pl.inputs[st][0].done_relay for st in ("input", "other", "input", "other")],
+                       [pl.drive.ignite] * 4)
+        # The dump's healthy clear has a fourth inhibitory spike; the failed clear
+        # has only three. A small timed input reproduces that extra first-cycle spike.
+        sim.add_events(node, [3367], [kill], [pl.drive.pulse // 2])
+    sim.run(79000)
+    starts = [e["start"] for e in sim.events]
+    dones = [e["done"] for e in sim.events]
+    assert [len(s) for s in starts] == [2, 1], (starts, dones)
+    assert [len(d) for d in dones] == [2, 1], (starts, dones)
+    assert not sim.events[0]["repair"] and len(sim.events[1]["repair"]) == 1
+    for node, events in enumerate(sim.events):
+        assert len(events["received"]) == 2 and not events["fault"]
+        assert len([s for s in events["kill"] if s < 4000]) == 4
+        assert len([s for s in events["kill"] if 58000 < s < 60000]) == 3
+        assert [t - s for t, s in zip(events["tap"], starts[node])] == [716] * len(starts[node])
+        rail = np.asarray(events["false"])
+        assert not np.any((rail > 4000) & (rail < starts[node][0]))  # first clear succeeds
+        train = rail[(rail > 20000) & (rail < 57000)]
+        assert np.all(np.diff(train) == (41 if node == 0 else 40)), (node, train[:20])
+        pending = [s for s in events["true"] if 61000 < s < 69000]
+        assert pending  # the first source's second request is waiting for the join
+        assert bool(np.any((rail > 61000) & (rail < 69000))) == (node == 1)
+
+
 def test_batched_runner_captures_selected_spikes_before_trace_trimming():
     import numpy as np
 

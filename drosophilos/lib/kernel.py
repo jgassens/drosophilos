@@ -411,6 +411,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # the true rail's edge-relay recovery. Its three pulses span ~11 ms and arrive
         # ~10..22 ms after true's rise; their recovery tail covers a repair landing
         # within ~15 ms of T. A still later DONE simply clears the already-repaired false.
+        # Also veto on false itself: repairing a live latch can add a second circulating
+        # spike. Tick copy 18 kept that faster train until the next DONE's clear, which
+        # merely slowed it instead of killing it (both REQ rails then stayed live).
+        # A failed START ignition leaves at most an early spike, with >55 ms to recover
+        # before T; a sustaining false rail must be left alone.
         # Thus there is no request-arrival exclusion window around T. Bounded-delay
         # prerequisites: normal kill/ignite margins, source cycles >86 ms, and IDLE
         # remains false during this repair/clear interval. As in the original handshake,
@@ -419,7 +424,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         if relight_requests:
             relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
             for src, pr in c.reqs.items():
-                add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u], pr[0])
+                add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u, pr[0].u], pr[0])
         G = Gates(net, drive)
         Sc = c.stage
         name = c.name
