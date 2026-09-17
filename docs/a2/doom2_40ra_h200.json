@@ -1,0 +1,15 @@
+{
+ "neurons": 666652,
+ "nodes": 8,
+ "neural_ms": 1989281.8,
+ "faults": 0,
+ "timeouts": 0,
+ "bad_outputs": 0,
+ "wall_s": 28138.24120759964,
+ "wrong": 0,
+ "missing": 0,
+ "frames": 2,
+ "width": 40,
+ "height": 25,
+ "neurons_per_node": 666652
+}

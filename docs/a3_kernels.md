@@ -883,9 +883,13 @@ STORE; `ph1_ring`, K = 8, on the pixel output); 24,721 neurons where the counter
 neural pacing, went from 42.6 s to **29.4 s** of neural time — within 4 % of the same program
 host-paced (30.6 s), so the pacing now costs nothing there; `doom1.c` at 4 × 3 (one copy, two
 frames, 26 tokens) from 279 s to **255 s**, every pixel right — a smaller gain, because at
-that size the Doom passes are bound by their own cells' latency, not the counter. The 40 × 25
-textured run on the H200 (1,982 s with the ALU counter) is queued again on the ring for the
-figure at scale.
+that size the Doom passes are bound by their own cells' latency, not the counter. At scale the
+gain is nil: the 40 × 25 textured run on the H200 (Juno 409220, 8 copies × 666,652 neurons,
+array multiplier) took **1,989 s** of neural time on the ring against 1,982 s with the ALU
+counter, 2,000 / 2,000 pixels right in both (`docs/a2/doom2_40ra_h200.json`,
+`docs/img/doom2_40ra_*_neural.png`). The Doom passes never waited on the counter — their
+tokens overlap inside a phase (§11.2) and the pass is bound by its cells' own latency — so
+the ring's saving is the 12,000 neurons, not time.
 
 One caveat the tiny test exposed, and it is the host's, not the ring's: with a program of
 one inner loop and the tick (two phases), the host deals the next frame's first pass token
