@@ -940,7 +940,10 @@ but stalled copies in all four blocks and corrupted a tick state, and was revert
 perspective duplicate stays open, with its mechanism known; a fourth, gated remedy (a veto relay
 re-lighting the rail only while no request is pending) gave the first campaign with no wrong value
 in any block (perspective 779 / 800) but stalled 22 of the tick kernel's 100 copies, and is kept
-buildable but off (`docs/a3_kernels.md` §10.5). (The first campaign's large "missing"
+buildable but off; a fifth, request-priority pair (only the start clears a pending request) also
+removed the duplicate and also stalled the tick kernel (1,411 / 1,600) and added 3 wrong fan-out
+values, and is off too (`docs/a3_kernels.md` §10.5). The stalls of both need a spike dump before
+another attempt. (The first campaign's large "missing"
 counts were the runner's 30 s ceiling: the tick kernel needs 52 s of neural time for eight
 tokens and the perspective kernel 39 s.)
 

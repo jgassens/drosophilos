@@ -717,6 +717,17 @@ the worktree, the Command Line Tools `usr/bin` first on `PATH`, and `SDKROOT` se
 The Juno 100-copy mix-B campaign remains the statistical confirmation; no campaign result
 is claimed for this remedy, and the flag remains off by default.
 
+**Outcome (Juno 409138, the 100-copy mix-B campaigns, 90 s; `relight_requests=True` patched
+in): stays off.** Perspective 764 / 800, **0 wrong**, 36 missing (8 copies); fan-out 765 / 800,
+**3 wrong**, 32 missing (7 copies); render 792 / 800, 0 wrong, 8 missing; tick 1,411 / 1,600,
+0 wrong, **189 missing in 19 copies**. The request-priority pair removes the perspective
+duplicate like the gated relay did, but the tick state kernel stalls a fifth of its copies
+again and fan-out now shows wrong values it never had. The stall is therefore not the lost
+request the third remedy's analysis named — that path no longer exists — and its cause is
+unmeasured. Both mix-B failures of this remedy need a spike dump of a stalled tick copy
+(`--dump-node`) before a fifth attempt; until then `lib/kernel.py` computes with the §10.3
+pairs (795 / 799 / 1,598 / 760, 10 wrong in 4,000).
+
 ### 9.2 Textures and a sprite (`examples/doom2.c`, `examples/doom3.c`)
 
 `doom2.c` textures the walls: the column pass also stores the hit position's texture column
