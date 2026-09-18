@@ -295,8 +295,7 @@ def render(cfg: RenderConfig) -> dict:
     runner_finished = time.perf_counter()
     image_regions = image_profiler.regions()
     if "image_write" in image_regions:
-        profile["image_write"] = image_regions["image_write"]
-        profile.setdefault("regions", {})["image_write"] = image_regions["image_write"]
+        profile["regions"]["image_write"] = image_regions["image_write"]
 
     # Ensure partial and invalid frames are still materialized, with missing pixels black.
     for f in range(F):

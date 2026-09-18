@@ -58,9 +58,12 @@ def test_profiled_batched_run_observes_outputs_without_changing_spikes():
     assert profiled == plain
     assert np.array_equal(profiled_sim.trace.events, plain_sim.trace.events)
     assert stats["profile"]["profiled_steps"] == 200
+    assert set(stats["profile"]) == {"profiled_steps", "regions"}
     for name in ("integrate", "threshold", "observe", "deliver", "reset",
                  "host_schedule", "decode"):
-        assert stats["profile"][name]["calls"] > 0
+        region = stats["profile"]["regions"][name]
+        assert set(region) == {"calls", "total_s"}
+        assert region["calls"] > 0
 
 
 def test_circuit_hash_is_stable_and_includes_constant_image():

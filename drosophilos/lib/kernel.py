@@ -948,7 +948,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
-             "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
+             "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None,
+             "profile": {"profiled_steps": 0, "regions": {}}}
     return first, sim, stats
 
 
@@ -1183,8 +1184,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
              "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad,
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
-             "profile": {**profile_regions, "regions": profile_regions,
-                         "profiled_steps": profiled_steps}}
+             "profile": {"profiled_steps": profiled_steps, "regions": profile_regions}}
     if capture_spikes is not None:
         stats["captured_spikes"] = (np.asarray(captured_steps, dtype=np.int64),
                                     np.asarray(captured_neurons, dtype=np.int64))
