@@ -1,14 +1,38 @@
 # DrosophilOS
 
-A connectome-constrained, asynchronous neural computer. The substrate is a simulated
-spiking network built on the *Drosophila* male central nervous system connectome
-(MCNS v1.0, 166,700 neurons). The target program is a Doom-like engine whose game update
+An asynchronous neural-computing project targeting the *Drosophila* male central
+nervous system connectome (MCNS v1.0, 166,700 neurons). The successful rendering
+workloads currently use freely synthesized fly-model spiking networks (Profile 3),
+not the anatomical wiring (Profile 2). The target program is a Doom-like engine whose game update
 **and** renderer both execute in the neural substrate; the host only integrates neuron
 equations, transports spike events, transduces input, loads the program image, and
 displays already-computed pixels.
 
 Design document: `docs/spec.md`. Plan and milestone order: `docs/plan.md`.
 Results record (what was done, what worked, what did not): `RESULTS.md`.
+
+## Current status and proposed priorities (2026-09-17)
+
+The [campaign report](docs/campaign_report_2026-09-17.md) records correct neural
+world-update and rendering demonstrations, including textures and a chasing sprite.
+The present labels are **Profile 3 / isolated / hybrid orchestration / external
+compilation**. This is a feasibility result, not an interactive game or full-workload
+execution on fly wiring.
+
+The [performance-first roadmap addendum](docs/performance_roadmap_2026-09-17.md)
+proposes measurement, semantics-preserving simulator acceleration, reduction of exact
+neural work, and then measured E2 population acceleration. The original milestone
+requirements remain in `docs/plan.md`; no incomplete stage is declared complete.
+
+Saved two-frame H200 runs average **3.94 h per 40 x 25 textured frame** and
+**8.99 h per 24 x 15 sprite frame**. These are aggregate simulation-run times divided
+by requested frame count, not measured first-frame or input-to-display latency.
+This review adds reporting/tests, not a measured runtime speedup.
+
+```bash
+python -m drosophilos.bench.render_budget \
+  docs/a2/doom2_40_h200.json docs/a2/doom4_24na_h200.json
+```
 
 Sub-systems: FlyISA (instruction set), FlyASM (assembler), FlyLink (inter-node transport),
 DrosoC (restricted C subset compiled to neural circuits), `minidoom` (the workload).
@@ -38,7 +62,10 @@ uv sync
 uv run pytest
 ```
 
-## Status (2026-09-14)
+## Historical status snapshot (2026-09-14)
+
+The entries below are retained as the earlier record. Use the September 17 campaign
+report and addendum above for current results, qualifications and priorities.
 
 - **Stage 0 done.** Normative model in `drosophilos/sim/schedule.md`; float64 reference
   simulator and PyTorch production simulator agree spike-for-spike with each other and with
