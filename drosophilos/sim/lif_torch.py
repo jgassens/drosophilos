@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from .model import D_MAX, Params, Topology, broadcast_param
+from .profile import Profiler
 from .trace import SpikeTrace
 
 
@@ -34,6 +35,7 @@ class TorchSim:
         stray_rate_hz: float = 0.0,
         stray_quanta: int = 0,
         stray_seed: int | None = None,
+        profiler: Profiler | None = None,
     ):
         self.topo = topo
         self.params = params
@@ -88,6 +90,7 @@ class TorchSim:
             # no seed given: a fresh one, so two unseeded runs never share a stray stream
             self._stray_gen.manual_seed(int(stray_seed if stray_seed is not None else np.random.default_rng().integers(2**31 - 1)))
         self.step_index = 0
+        self.profiler = profiler if profiler is not None else Profiler(False)
 
         self._events: dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = defaultdict(list)
         self._spk_step: list[np.ndarray] = []
@@ -125,60 +128,121 @@ class TorchSim:
     def step(self) -> None:
         s = self.step_index
         V, g, r = self.V, self.g, self.r
+        profiler = self.profiler
 
         # 1. integrate
-        held = r > 0
-        active = (r == 0) & ~self.silenced
-        Vn = self.E_L + self.bias + (V - self.E_L - self.bias) * self.a + g * self.k
-        V = torch.where(active, Vn, V)
-        V = torch.where(held, torch.full_like(V, self.V_reset), V)
-        g = g * self.c
-        V = torch.where(self.silenced, torch.full_like(V, self.E_L), V)
-        g = torch.where(self.silenced, torch.zeros_like(g), g)
-        r = torch.where(held, r - 1, r)
+        if profiler.enabled:
+            with profiler.region("integrate"):
+                held = r > 0
+                active = (r == 0) & ~self.silenced
+                Vn = self.E_L + self.bias + (V - self.E_L - self.bias) * self.a + g * self.k
+                V = torch.where(active, Vn, V)
+                V = torch.where(held, torch.full_like(V, self.V_reset), V)
+                g = g * self.c
+                V = torch.where(self.silenced, torch.full_like(V, self.E_L), V)
+                g = torch.where(self.silenced, torch.zeros_like(g), g)
+                r = torch.where(held, r - 1, r)
+        else:
+            held = r > 0
+            active = (r == 0) & ~self.silenced
+            Vn = self.E_L + self.bias + (V - self.E_L - self.bias) * self.a + g * self.k
+            V = torch.where(active, Vn, V)
+            V = torch.where(held, torch.full_like(V, self.V_reset), V)
+            g = g * self.c
+            V = torch.where(self.silenced, torch.full_like(V, self.E_L), V)
+            g = torch.where(self.silenced, torch.zeros_like(g), g)
+            r = torch.where(held, r - 1, r)
 
         # 2. threshold
-        spk = active & (V > self.V_th)
-        idx = torch.nonzero(spk)
+        if profiler.enabled:
+            with profiler.region("threshold"):
+                spk = active & (V > self.V_th)
+                idx = torch.nonzero(spk)
+        else:
+            spk = active & (V > self.V_th)
+            idx = torch.nonzero(spk)
         b_idx, n_idx = idx[:, 0], idx[:, 1]
-        if len(b_idx):
+
+        # Device-to-host observation is deliberately separate from thresholding.
+        if profiler.enabled:
+            with profiler.region("observe"):
+                if len(b_idx):
+                    self._spk_step.append(np.full(len(b_idx), s, np.int64))
+                    self._spk_node.append(b_idx.cpu().numpy().astype(np.int64))
+                    self._spk_neuron.append(n_idx.cpu().numpy().astype(np.int64))
+        elif len(b_idx):
             self._spk_step.append(np.full(len(b_idx), s, np.int64))
             self._spk_node.append(b_idx.cpu().numpy().astype(np.int64))
             self._spk_neuron.append(n_idx.cpu().numpy().astype(np.int64))
 
         # 3. deliver
-        slot = s % self.L
-        if len(b_idx):
-            starts = self.t_indptr[n_idx]
-            lens = self.t_indptr[n_idx + 1] - starts
-            total = int(lens.sum())
-            if total:
-                b_rep = torch.repeat_interleave(b_idx, lens)
-                base = torch.repeat_interleave(starts - torch.cumsum(lens, 0) + lens, lens)
-                syn = torch.arange(total, device=self.device, dtype=torch.int64) + base
-                q = self.t_quanta_shared[syn] if self.t_quanta is None else self.t_quanta[b_rep, syn]
-                at = (s + self.t_delay[syn]) % self.L
-                self.ring.index_put_((at, b_rep, self.t_dst[syn]), q, accumulate=True)
-        for node_t, neur_t, q_t in self._events.pop(s, ()):
-            slot_t = torch.full_like(node_t, slot)
-            self.ring.index_put_((slot_t, node_t, neur_t), q_t, accumulate=True)
-        due = self.ring[slot]
-        if self.stray_p > 0.0:
-            hit = torch.rand((self.B, self.n), device=self.device, generator=self._stray_gen) < self.stray_p
-            due = due + hit.to(due.dtype) * self.stray_q
-        g = g + self.w_unit * self.gain * due.to(self.dtype)
-        self.ring[slot] = 0
-        g = torch.where(self.silenced, torch.zeros_like(g), g)
+        if profiler.enabled:
+            with profiler.region("deliver"):
+                slot = s % self.L
+                if len(b_idx):
+                    starts = self.t_indptr[n_idx]
+                    lens = self.t_indptr[n_idx + 1] - starts
+                    total = int(lens.sum())
+                    if total:
+                        b_rep = torch.repeat_interleave(b_idx, lens)
+                        base = torch.repeat_interleave(starts - torch.cumsum(lens, 0) + lens, lens)
+                        syn = torch.arange(total, device=self.device, dtype=torch.int64) + base
+                        q = self.t_quanta_shared[syn] if self.t_quanta is None else self.t_quanta[b_rep, syn]
+                        at = (s + self.t_delay[syn]) % self.L
+                        self.ring.index_put_((at, b_rep, self.t_dst[syn]), q, accumulate=True)
+                for node_t, neur_t, q_t in self._events.pop(s, ()):
+                    slot_t = torch.full_like(node_t, slot)
+                    self.ring.index_put_((slot_t, node_t, neur_t), q_t, accumulate=True)
+                due = self.ring[slot]
+                if self.stray_p > 0.0:
+                    hit = torch.rand((self.B, self.n), device=self.device, generator=self._stray_gen) < self.stray_p
+                    due = due + hit.to(due.dtype) * self.stray_q
+                g = g + self.w_unit * self.gain * due.to(self.dtype)
+                self.ring[slot] = 0
+                g = torch.where(self.silenced, torch.zeros_like(g), g)
+        else:
+            slot = s % self.L
+            if len(b_idx):
+                starts = self.t_indptr[n_idx]
+                lens = self.t_indptr[n_idx + 1] - starts
+                total = int(lens.sum())
+                if total:
+                    b_rep = torch.repeat_interleave(b_idx, lens)
+                    base = torch.repeat_interleave(starts - torch.cumsum(lens, 0) + lens, lens)
+                    syn = torch.arange(total, device=self.device, dtype=torch.int64) + base
+                    q = self.t_quanta_shared[syn] if self.t_quanta is None else self.t_quanta[b_rep, syn]
+                    at = (s + self.t_delay[syn]) % self.L
+                    self.ring.index_put_((at, b_rep, self.t_dst[syn]), q, accumulate=True)
+            for node_t, neur_t, q_t in self._events.pop(s, ()):
+                slot_t = torch.full_like(node_t, slot)
+                self.ring.index_put_((slot_t, node_t, neur_t), q_t, accumulate=True)
+            due = self.ring[slot]
+            if self.stray_p > 0.0:
+                hit = torch.rand((self.B, self.n), device=self.device, generator=self._stray_gen) < self.stray_p
+                due = due + hit.to(due.dtype) * self.stray_q
+            g = g + self.w_unit * self.gain * due.to(self.dtype)
+            self.ring[slot] = 0
+            g = torch.where(self.silenced, torch.zeros_like(g), g)
 
         # 4. reset
-        V = torch.where(spk, torch.full_like(V, self.V_reset), V)
-        r = torch.where(spk, torch.full_like(r, self.n_ref - 1), r)
+        if profiler.enabled:
+            with profiler.region("reset"):
+                V = torch.where(spk, torch.full_like(V, self.V_reset), V)
+                r = torch.where(spk, torch.full_like(r, self.n_ref - 1), r)
+        else:
+            V = torch.where(spk, torch.full_like(V, self.V_reset), V)
+            r = torch.where(spk, torch.full_like(r, self.n_ref - 1), r)
 
-        # 5. observe
+        # 5. record
         self.V, self.g, self.r = V, g, r
         if self.record:
-            self.rec_V.append(V[self._rec_b, self._rec_i].cpu().numpy())
-            self.rec_g.append(g[self._rec_b, self._rec_i].cpu().numpy())
+            if profiler.enabled:
+                with profiler.region("record"):
+                    self.rec_V.append(V[self._rec_b, self._rec_i].cpu().numpy())
+                    self.rec_g.append(g[self._rec_b, self._rec_i].cpu().numpy())
+            else:
+                self.rec_V.append(V[self._rec_b, self._rec_i].cpu().numpy())
+                self.rec_g.append(g[self._rec_b, self._rec_i].cpu().numpy())
         self.step_index = s + 1
 
     def run(self, n_steps: int) -> None:

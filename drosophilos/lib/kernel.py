@@ -829,7 +829,8 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
 
 
 def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 60000, gap_ms: float = 0.0,
-                 sim=None, per_token: int | None = None, expect_outputs: int | None = None) -> tuple[list, RefSim, dict]:
+                 sim=None, per_token: int | None = None, expect_outputs: int | None = None,
+                 on_output=None, should_stop=None, wall_limit: float = 0.0) -> tuple[list, RefSim, dict]:
     """Streams `tokens` into the input producers and decodes every completion of each output
     cell's master in order. A token is a value (the first stream), a pair (stream, value), or
     a triple (stream, value, min_outputs): the host schedule; a triple is loaded only once the
@@ -841,9 +842,21 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     value); `stats["outputs_by_cell"]` holds every output's list. The run ends when the outputs
     number `expect_outputs` in total (default: `per_token` per token, default one) or at `max_ms`."""
     net, drive = pl.net, pl.drive
+    runner_started = time.perf_counter()
+    deadline = runner_started + wall_limit if wall_limit and wall_limit > 0 else None
+
+    def stop_requested() -> bool:
+        return bool((should_stop is not None and should_stop()) or
+                    (deadline is not None and time.perf_counter() >= deadline))
+
     sim = sim or RefSim(net.topology(), params)
+    load_started = time.perf_counter()
     load_pipeline_image(sim, pl)
-    sim.run(3000)  # the image's completions settle
+    for _ in range(3000):  # the image's completions settle; stepwise so signals stop cleanly
+        if stop_requested():
+            break
+        sim.step()
+    t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
     sched = []
     for t in tokens:
@@ -860,13 +873,14 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     comp = {c.completion.u: c for c in (o.master for o in pl.outputs)}
     outs = {c.name: [] for c in pl.outputs}
     last_wm = {u: None for u in comp}
-    loads, k, bad = [], 0, 0
+    loads, load_events, k, bad = [], [], 0, 0
     pending = []  # (completion step, output cell)
     fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
     timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     seen_f, seen_t = set(), set()
     want = expect_outputs or (per_token or len(pl.outputs)) * len(sched)  # total outputs over all cells: one per output cell per token
-    while sim.step_index < int(max_ms / params.dt):
+    truncated = stop_requested()
+    while not stop_requested() and sim.step_index < int(max_ms / params.dt):
         if k < len(sched):
             st, value, min_outs = sched[k]
             n_out = sum(len(v) for v in outs.values())
@@ -876,6 +890,9 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 for i, r in rails_for(value, pl.n):
                     sim.add_events(0, [t], [Pst.rails[i][r].u], [drive.ignite])
                 loads.append(t)
+                load_events.append({"schedule_index": k, "stream": st, "value": value,
+                                    "injected_step": sim.step_index, "event_step": t,
+                                    "injected_wall_s": time.perf_counter()})
                 loaded[st] += 1
                 k += 1
         sim.step()
@@ -892,7 +909,10 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
         while pending and s_ >= pending[0][0] + window:
             stp, cell = pending.pop(0)
             v, status = decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window)  # R bits; C Z V follow
-            outs[cell.name].append((stp, v if status == "valid" else None))  # a faulted or partial word is None
+            value = v if status == "valid" else None
+            outs[cell.name].append((stp, value))  # a faulted or partial word is None
+            if on_output is not None:
+                on_output(0, cell.name, stp, value, time.perf_counter())
             bad += status != "valid"
         if k >= len(sched) and sum(len(v) for v in outs.values()) >= want:
             break
@@ -909,6 +929,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 if last_wm[u] is None or s_ - last_wm[u] > 3 * period:
                     pending.append((s_, next(o for o in pl.outputs if o.master is master)))
                 last_wm[u] = s_
+        truncated = stop_requested()
+    truncated = stop_requested()
     first = outs[pl.outputs[0].name]
     for st_, nr in zip(sim._spk_step, sim._spk_neuron):  # first spike of each fault / timeout latch (the rest was counted on trimming)
         for x in nr.tolist():
@@ -917,9 +939,14 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
             elif x in timeout_n and x not in seen_t:
                 seen_t.add(x)
     n_fault, n_timeout = len(seen_f), len(seen_t)
+    work_outstanding = k < len(sched) or sum(len(v) for v in outs.values()) < want or bool(pending)
+    hit_max_ms = sim.step_index >= int(max_ms / params.dt) and work_outstanding and not truncated
     stats = {"neurons": net.n, "tokens": len(sched), "outputs": len(first), "outputs_by_cell": outs, "loaded": dict(loaded),
              "ready": dict(n_ready), "load_steps": loads,
+             "load_events": load_events, "t_load": t_load,
              "faults": n_fault, "timeouts": n_timeout, "bad_outputs": bad,
+             "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
+             "wall_s": time.perf_counter() - runner_started,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None}
     return first, sim, stats
@@ -928,7 +955,9 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
                          expect_outputs: list | None = None, dtype=None, sim=None,
                          progress: "float | callable | None" = 300,
-                         capture_spikes: "tuple[int, object] | None" = None, gap_ms: float = 0.0) -> tuple[list, object, dict]:
+                         capture_spikes: "tuple[int, object] | None" = None, gap_ms: float = 0.0,
+                         on_output=None, profile_steps: int | None = None,
+                         should_stop=None, wall_limit: float = 0.0) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
@@ -954,13 +983,36 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     without retaining every spike of a 100-copy run."""
     import torch
     from ..sim.lif_torch import TorchSim
+    from ..sim.profile import Profiler
     net, drive = pl.net, pl.drive
     B = len(schedules)
+    runner_started = time.perf_counter()
+    deadline = runner_started + wall_limit if wall_limit and wall_limit > 0 else None
+
+    def stop_requested() -> bool:
+        return bool((should_stop is not None and should_stop()) or
+                    (deadline is not None and time.perf_counter() >= deadline))
+
+    dev = torch.device(device if sim is None else getattr(sim, "device", device))
+    sync = None
+    if dev.type == "cuda":
+        sync = torch.cuda.synchronize
+    elif dev.type == "mps":
+        sync = torch.mps.synchronize
+    profiler = Profiler(False, sync=sync)
     kw = {"dtype": dtype} if dtype is not None else {}
-    sim = sim or TorchSim(net.topology(), params, n_nodes=B, device=device, **kw)  # a perturbed simulator may be passed (campaigns)
+    sim = sim or TorchSim(net.topology(), params, n_nodes=B, device=device, profiler=profiler,
+                          **kw)  # a perturbed simulator may be passed (campaigns)
+    if hasattr(sim, "profiler"):
+        sim.profiler = profiler
+    load_started = time.perf_counter()
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
-    sim.run(3000)
+    for _ in range(3000):
+        if stop_requested():
+            break
+        sim.step()
+    t_load = time.perf_counter() - load_started
     captured_steps, captured_neurons = [], []
     if capture_spikes is not None:
         capture_node, capture_ids = capture_spikes
@@ -996,6 +1048,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     last_wm = [{o.name: None for o in pl.outputs} for _ in range(B)]
     outs = [{o.name: [] for o in pl.outputs} for _ in range(B)]
     loads = [[] for _ in range(B)]
+    load_events = [[] for _ in range(B)]
     k = [0] * B
     pending = []  # (step, node, cell)
     fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
@@ -1017,13 +1070,18 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
         progress_interval, progress_fn = 300, progress
     else:
         progress_interval, progress_fn = progress, default_progress
-    t_start = time.time()
+    t_start = time.perf_counter()
     t_last_report = t_start
     step_last_report = sim.step_index
     STEP_CHECK = 1000
     steps_since_check = 0
 
-    while sim.step_index < int(max_ms / params.dt):
+    profile_target = max(0, int(profile_steps or 0))
+    profiled_steps = 0
+    if profile_target and not stop_requested():
+        profiler.enabled = True
+
+    def host_schedule() -> None:
         for b in range(B):
             if k[b] < len(scheds[b]):
                 st, value, min_outs = scheds[b][k[b]]
@@ -1034,42 +1092,29 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     ev_n = [Pst.rails[i][r].u for i, r in rails_for(value, pl.n)]
                     sim.add_events(b, [t] * len(ev_n), ev_n, [drive.ignite] * len(ev_n))
                     loads[b].append(t)
+                    load_events[b].append({"schedule_index": k[b], "stream": st, "value": value,
+                                           "injected_step": sim.step_index, "event_step": t,
+                                           "injected_wall_s": time.perf_counter()})
                     loaded[b][st] += 1
                     k[b] += 1
-        n_spike_chunks = len(sim._spk_step)
-        sim.step()
-        if capture_spikes is not None:
-            for stp, nr, nd in zip(sim._spk_step[n_spike_chunks:], sim._spk_neuron[n_spike_chunks:],
-                                   sim._spk_node[n_spike_chunks:]):
-                capture_chunk(stp, nr, nd)
-        s_ = sim.step_index - 1
-        steps_since_check += 1
-        if progress_interval and steps_since_check >= STEP_CHECK:
-            steps_since_check = 0
-            now = time.time()
-            if now - t_last_report >= progress_interval:
-                steps_per_s = (sim.step_index - step_last_report) / (now - t_last_report)
-                progress_fn({
-                    "elapsed_s": now - t_start, "neural_ms": sim.step_index * params.dt, "steps_per_s": steps_per_s,
-                    "outputs": sum(sum(len(v) for v in o.values()) for o in outs), "expected_outputs": sum(want),
-                    "nodes_done": sum(done_nodes), "total_nodes": B,
-                    "faults": len(seen_f), "timeouts": len(seen_t), "outs": outs,
-                })
-                t_last_report, step_last_report = now, sim.step_index
-        if len(sim._spk_step) > 8 * window:  # keep the recent spikes only: 128 nodes' whole run was OOM-killed at 96 GB
-            del sim._spk_step[: -4 * window]; del sim._spk_neuron[: -4 * window]; del sim._spk_node[: -4 * window]
+
+    def decode_and_watch(s_: int) -> bool:
+        nonlocal bad
         while pending and s_ >= pending[0][0] + window:
             stp, b, cell = pending.pop(0)
             v, status = decode_recent(sim, cell.master.rail_taps[: pl.n], stp + window, window, node=b)
-            outs[b][cell.name].append((stp, v if status == "valid" else None))
+            value = v if status == "valid" else None
+            outs[b][cell.name].append((stp, value))
+            if on_output is not None:
+                on_output(b, cell.name, stp, value, time.perf_counter())
             bad += status != "valid"
         for b in range(B):
             if not done_nodes[b] and k[b] >= len(scheds[b]) and sum(len(v) for v in outs[b].values()) >= want[b]:
                 done_nodes[b] = True
         if all(done_nodes) and not pending:
-            break
+            return True
         if not sim._spk_step or int(sim._spk_step[-1][0]) != s_:
-            continue
+            return False
         nr, nd = sim._spk_neuron[-1], sim._spk_node[-1]
         mf = np.isin(nr, fault_ids)
         for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
@@ -1085,9 +1130,61 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                 if last_wm[b][what.name] is None or s_ - last_wm[b][what.name] > 3 * period:
                     pending.append((s_, b, what))
                 last_wm[b][what.name] = s_
+        return False
+
+    truncated = stop_requested()
+    while not stop_requested() and sim.step_index < int(max_ms / params.dt):
+        profiling_this_step = profiler.enabled
+        if profiling_this_step:
+            with profiler.region("host_schedule"):
+                host_schedule()
+        else:
+            host_schedule()
+        n_spike_chunks = len(sim._spk_step)
+        sim.step()
+        if capture_spikes is not None:
+            for stp, nr, nd in zip(sim._spk_step[n_spike_chunks:], sim._spk_neuron[n_spike_chunks:],
+                                   sim._spk_node[n_spike_chunks:]):
+                capture_chunk(stp, nr, nd)
+        s_ = sim.step_index - 1
+        steps_since_check += 1
+        if progress_interval and steps_since_check >= STEP_CHECK:
+            steps_since_check = 0
+            now = time.perf_counter()
+            if now - t_last_report >= progress_interval:
+                steps_per_s = (sim.step_index - step_last_report) / (now - t_last_report)
+                progress_fn({
+                    "elapsed_s": now - t_start, "neural_ms": sim.step_index * params.dt, "steps_per_s": steps_per_s,
+                    "outputs": sum(sum(len(v) for v in o.values()) for o in outs), "expected_outputs": sum(want),
+                    "nodes_done": sum(done_nodes), "total_nodes": B,
+                    "faults": len(seen_f), "timeouts": len(seen_t), "outs": outs,
+                })
+                t_last_report, step_last_report = now, sim.step_index
+        if len(sim._spk_step) > 8 * window:  # keep the recent spikes only: 128 nodes' whole run was OOM-killed at 96 GB
+            del sim._spk_step[: -4 * window]; del sim._spk_neuron[: -4 * window]; del sim._spk_node[: -4 * window]
+        if profiling_this_step:
+            with profiler.region("decode"):
+                finished = decode_and_watch(s_)
+            profiled_steps += 1
+            if profiled_steps >= profile_target:
+                profiler.enabled = False
+        else:
+            finished = decode_and_watch(s_)
+        if finished:
+            break
+    truncated = stop_requested()
+    work_outstanding = any(k[b] < len(scheds[b]) or
+                           sum(len(v) for v in outs[b].values()) < want[b] for b in range(B)) or bool(pending)
+    hit_max_ms = sim.step_index >= int(max_ms / params.dt) and work_outstanding and not truncated
+    profile_regions = profiler.regions()
     stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
              "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
-             "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad}
+             "load_steps": loads, "load_events": load_events, "t_load": t_load,
+             "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad,
+             "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
+             "wall_s": time.perf_counter() - runner_started,
+             "profile": {**profile_regions, "regions": profile_regions,
+                         "profiled_steps": profiled_steps}}
     if capture_spikes is not None:
         stats["captured_spikes"] = (np.asarray(captured_steps, dtype=np.int64),
                                     np.asarray(captured_neurons, dtype=np.int64))
