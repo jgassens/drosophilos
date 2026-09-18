@@ -956,7 +956,10 @@ H200 (8 copies of 686,351 neurons) with the frame's phase order kept by the subs
 phase gates and no host barrier: all 2,000 pixels equal to the reference, no fault, 1,982 s
 of neural time, 7 h 53 min of wall time (`docs/img/doom2_40_0_neural.png`). Rerun on the
 one-hot ring counter it takes 1,989 s, the same to 0.4 %: at this scale the passes are bound by
-their cells, not the counter (`docs/a3_kernels.md` §11.1). The frame loop's
+their cells, not the counter (`docs/a3_kernels.md` §11.1). `doom4.c`, a sprite that chases the
+player, ran neurally at 24 × 15 × 2 frames (8 copies × 1,440,390 neurons, 239 cells in four kernels):
+**720 / 720 pixels equal to the reference**, no fault, 2,711 s of neural time in 18 h of wall
+time — the first moving thing computed in the substrate (`docs/img/doom4_24na_*_neural.png`). The frame loop's
 ordering label for this run is *neural*; the token dealing stays hybrid. Its cost is visible:
 about 7 s of neural time per token against 3 s under host pacing, because the compiler's
 wrapping counter was a three-cell feedback loop every token waited for. A one-hot ring

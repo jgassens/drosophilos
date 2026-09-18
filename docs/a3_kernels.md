@@ -790,7 +790,14 @@ prologue as state. Four kernels: tick 60 cells, column 67, sprite 18, pixel 52; 
 neurons per copy at 16 bits (the tick's multiplies are most of it). Validated by the kernel
 oracle against the interpreter and the C golden build on two 160 × 100 frames
 (`tests/test_doom3.py`, `docs/img/doom3_0_reference.png`: the sprite half hidden behind the
-near wall; `_1_`: the view turned); not yet run neurally (an H200 job at 40 × 25 is next).
+near wall; `_1_`: the view turned); not yet run neurally at scale. `doom4.c` makes the thing
+*chase* the player (a tick-kernel move toward the player each frame) and is the first program
+with a moving thing run neurally at scale: 24 × 15 × 2 frames on the H200 (Juno 409221, 8 copies
+× 1,440,390 neurons, neural pacing on the ring, array multiplier, inputs turn 6 then forward 256):
+**720 / 720 pixels equal to the reference**, no fault or timeout, 2,710.7 s of neural time in
+18 h of wall time (`docs/img/doom4_24na_0_neural.png`, `_1_`; `docs/a2/doom4_24na_h200.json`).
+The imp is closer and larger in the second frame, as the reference says it should be. The 32 × 20 ×
+3-frame runs with the pipelined multiplier could not finish (§11.2).
 `doom4.c` makes the thing *move*: its position is frame state of the tick kernel, and each
 tick it takes one 8-unit step toward the player along the larger axis, refused into a wall
 cell or the player's cell (Doom's `P_Move` shape); 96 tick cells. Three frames, the imp
