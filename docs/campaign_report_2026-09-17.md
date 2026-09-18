@@ -175,7 +175,11 @@ mechanism claim, the gated-re-light design.
 - The one-hot ring counter replaced a three-cell feedback counter and saves 12,000 neurons,
   but at scale saves no time (1,989 vs 1,982 s): the passes are bound by their cells.
 - The simulator runs 14× slower than neural time at 5 M neurons on an H200 and scales with
-  neuron count, so wall time is GPU throughput: one 40 × 25 frame per ~4 h.
+  neuron count: one 40 × 25 frame per ~4 h. That wall time has two parts, and only one is
+  measured: the **neural workload cost** (steps × neurons, set by the protocol's latency) and
+  the **not-yet-profiled simulator cost** (per-step spike extraction to the host, Python
+  scheduling, decoding). The aggregate timings do not say how much is which;
+  `docs/perf_campaign.md` §2 is the instrumentation that will.
 
 ### 4.3 The kernel duplicate, in five attempts
 
@@ -220,15 +224,24 @@ wiring, or in a living brain's traffic, or at any speed a player would notice.
 | **C. The hypervisor (C/F)** | tick brain + pixel brains over FlyLink, live input, a 160 × 100 frame per hour on ~100 GPUs | plumbing; the floor stays ~1 min neural per frame |
 | **D. Write up the feasibility result** | fixes the claim at its four labels while the numbers are fresh | none |
 
-Recommendation: D now, then A. Speed is the wall, and A is the one goal that is science about
-how the fly computes rather than engineering around it. B's negative result is already the
-paper's most interesting finding. C makes a slow thing wider.
+Recommendation (revised 2026-09-17, `docs/perf_campaign.md`): write up the demonstrated
+feasibility result now. In parallel, establish an instrumented performance baseline, improve
+simulator execution without changing the neural computation, and test operation-specific
+exact datapaths. Diagnose the multiplier regression and remaining tick failures with bounded
+traces. Use the resulting complete-frame measurements to determine the scope of E2 and any
+later cluster expansion. A's 10–50× is a proposed gain, not a measured one; E2 begins with
+one bounded primitive whose benchmark includes encoding, settling, decoding, uncertainty
+detection and the neural fallback, and the exact renderer is not replaced until the
+complete-path comparison supports it. B's negative result is already the paper's most
+interesting finding. C makes a slow thing wider.
 
 ## 7. Open items, in priority order
 
 1. The five remaining tick fail-stops (31 outputs in 100 copies) — one spike dump.
-2. Why the pipelined multiplier doubles the per-pixel cost — the inter-commit intervals in
-   `docs/a2/doom4_24na_h200.json` are the first look.
+2. Why the pipelined multiplier doubles the per-pixel cost. (`docs/a2/doom4_24na_h200.json`
+   holds aggregate counters only — neuron and node counts, neural ms, faults, wall time — not
+   the inter-commit event history; that history has to be captured first:
+   `docs/perf_campaign.md` §5.)
 3. Stage C's remaining protocol: epochs, credits, corruption, backpressure.
 4. Stage D's exit: 1,000 ticks against the reference; TMR and the commit log.
 5. A stable active regime for the whole-brain model (adaptation, depression, tonic
