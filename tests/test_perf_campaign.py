@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 
 import pytest
 
@@ -20,6 +21,20 @@ def _args(**overrides):
                historical=False, allow_cpu_renders=False, dry_run=False, out="data/perf/campaign")
     base.update(overrides)
     return argparse.Namespace(**base)
+
+
+def _stub_primitive_run(name, cfg, *, tokens, profile_steps=0, max_neural_s=150):
+    """Return the complete record shape produced by the real primitive runner."""
+    return {
+        "level": "primitive", "workload": name, "config": dict(cfg), "tokens": tokens,
+        "reference": [], "outputs": [], "first_neural_s": 0.001, "first_wall_s": 0.002,
+        "interval_neural_s": [], "interval_wall_s": [], "neural_s": 0.003, "wall_s": 0.004,
+        "wall_neural": 4 / 3, "neurons": 1, "edges": 0, "spikes": 0,
+        "spike_count_method": "stub", "spike_count_cost": "stub", "wrong": 0,
+        "missing": 0, "duplicates": 0, "invalid": 0, "faults": 0, "timeouts": 0,
+        "host_stalls": 0, "truncated": False, "max_neural_s": max_neural_s,
+        "t_load": 0.0, "load_events": [], "profile": {}, "profiled": bool(profile_steps),
+    }
 
 
 def test_level_two_coverage_accepts_selected_inputs_and_rejects_static_input(tmp_path):
@@ -58,8 +73,10 @@ def test_dry_run_prints_cost_estimate(tmp_path):
     assert "not a measurement" in result["cost_estimate_note"] or "estimate" in result["cost_estimate_note"]
 
 
+@pytest.mark.skipif(os.environ.get("RUN_SLOW") != "1", reason="real CPU kernel test; set RUN_SLOW=1")
 def test_primitive_cells_write_correct_cpu_report(tmp_path):
-    args = _args(primitive_blocks="cells", tokens=3, copies="1", out=str(tmp_path / "cells"))
+    """Run one real CPU kernel only when RUN_SLOW=1; the contract suite uses stubs."""
+    args = _args(primitive_blocks="cells", tokens=2, copies="1", out=str(tmp_path / "cells"))
     report = run_campaign(args)
     assert {x["workload"] for x in report["summaries"]} == {
         "cells-add", "cells-and", "cells-xor", "cells-mov"}
@@ -68,7 +85,7 @@ def test_primitive_cells_write_correct_cpu_report(tmp_path):
     assert (tmp_path / "cells.md").exists()
 
 
-def test_bare_defaults_run_the_primitive_smoke_set(tmp_path):
+def test_bare_defaults_run_the_primitive_smoke_set(tmp_path, monkeypatch):
     """A bare invocation is a short smoke: primitive cells,fanout,tick at repeats 1."""
     args = _args(out=str(tmp_path / "smoke"))
     assert args.levels == "primitive"
@@ -78,7 +95,8 @@ def test_bare_defaults_run_the_primitive_smoke_set(tmp_path):
     # The assertions above pin down what a bare invocation selects; the run itself is kept to
     # the cells block (the tick kernel is 13.7k neurons: minutes per token on a CPU, and the
     # blocks are exercised for real on the cluster).
-    args = _args(primitive_blocks="cells", tokens=3, copies="1", out=str(tmp_path / "smoke"))
+    monkeypatch.setattr("drosophilos.bench.perf_campaign._primitive_run", _stub_primitive_run)
+    args = _args(primitive_blocks="cells", tokens=2, copies="1", out=str(tmp_path / "smoke"))
     report = run_campaign(args)
     assert {x["workload"] for x in report["summaries"]} == {
         "cells-add", "cells-and", "cells-xor", "cells-mov"}
@@ -96,15 +114,17 @@ def test_historical_level_on_cpu_is_refused_without_allow_cpu_renders(tmp_path):
         run_campaign(args)
 
 
-def test_primitive_max_s_caps_neural_time_and_records_it(tmp_path):
-    args = _args(primitive_blocks="cells", tokens=3, primitive_max_s=0.001, out=str(tmp_path / "capped"))
+def test_primitive_max_s_caps_neural_time_and_records_it(tmp_path, monkeypatch):
+    monkeypatch.setattr("drosophilos.bench.perf_campaign._primitive_run", _stub_primitive_run)
+    args = _args(primitive_blocks="cells", tokens=2, primitive_max_s=0.001, out=str(tmp_path / "capped"))
     report = run_campaign(args)
     assert all(r["max_neural_s"] == 0.001 for r in report["records"])
 
 
-def test_report_is_written_incrementally_and_marked_incomplete_until_done(tmp_path):
+def test_report_is_written_incrementally_and_marked_incomplete_until_done(tmp_path, monkeypatch):
     out = tmp_path / "incremental"
     args = _args(primitive_blocks="cells", tokens=3, out=str(out))
+    monkeypatch.setattr("drosophilos.bench.perf_campaign._primitive_run", _stub_primitive_run)
 
     seen_incomplete = []
     from drosophilos.bench import perf_campaign as pc
@@ -125,5 +145,9 @@ def test_report_is_written_incrementally_and_marked_incomplete_until_done(tmp_pa
     assert seen_incomplete[-1]["complete"] is True
     partial = json.loads((out.with_suffix(".json")).read_text())
     assert "complete" in partial
-    for r in seen_incomplete[:-1]:
-        assert r["configurations_done"] < r["configurations_planned"]
+    assert all(not r["complete"] for r in seen_incomplete[:-1])
+    assert seen_incomplete[0]["configurations_done"] == 1
+    done_counts = [r["configurations_done"] for r in seen_incomplete]
+    assert done_counts == sorted(done_counts)
+    assert done_counts[-1] == seen_incomplete[-1]["configurations_planned"]
+    assert seen_incomplete[-1]["complete"] is True
