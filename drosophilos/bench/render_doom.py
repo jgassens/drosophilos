@@ -15,7 +15,7 @@ from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_program, kernel_outputs
 from ..display.frame import write_png
 from ..lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
-from ..sim.model import Params
+from ..sim.model import D_MAX, Params
 from ..sim.profile import Profiler
 from .repro import record as repro_record
 
@@ -44,6 +44,9 @@ class RenderConfig:
     dtype: str = "float64"
     profile_steps: int = 0
     wall_limit: float = 0.0
+    graph_steps: int = 0
+    observe_every: int | None = None
+    delivery: str = "auto"
 
 
 def _effective_backend(cfg: RenderConfig):
@@ -54,8 +57,8 @@ def _effective_backend(cfg: RenderConfig):
     dtype_name = "float32" if cfg.fp32 else cfg.dtype
     if cfg.fp32:
         warnings.warn("--fp32 is deprecated; use --dtype float32", DeprecationWarning, stacklevel=3)
-    if backend not in ("ref", "torch"):
-        raise SystemExit(f"unsupported backend {backend!r}; choose ref or torch")
+    if backend not in ("ref", "torch", "torch-fast"):
+        raise SystemExit(f"unsupported backend {backend!r}; choose ref, torch or torch-fast")
     if dtype_name not in ("float64", "float32"):
         raise SystemExit(f"unsupported dtype {dtype_name!r}; choose float64 or float32")
     try:
@@ -66,20 +69,26 @@ def _effective_backend(cfg: RenderConfig):
         raise SystemExit("the ref backend supports only --device cpu")
     if backend == "ref" and dtype_name != "float64":
         raise SystemExit("the ref backend supports only --dtype float64")
-    if backend == "torch" and device.type == "mps" and dtype_name == "float64":
+    if backend in ("torch", "torch-fast") and device.type == "mps" and dtype_name == "float64":
         raise SystemExit("Torch on MPS does not support --dtype float64; use float32")
+    if backend != "torch-fast" and (cfg.graph_steps or cfg.observe_every or cfg.delivery != "auto"):
+        raise SystemExit("--graph-steps, --observe-every and --delivery apply to --backend torch-fast only")
+    if cfg.delivery not in ("auto", "sparse", "scatter"):
+        raise SystemExit("--delivery must be auto, sparse or scatter")
+    if cfg.graph_steps < 0 or cfg.graph_steps > D_MAX + 1:
+        raise SystemExit(f"--graph-steps must lie in [0, {D_MAX + 1}]")
     if device.type == "cuda" and not torch.cuda.is_available():
         raise SystemExit("--device cuda requested, but CUDA is not available")
     if device.type == "mps" and not torch.backends.mps.is_available():
         raise SystemExit("--device mps requested, but MPS is not available")
-    if backend == "torch" and device.type not in ("cpu", "cuda", "mps"):
-        raise SystemExit(f"the torch backend does not support --device {device.type}")
+    if backend in ("torch", "torch-fast") and device.type not in ("cpu", "cuda", "mps"):
+        raise SystemExit(f"the {backend} backend does not support --device {device.type}")
     gpu_name = None
     if device.type == "cuda":
         gpu_name = torch.cuda.get_device_name(device)
     elif device.type == "mps":
         gpu_name = "Apple Metal Performance Shaders"
-    simulator = "RefSim" if backend == "ref" else "TorchSim"
+    simulator = {"ref": "RefSim", "torch": "TorchSim", "torch-fast": "FastSim"}[backend]
     torch_dtype = torch.float32 if dtype_name == "float32" else torch.float64
     return backend, str(device), dtype_name, torch_dtype, simulator, gpu_name
 
@@ -299,7 +308,8 @@ def render(cfg: RenderConfig) -> dict:
                 expect_outputs=expect, dtype=torch_dtype,
                 progress=(cfg.progress, on_progress) if cfg.progress else None,
                 on_output=on_output, profile_steps=cfg.profile_steps,
-                should_stop=stop_requested,
+                should_stop=stop_requested, backend=backend,
+                graph_steps=cfg.graph_steps, observe_every=cfg.observe_every, delivery=cfg.delivery,
             )
             load_events = stats["load_events"]
             profile = dict(stats["profile"])
@@ -401,6 +411,11 @@ def render(cfg: RenderConfig) -> dict:
     )
     rec.update({
         "backend_selected_by_default": cfg.backend is None,
+        # the effective simulator class and its execution mode, from the runner itself
+        "simulator_effective": stats.get("simulator", simulator_name),
+        "simulator_mode": {key: stats[key] for key in ("observe_every", "graph_steps", "graph_active",
+                                                        "graph_fallback_reason", "delivery", "delays")
+                           if key in stats},
         "kernel_cells": len(ks.cells),
         "frames_completed": len(completed_indices),
         "wrong": wrong,
@@ -433,12 +448,18 @@ def _parser() -> argparse.ArgumentParser:
                     help="tick inputs per frame: turn in bits 0-5, forward 256 / back 512")
     ap.add_argument("--nodes", type=int, default=RenderConfig.nodes)
     ap.add_argument("--device", default=RenderConfig.device)
-    ap.add_argument("--backend", choices=["ref", "torch"], default=None)
+    ap.add_argument("--backend", choices=["ref", "torch", "torch-fast"], default=None)
     ap.add_argument("--dtype", choices=["float64", "float32"], default=RenderConfig.dtype)
     ap.add_argument("--fp32", action="store_true", help="deprecated alias for --dtype float32")
     ap.add_argument("--max-ms", type=float, default=RenderConfig.max_ms)
     ap.add_argument("--wall-limit", type=float, default=RenderConfig.wall_limit,
                     help="stop cleanly after this many wall seconds (0 disables)")
+    ap.add_argument("--graph-steps", type=int, default=RenderConfig.graph_steps,
+                    help="torch-fast only: run K-step blocks (a CUDA graph on CUDA); 0 = eager steps")
+    ap.add_argument("--observe-every", type=int, default=RenderConfig.observe_every,
+                    help="torch-fast only: device-to-host spike transfer interval in steps (default: the decode window)")
+    ap.add_argument("--delivery", default=RenderConfig.delivery, choices=["auto", "sparse", "scatter"],
+                    help="torch-fast only: synaptic delivery kernel (auto: CSR product on CUDA, edge-wise scatter elsewhere)")
     ap.add_argument("--profile-steps", type=int, default=RenderConfig.profile_steps,
                     help="profile this many post-settle neural steps (0 disables)")
     ap.add_argument("--out", default=RenderConfig.out)
@@ -464,8 +485,11 @@ def main() -> None:
         return
     default_note = " (selected by default)" if result["backend_selected_by_default"] else ""
     gpu = f", {result['hardware']['gpu_name']}" if result["hardware"]["gpu_name"] else ""
-    print(f"backend: {result['simulator']} via {result['backend']}{default_note}; "
-          f"device {result['device']}{gpu}; dtype {result['dtype']}", flush=True)
+    mode = result.get("simulator_mode") or {}
+    mode_note = (f"; graph_steps {mode['graph_steps']} ({'CUDA graph' if mode.get('graph_active') else 'eager blocks'}), "
+                 f"observe_every {mode['observe_every']}, delivery {mode['delivery']}" if "graph_steps" in mode else "")
+    print(f"backend: {result['simulator_effective']} via {result['backend']}{default_note}; "
+          f"device {result['device']}{gpu}; dtype {result['dtype']}{mode_note}", flush=True)
     print(f"kernels: {result['kernel_cells']} cells, {result['neurons_per_node']} neurons per node, "
           f"{result['copies']} nodes, {result['width']}x{result['height']} pixels x "
           f"{result['frames_requested']} frames, pacing {result['pacing']}", flush=True)

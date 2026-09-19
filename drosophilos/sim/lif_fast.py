@@ -1,15 +1,34 @@
-"""Static-shape PyTorch LIF backend for CUDA/MPS/CPU.
+"""Static-shape PyTorch LIF backend (docs/perf_campaign.md §4, Track A3/A4).
 
-Unlike :class:`lif_torch.TorchSim`, thresholding never extracts a variable-length index
-array.  Spikes stay as a dense bool tensor, delivery is one sparse-dense product per delay
-group (a static scatter reduction on MPS/per-node weights), and only watched spike columns
-leave the device through :class:`observe.Observer`.
+The same model as ``lif_torch.TorchSim`` (schedule.md §5), expression for expression and in
+the same floating-point order, but the step has no data-dependent shapes and no host
+synchronisation:
+
+* **threshold** keeps the spikes as a dense ``(B, n)`` bool mask — no ``torch.nonzero``;
+* **deliver** is one sparse-dense product per distinct delay, ``W_dᵀ (n×n CSR of quanta)
+  @ spkᵀ`` — no ``repeat_interleave``/``cumsum``/gathers/``index_put_``. Quanta are
+  integers and the product is exact (sums stay below 2^53 in float64, 2^24 in float32, checked
+  at construction), so delivery order does not matter and the ring stays int64 as in
+  ``TorchSim``: the spike traces are bit-identical to ``RefSim``/``TorchSim``;
+* **observe** gathers the watched columns into a device buffer (``observe.Observer``) and
+  copies a block to the host every K steps;
+* **integrate** and **reset** are in-place ops on preallocated buffers.
+
+Devices: CUDA uses the CSR product (cuSPARSE); CPU (whose CSR kernel is slower than the
+alternative) and MPS (no sparse support), and per-node quanta on any device (perturbed
+campaigns have no shared matrix), use an edge-wise gather/``scatter_add_`` in int64 — still
+static-shape and exact. ``delivery="sparse"|"scatter"`` overrides the choice. ``graph_steps=K`` runs K steps as one block: on
+CUDA the block is captured once as a ``torch.cuda.CUDAGraph`` and replayed; elsewhere (and
+for partial tail blocks) the same function runs eagerly, so the block semantics — events
+pre-staged into the ring before the block, observation committed after it — are testable on
+this laptop. See docs/track_a.md.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 import logging
+import warnings
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -18,8 +37,9 @@ from .model import D_MAX, Params, Topology, broadcast_param
 from .observe import Observer
 from .profile import Profiler
 
-
 LOG = logging.getLogger(__name__)
+
+_EXACT_LIMIT = {torch.float32: 2**24, torch.float64: 2**53}
 
 
 class FastSim:
@@ -44,7 +64,11 @@ class FastSim:
         observer: Observer | None = None,
         observe_every: int = 1,
         graph_steps: int = 0,
+        delivery: str = "auto",
     ):
+        """``TorchSim``'s constructor plus: ``observer`` (default: a full-trace observer
+        transferring every ``observe_every`` steps), ``graph_steps`` (K-step blocks; 0 = one
+        eager step at a time), ``delivery`` ("auto" | "sparse" | "scatter")."""
         self.topo = topo
         self.params = params
         self.B = int(n_nodes)
@@ -52,84 +76,77 @@ class FastSim:
         self.L = D_MAX + 1
         self.device = torch.device(device)
         self.dtype = dtype
-        if dtype not in (torch.float32, torch.float64):
+        if dtype not in _EXACT_LIMIT:
             raise ValueError("FastSim supports float32 or float64")
         if self.device.type == "mps" and dtype != torch.float32:
-            raise ValueError("MPS FastSim supports float32 only")
+            raise ValueError("FastSim on MPS supports float32 only")
         self.graph_steps = int(graph_steps)
         if self.graph_steps < 0 or self.graph_steps > self.L:
-            raise ValueError(f"graph_steps must lie in [0, {self.L}]")
+            raise ValueError(f"graph_steps must lie in [0, {self.L}]: events are staged one ring length ahead")
+        if delivery not in ("auto", "sparse", "scatter"):
+            raise ValueError("delivery must be 'auto', 'sparse' or 'scatter'")
 
         a, c, k = params.constants()
         self.a, self.c, self.k = float(a), float(c), float(k)
         self.w_unit = float(params.w_unit)
         self.n_ref = int(params.n_ref)
+        self.E_L = float(params.E_L)
+        self.V_reset = float(params.V_reset)
         B, n, dev = self.B, self.n, self.device
 
         def T(arr, dt=None):
             return torch.as_tensor(np.ascontiguousarray(arr), device=dev, dtype=dt)
 
         self.V_th = T(broadcast_param(params.V_th if V_th is None else V_th, B, n, np.float64), dtype)
-        self.bias = T(broadcast_param(topo.sim_bias(bias), B, n, np.float64), dtype)
+        self.bias = T(broadcast_param(topo.sim_bias(bias), B, n, np.float64), dtype)  # None: the topology's own biases
         self.gain = T(broadcast_param(gain, B, n, np.float64), dtype)
         self.silenced = T(broadcast_param(silenced, B, n, bool), torch.bool)
         self._enabled = ~self.silenced
-        self.E_L = float(params.E_L)
-        self.V_reset = float(params.V_reset)
-        self._rest = self.bias + self.E_L
+        # the two per-step constants TorchSim recomputes: E_L + bias and w_unit * gain, in
+        # the same expressions so the roundings match
+        self._rest = self.E_L + self.bias
+        self._wg = self.w_unit * self.gain
 
         q_override = None
         if quanta is not None:
             q_override = np.asarray(quanta, dtype=np.int64)
             if q_override.shape != (B, topo.nnz):
                 raise ValueError(f"per-node quanta must have shape ({B}, {topo.nnz})")
-        self._check_exact_delivery(q_override)
-        self._per_node_quanta = None if q_override is None else T(q_override, dtype)
+        self.t_quanta = None if q_override is None else T(q_override, torch.int64)
 
+        # state (TorchSim's, same dtypes) and preallocated scratch
         self.V = torch.full((B, n), self.E_L, device=dev, dtype=dtype)
         self.g = torch.zeros((B, n), device=dev, dtype=dtype)
         self.r = torch.zeros((B, n), device=dev, dtype=torch.int32)
-        # Quanta remain exactly represented in this float ring after the constructor bound.
-        self.ring = torch.zeros((self.L, B, n), device=dev, dtype=dtype)
-        self._slot = torch.zeros(1, device=dev, dtype=torch.int64)
-        self._due = torch.empty((1, B, n), device=dev, dtype=dtype)
+        self.ring = torch.zeros((self.L, B, n), device=dev, dtype=torch.int64)
+        self._slot = torch.zeros(1, device=dev, dtype=torch.int64)  # step_index % L, on the device
+        self._at = torch.zeros(1, device=dev, dtype=torch.int64)
         self._Vn = torch.empty_like(self.V)
-        self._scaled = torch.empty_like(self.g)
+        self._tmp = torch.empty_like(self.V)
         self._held = torch.empty((B, n), device=dev, dtype=torch.bool)
         self._active = torch.empty((B, n), device=dev, dtype=torch.bool)
-        self._spk = torch.empty((B, n), device=dev, dtype=torch.bool)
+        self._spk = torch.zeros((B, n), device=dev, dtype=torch.bool)
+        self._due = torch.empty((1, B, n), device=dev, dtype=torch.int64)
+        self._due_f = torch.empty((B, n), device=dev, dtype=dtype)
+        self._spkT = torch.empty((n, B), device=dev, dtype=dtype)
+        self._acc = torch.empty((B, n), device=dev, dtype=torch.int64)
 
-        self._delay_groups = self._make_delay_groups(q_override)
-        distinct = tuple(group[0] for group in self._delay_groups)
-        if q_override is not None:
-            self.delivery_path = f"static scatter, per-node quanta, delays={distinct}"
-        elif self.device.type == "mps":
-            self.delivery_path = f"static scatter (MPS sparse CSR unavailable), delays={distinct}"
-        else:
-            self.delivery_path = f"sparse CSR, delays={distinct}"
-        if len(distinct) > 1:
-            LOG.info("FastSim grouped delivery across delays %s", distinct)
+        self._groups = self._build_delivery(q_override, delivery)
+        self.delays = tuple(g["delay"] for g in self._groups)
+        self.delivery_path = self._groups[0]["path"] if self._groups else "none (no synapses)"
+        if len(self.delays) > 1:
+            LOG.info("FastSim: %d distinct delays %s -> one sparse product per delay per step", len(self.delays), self.delays)
 
         self.stray_p = float(stray_rate_hz) * params.dt / 1000.0
         self.stray_q = int(stray_quanta)
         self._stray_gen = None
         if self.stray_p > 0.0:
             self._stray_gen = torch.Generator(device=dev)
-            seed = int(stray_seed if stray_seed is not None else np.random.default_rng().integers(2**31 - 1))
-            self._stray_gen.manual_seed(seed)
+            self._stray_gen.manual_seed(int(stray_seed if stray_seed is not None else np.random.default_rng().integers(2**31 - 1)))
 
         self.step_index = 0
         self.profiler = profiler if profiler is not None else Profiler(False)
         self._events: dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = defaultdict(list)
-        self.observer = observer or Observer(
-            range(n), B, n_neurons=n, device=dev, observe_every=observe_every, full_trace=True
-        )
-        if self.observer.B != B or self.observer.n != n or self.observer.device != dev:
-            raise ValueError("observer shape/device does not match FastSim")
-        # Compatibility for token.py and existing diagnostics.  The lists belong to Observer.
-        self._spk_step = self.observer._spk_step
-        self._spk_node = self.observer._spk_node
-        self._spk_neuron = self.observer._spk_neuron
 
         self.record = list(record) if record else []
         self.rec_V: list[np.ndarray] = []
@@ -137,55 +154,93 @@ class FastSim:
         if self.record:
             self._rec_b = torch.tensor([b for b, _ in self.record], device=dev, dtype=torch.int64)
             self._rec_i = torch.tensor([i for _, i in self.record], device=dev, dtype=torch.int64)
-        self._compiled_block = None
-        self.graph_enabled = False
+
+        self._graph = None
+        self.graph_active = False
         self.graph_fallback_reason: str | None = None
+        if observer is None:  # the default: everything, transferred every observe_every steps (or per block)
+            observer = Observer(range(n), B, n_neurons=n, device=dev, full_trace=True,
+                                observe_every=max(1, int(observe_every), self.graph_steps))
+        self.set_observer(observer)
 
-    def _check_exact_delivery(self, per_node: np.ndarray | None) -> None:
-        limit = 2**24 if self.dtype == torch.float32 else 2**53
-        if not self.topo.nnz:
-            return
-        if per_node is None:
-            inbound = np.zeros(self.n, dtype=np.int64)
-            np.add.at(inbound, self.topo.dst, np.abs(self.topo.quanta.astype(np.int64)))
-            bound = int(inbound.max(initial=0))
-        else:
-            bound = 0
-            for row in per_node:
-                inbound = np.zeros(self.n, dtype=np.int64)
-                np.add.at(inbound, self.topo.dst, np.abs(row))
-                bound = max(bound, int(inbound.max(initial=0)))
-        if bound >= limit:
-            raise ValueError(
-                f"FastSim {self.dtype} delivery could exceed exact integer range: "
-                f"max absolute inbound quanta {bound} >= {limit}"
-            )
+    # ---- construction helpers ---------------------------------------------------------
+    def set_observer(self, observer: Observer) -> None:
+        """Install the observer the host reads through (a runner replaces the default)."""
+        if observer.B != self.B or observer.n != self.n or observer.device != self.device:
+            raise ValueError("observer shape/device does not match this FastSim")
+        if self.graph_steps and observer.observe_every < self.graph_steps:
+            raise ValueError(f"observer buffer ({observer.observe_every}) is smaller than graph_steps ({self.graph_steps})")
+        self.observer = observer
+        # compatibility with protocol.token.recent_active & co. when handed the simulator
+        self._spk_step = observer._spk_step
+        self._spk_node = observer._spk_node
+        self._spk_neuron = observer._spk_neuron
 
-    def _make_delay_groups(self, per_node: np.ndarray | None):
+    def _build_delivery(self, per_node: np.ndarray | None, delivery: str) -> list[dict]:
+        topo, dev, n = self.topo, self.device, self.n
+        if not topo.nnz:
+            return []
         groups = []
-        for delay in np.unique(self.topo.delay).tolist():
-            edge_ids = np.flatnonzero(self.topo.delay == delay).astype(np.int64)
-            src_np = self.topo.src[edge_ids].astype(np.int64)
-            dst_np = self.topo.dst[edge_ids].astype(np.int64)
-            src = torch.as_tensor(src_np, device=self.device, dtype=torch.int64)
-            dst = torch.as_tensor(dst_np, device=self.device, dtype=torch.int64)
-            sparse = None
-            if per_node is None and self.device.type != "mps":
-                order = np.lexsort((src_np, dst_np))
-                rows = dst_np[order]
-                cols = src_np[order]
-                crow = np.zeros(self.n + 1, dtype=np.int64)
-                np.cumsum(np.bincount(rows, minlength=self.n), out=crow[1:])
-                values = self.topo.quanta[edge_ids][order].astype(np.float64)
-                sparse = torch.sparse_csr_tensor(
-                    torch.as_tensor(crow, device=self.device),
-                    torch.as_tensor(cols, device=self.device),
-                    torch.as_tensor(values, device=self.device, dtype=self.dtype),
-                    size=(self.n, self.n), device=self.device, dtype=self.dtype,
-                )
-            groups.append((int(delay), edge_ids, src, dst, sparse))
+        for delay in np.unique(topo.delay).tolist():
+            edges = np.flatnonzero(topo.delay == delay).astype(np.int64)
+            src = topo.src[edges].astype(np.int64)
+            dst = topo.dst[edges].astype(np.int64)
+            q = topo.quanta[edges].astype(np.int64) if per_node is None else per_node[:, edges]
+            # the largest sum one step's product can form at one target: each source spikes at
+            # most once per step, so this bounds every partial sum of the float product
+            inbound = np.zeros(n, dtype=np.int64)
+            np.add.at(inbound, dst, np.abs(q).max(axis=0) if per_node is not None else np.abs(q))
+            bound = int(inbound.max(initial=0))
+            path = delivery
+            if path == "auto":
+                # the CSR product is the CUDA path (cuSPARSE SpMM, one kernel per delay). The
+                # CPU CSR kernel is single-threaded and ~10 ns per synapse (measured: 190 us
+                # for 19k edges, 10x the edge-wise scatter), and MPS has no sparse CSR at all,
+                # so both take the edge-wise int64 scatter, which is exact for any dtype.
+                if per_node is not None:
+                    path, why = "scatter", "per-node quanta"
+                elif dev.type != "cuda":
+                    path, why = "scatter", f"{dev.type} device"
+                elif bound >= _EXACT_LIMIT[self.dtype]:
+                    path, why = "scatter", f"inbound quanta bound {bound} >= {_EXACT_LIMIT[self.dtype]} would round in {self.dtype}"
+                else:
+                    path, why = "sparse", ""
+                if why:
+                    LOG.debug("FastSim: delay %d uses edge-wise int64 scatter delivery (%s)", delay, why)
+            if path == "sparse":
+                if per_node is not None:
+                    raise ValueError("delivery='sparse' needs shared quanta; per-node quanta use 'scatter'")
+                if bound >= _EXACT_LIMIT[self.dtype]:
+                    raise ValueError(
+                        f"delivery='sparse' in {self.dtype} is not exact here: inbound quanta bound {bound} >= "
+                        f"{_EXACT_LIMIT[self.dtype]}; use float64 or delivery='scatter'"
+                    )
+                # W_dᵀ: rows = targets, columns = sources; duplicate (src, dst) pairs summed
+                pair = dst * n + src
+                uniq, inv = np.unique(pair, return_inverse=True)
+                vals = np.zeros(len(uniq), dtype=np.int64)
+                np.add.at(vals, inv, q)
+                rows, cols = uniq // n, uniq % n
+                crow = np.zeros(n + 1, dtype=np.int64)
+                np.cumsum(np.bincount(rows, minlength=n), out=crow[1:])
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Sparse CSR tensor support is in beta")
+                    W = torch.sparse_csr_tensor(
+                        torch.as_tensor(crow, device=dev), torch.as_tensor(cols, device=dev),
+                        torch.as_tensor(vals, device=dev, dtype=self.dtype), size=(n, n), device=dev, dtype=self.dtype,
+                    )
+                groups.append({"delay": int(delay), "W": W, "path": f"sparse CSR ({self.dtype})"})
+            else:
+                q_t = torch.as_tensor(np.ascontiguousarray(q), device=dev, dtype=torch.int64)
+                groups.append({
+                    "delay": int(delay),
+                    "src": torch.as_tensor(src, device=dev), "q": q_t,
+                    "dst": torch.as_tensor(dst, device=dev).unsqueeze(0).expand(self.B, -1),
+                    "path": "edge-wise int64 scatter" + (" (per-node quanta)" if per_node is not None else ""),
+                })
         return groups
 
+    # ---- external port input ------------------------------------------------------------
     def add_events(self, node: int, steps, neurons, quanta) -> None:
         steps = np.asarray(steps, dtype=np.int64).ravel()
         neurons = np.asarray(neurons, dtype=np.int64).ravel()
@@ -196,81 +251,68 @@ class FastSim:
             raise ValueError("cannot schedule events in the past")
         if len(neurons) and (neurons.min() < 0 or neurons.max() >= self.n):
             raise ValueError("event neuron id out of range")
-        exact_limit = 2**24 if self.dtype == torch.float32 else 2**53
-        if len(quanta) and np.abs(quanta).max() >= exact_limit:
-            raise ValueError("external event quanta exceed the dtype's exact integer range")
-        for step in np.unique(steps):
-            at = steps == step
-            self._events[int(step)].append((
-                torch.full((int(at.sum()),), int(node), device=self.device, dtype=torch.int64),
-                torch.as_tensor(neurons[at], device=self.device, dtype=torch.int64),
-                torch.as_tensor(quanta[at], device=self.device, dtype=self.dtype),
+        dev = self.device
+        for s in np.unique(steps):
+            m = steps == s
+            self._events[int(s)].append((
+                torch.full((int(m.sum()),), int(node), device=dev, dtype=torch.int64),
+                torch.as_tensor(neurons[m], device=dev),
+                torch.as_tensor(quanta[m], device=dev),
             ))
 
     def _stage_events(self, first: int, count: int) -> None:
-        """Put host events in ring slots before the static numerical block starts."""
+        """Host injection: put the events of steps ``first .. first+count-1`` into their ring
+        slots before the block runs. Safe for ``count <= L``: slot ``s % L`` was last cleared
+        at step ``s - L``, before the block, and the block's own deliveries only add."""
         for step in range(int(first), int(first) + int(count)):
             slot = step % self.L
-            for nodes, neurons, quanta in self._events.pop(step, ()):
-                slots = torch.full_like(nodes, slot)
-                self.ring.index_put_((slots, nodes, neurons), quanta, accumulate=True)
+            for node_t, neur_t, q_t in self._events.pop(step, ()):
+                self.ring.index_put_((torch.full_like(node_t, slot), node_t, neur_t), q_t, accumulate=True)
 
-    def _timed(self, name, fn, *args):
-        if not self.profiler.enabled:
-            return fn(*args)
-        with self.profiler.region(name):
-            return fn(*args)
-
+    # ---- one step, tensor ops only (schedule.md §5) ---------------------------------------
     def _integrate(self) -> None:
-        torch.gt(self.r, 0, out=self._held)
-        torch.eq(self.r, 0, out=self._active)
+        V, g, r = self.V, self.g, self.r
+        torch.gt(r, 0, out=self._held)
+        torch.eq(r, 0, out=self._active)
         self._active.logical_and_(self._enabled)
-        self._Vn.copy_(self.V).sub_(self._rest).mul_(self.a).add_(self._rest).add_(self.g, alpha=self.k)
-        torch.where(self._active, self._Vn, self.V, out=self.V)
-        self.V.masked_fill_(self._held, self.V_reset)
-        self.g.mul_(self.c)
-        self.V.masked_fill_(self.silenced, self.E_L)
-        self.g.masked_fill_(self.silenced, 0.0)
-        torch.sub(self.r, self._held, out=self.r)
+        # Vn = E_L + bias + (V - E_L - bias) * a + g * k, in TorchSim's evaluation order
+        self._Vn.copy_(V).sub_(self.E_L).sub_(self.bias).mul_(self.a).add_(self._rest)
+        torch.mul(g, self.k, out=self._tmp)
+        self._Vn.add_(self._tmp)
+        torch.where(self._active, self._Vn, V, out=V)
+        V.masked_fill_(self._held, self.V_reset)
+        g.mul_(self.c)
+        V.masked_fill_(self.silenced, self.E_L)
+        g.masked_fill_(self.silenced, 0.0)
+        r.sub_(self._held.to(torch.int32))  # r = where(held, r - 1, r)
 
     def _threshold(self) -> None:
         torch.gt(self.V, self.V_th, out=self._spk)
         self._spk.logical_and_(self._active)
 
-    def _group_sum(self, group) -> torch.Tensor:
-        _delay, edge_ids, src, dst, sparse = group
-        if sparse is not None:
-            return torch.sparse.mm(sparse, self._spk.to(self.dtype).T).T
-        # MPS has no usable sparse CSR matmul.  This is still static-shape and never extracts
-        # spike indices; per-node quanta naturally uses the same edge-wise representation.
-        values = self._spk.index_select(1, src).to(self.dtype)
-        if self._per_node_quanta is None:
-            q = torch.as_tensor(
-                self.topo.quanta[edge_ids], device=self.device, dtype=self.dtype
-            ).unsqueeze(0)
-        else:
-            ids = torch.as_tensor(edge_ids, device=self.device, dtype=torch.int64)
-            q = self._per_node_quanta.index_select(1, ids)
-        values.mul_(q)
-        out = torch.zeros_like(self.g)
-        out.scatter_add_(1, dst.unsqueeze(0).expand(self.B, -1), values)
-        return out
-
     def _deliver(self) -> None:
-        for group in self._delay_groups:
-            delay = group[0]
-            delivery = self._group_sum(group)
-            at = torch.remainder(self._slot + delay, self.L)
-            self.ring.index_add_(0, at, delivery.unsqueeze(0))
+        for grp in self._groups:
+            if "W" in grp:
+                self._spkT.copy_(self._spk.t())
+                prod = torch.sparse.mm(grp["W"], self._spkT)  # (n_dst, B), exact integers
+                self._acc.copy_(prod.t())
+            else:
+                vals = self._spk.index_select(1, grp["src"]).to(torch.int64)
+                vals.mul_(grp["q"])
+                self._acc.zero_()
+                self._acc.scatter_add_(1, grp["dst"], vals)
+            torch.add(self._slot, grp["delay"], out=self._at)
+            self._at.remainder_(self.L)
+            self.ring.index_add_(0, self._at, self._acc.unsqueeze(0))
         torch.index_select(self.ring, 0, self._slot, out=self._due)
+        due = self._due[0]
         if self.stray_p > 0.0:
-            hit = torch.rand(
-                (self.B, self.n), device=self.device, generator=self._stray_gen
-            ) < self.stray_p
-            self._due[0].add_(hit.to(self.dtype), alpha=self.stray_q)
-        self._scaled.copy_(self.gain).mul_(self.w_unit).mul_(self._due[0])
-        self.g.add_(self._scaled)
-        self.ring.index_fill_(0, self._slot, 0.0)
+            hit = torch.rand((self.B, self.n), device=self.device, generator=self._stray_gen) < self.stray_p
+            due.add_(hit.to(torch.int64) * self.stray_q)
+        self._due_f.copy_(due)
+        torch.mul(self._wg, self._due_f, out=self._tmp)
+        self.g.add_(self._tmp)
+        self.ring.index_fill_(0, self._slot, 0)
         self.g.masked_fill_(self.silenced, 0.0)
 
     def _reset(self) -> None:
@@ -283,68 +325,113 @@ class FastSim:
             self.rec_V.append(self.V[self._rec_b, self._rec_i].cpu().numpy())
             self.rec_g.append(self.g[self._rec_b, self._rec_i].cpu().numpy())
 
-    @torch.no_grad()
-    def step(self) -> None:
-        s = self.step_index
-        self._stage_events(s, 1)
+    def _timed(self, name, fn, *args):
+        if not self.profiler.enabled:
+            return fn(*args)
+        with self.profiler.region(name):
+            return fn(*args)
+
+    def _step_core(self, obs_slot: int | None) -> None:
+        """Integrate, threshold, observe, deliver, reset. ``obs_slot`` None: the observer's
+        own eager bookkeeping; an int: device-only gather into that slot (block mode)."""
         self._timed("integrate", self._integrate)
         self._timed("threshold", self._threshold)
-        self._timed("observe", self.observer.write_dense, s, self._spk)
+        if obs_slot is None:
+            self._timed("observe", self.observer.write_dense, self.step_index, self._spk)
+        else:
+            self._timed("observe", self.observer.gather, obs_slot, self._spk)
         self._timed("deliver", self._deliver)
         self._timed("reset", self._reset)
+
+    @torch.no_grad()
+    def step(self) -> None:
+        """One eager step (events staged for this step only)."""
+        s = self.step_index
+        self._stage_events(s, 1)
+        self._step_core(None)
         self._timed("record", self._record)
         self.step_index = s + 1
 
-    def _run_eager_block(self, count: int) -> None:
-        for _ in range(int(count)):
-            self.step()
+    # ---- K-step blocks ----------------------------------------------------------------------
+    def _block_eager(self, count: int) -> None:
+        for k in range(count):
+            self._step_core(k)
+            if self.record:
+                self._record()
 
-    def _configure_compiled_block(self, count: int) -> None:
-        """Best-effort CUDA low-overhead compilation; eager remains the safe fallback.
+    def _run_block(self, count: int) -> None:
+        s0 = self.step_index
+        self.observer.flush()
+        self._stage_events(s0, count)
+        if count == self.graph_steps and self._graph_ready():
+            self._timed("graph_replay", self._graph.replay)
+        else:
+            self._block_eager(count)
+        self._timed("observe_commit", self.observer.commit_block, s0, count)
+        self.step_index = s0 + count
 
-        PyTorch's sparse CSR capture support is version/device dependent.  Compilation is
-        deliberately lazy and failures are reported through ``graph_fallback_reason``.
-        """
+    def _graph_ready(self) -> bool:
+        if self._graph is not None:
+            return True
+        if self.graph_fallback_reason is not None:
+            return False
+        if self.profiler.enabled:  # per-step regions are being timed: eager for now, capture later
+            return False
+        reason = None
         if self.device.type != "cuda":
-            self.graph_fallback_reason = "CUDA graph/compile unavailable on this device; eager K-step loop used"
-            return
-        if self.stray_p or self.record:
-            self.graph_fallback_reason = "stray RNG or host trajectory recording requires eager steps"
-            return
-        # ``step`` includes observation bookkeeping and step labels, so compile the fixed
-        # numerical sequence while the outer block owns event staging and host observation.
-        # Cluster validation decides whether the installed torch sparse backend keeps this
-        # loop in one CUDA graph; any graph break remains correct and is visible in profiling.
-        try:
-            self._compiled_block = torch.compile(self._run_eager_block, mode="reduce-overhead")
-            self.graph_enabled = True
-        except Exception as exc:  # pragma: no cover - CUDA-only construction
-            self.graph_fallback_reason = f"torch.compile unavailable: {type(exc).__name__}: {exc}"
-            LOG.warning("FastSim graph fallback: %s", self.graph_fallback_reason)
+            reason = f"CUDA graphs need a CUDA device (this is {self.device.type}); the K-step block runs eagerly"
+        elif self.stray_p > 0.0:
+            reason = "stray input draws from a torch.Generator each step; capturing it needs the graph-safe RNG registration (TODO(cluster))"
+        elif self.record:
+            reason = "record= copies V/g to the host every step; a captured block cannot"
+        if reason is None:
+            try:
+                self._capture_graph()
+            except Exception as exc:  # pragma: no cover - CUDA only
+                reason = f"CUDA graph capture failed: {type(exc).__name__}: {exc}"
+                self._graph = None
+        if reason is not None:
+            self.graph_fallback_reason = reason
+            (LOG.info if self.device.type != "cuda" else LOG.warning)("FastSim graph_steps=%d: %s", self.graph_steps, reason)
+            return False
+        self.graph_active = True
+        return True
+
+    def _capture_graph(self) -> None:  # pragma: no cover - CUDA only
+        """Capture ``_block_eager(K)`` once. Warm-up and capture advance the device state, so
+        it is saved before and copied back after; the observer buffer is overwritten before
+        the next commit anyway."""
+        K = self.graph_steps
+        saved = self._state_clone()
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            for _ in range(2):
+                self._block_eager(K)
+        torch.cuda.current_stream().wait_stream(side)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            self._block_eager(K)
+        torch.cuda.synchronize()
+        self._state_restore(saved)
+        self._graph = graph
 
     @torch.no_grad()
     def run(self, n_steps: int) -> None:
         remaining = int(n_steps)
         if remaining < 0:
             raise ValueError("n_steps must be non-negative")
-        K = self.graph_steps
-        if not K:
-            self._run_eager_block(remaining)
-            self.observer.flush()
-            return
-        if self._compiled_block is None and self.graph_fallback_reason is None:
-            self._configure_compiled_block(K)
-        while remaining:
-            count = min(K, remaining)
-            # Partial tail blocks and every non-CUDA run use the same eager function tested
-            # on CPU/MPS.  Event injection remains inside each step, preserving exact timing.
-            if count == K and self._compiled_block is not None:
-                self._compiled_block(count)
-            else:
-                self._run_eager_block(count)
-            remaining -= count
+        if self.graph_steps == 0:
+            for _ in range(remaining):
+                self.step()
+        else:
+            while remaining:
+                count = min(self.graph_steps, remaining)
+                self._run_block(count)
+                remaining -= count
         self.observer.flush()
 
+    # ---- results -----------------------------------------------------------------------------
     @property
     def trace(self):
         return self.observer.trace
@@ -352,34 +439,43 @@ class FastSim:
     def recorded(self) -> tuple[np.ndarray, np.ndarray]:
         return np.array(self.rec_V), np.array(self.rec_g)
 
-    def snapshot(self) -> dict:
+    # ---- snapshots (schedule.md §8) ------------------------------------------------------------
+    def _state_clone(self) -> dict:
         return {
-            "step_index": self.step_index,
             "V": self.V.clone(), "g": self.g.clone(), "r": self.r.clone(),
             "ring": self.ring.clone(), "slot": self._slot.clone(),
-            "events": {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v]
-                       for k, v in self._events.items()},
-            "quanta": None if self._per_node_quanta is None else self._per_node_quanta.clone(),
-            "V_th": self.V_th.clone(), "bias": self.bias.clone(), "gain": self.gain.clone(),
-            "silenced": self.silenced.clone(),
             "stray_rng": None if self._stray_gen is None else self._stray_gen.get_state(),
         }
 
+    def _state_restore(self, st: dict) -> None:
+        self.V.copy_(st["V"]); self.g.copy_(st["g"]); self.r.copy_(st["r"])
+        self.ring.copy_(st["ring"]); self._slot.copy_(st["slot"])
+        if self._stray_gen is not None and st["stray_rng"] is not None:
+            self._stray_gen.set_state(st["stray_rng"])
+
+    def snapshot(self) -> dict:
+        snap = self._state_clone()
+        snap.update({
+            "step_index": self.step_index,
+            "events": {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in self._events.items()},
+            "quanta": None if self.t_quanta is None else self.t_quanta.clone(),
+            "V_th": self.V_th.clone(), "bias": self.bias.clone(), "gain": self.gain.clone(),
+            "silenced": self.silenced.clone(),
+        })
+        return snap
+
     def restore(self, snap: dict) -> None:
         self.step_index = int(snap["step_index"])
-        self.V.copy_(snap["V"]); self.g.copy_(snap["g"]); self.r.copy_(snap["r"])
-        self.ring.copy_(snap["ring"]); self._slot.copy_(snap["slot"])
-        self._events = defaultdict(
-            list, {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v]
-                   for k, v in snap["events"].items()}
-        )
-        if self._per_node_quanta is not None and snap["quanta"] is not None:
-            self._per_node_quanta.copy_(snap["quanta"])
-        self.V_th.copy_(snap["V_th"]); self.bias.copy_(snap["bias"])
-        self.gain.copy_(snap["gain"]); self.silenced.copy_(snap["silenced"])
+        self._state_restore(snap)
+        self._events = defaultdict(list, {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in snap["events"].items()})
+        if snap["quanta"] is not None:
+            if self.t_quanta is None or not torch.equal(self.t_quanta, snap["quanta"]):
+                raise ValueError("FastSim bakes per-node quanta into its delivery tables; restore cannot change them")
+        self.V_th.copy_(snap["V_th"]); self.bias.copy_(snap["bias"]); self.gain.copy_(snap["gain"])
+        self.silenced.copy_(snap["silenced"])
+        # into the existing buffers: a captured graph holds their addresses
         self._enabled.copy_(~self.silenced)
-        self._rest.copy_(self.bias + self.E_L)
-        if self._stray_gen is not None and snap["stray_rng"] is not None:
-            self._stray_gen.set_state(snap["stray_rng"])
+        self._rest.copy_(self.E_L + self.bias)
+        self._wg.copy_(self.w_unit * self.gain)
         self.observer.clear()
-        self.rec_V.clear(); self.rec_g.clear()
+        self.rec_V, self.rec_g = [], []

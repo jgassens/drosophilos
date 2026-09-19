@@ -170,11 +170,13 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
     dtype = torch.float32 if cfg["dtype"] == "float32" else torch.float64
     # Capturing every neuron on node 0 is intentionally limited to short primitive runs.  It
     # adds trace-copy/memory cost, which is recorded rather than pretending spikes are free.
+    fast = {"graph_steps": int(cfg.get("graph_steps") or 0), "observe_every": cfg.get("observe_every"),
+            "delivery": cfg.get("delivery", "auto")} if cfg["backend"] == "torch-fast" else {}
     outs, _sim, stats = run_pipeline_batched(
         pl, params, [list(values) for _ in range(copies)], max_ms=max_neural_s * 1000,
         device=cfg["device"], dtype=dtype, expect_outputs=[len(values) * len(spec.outputs)] * copies,
         progress=0, on_output=observed, profile_steps=profile_steps,
-        capture_spikes=(0, range(pl.net.n)),
+        capture_spikes=(0, range(pl.net.n)), backend=cfg["backend"], **fast,
     )
     wrong = missing = duplicates = 0
     for node in range(copies):
@@ -203,6 +205,9 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
         "wall_neural": None if not neural else wall / neural, "neurons": pl.net.n, "edges": pl.net.nnz,
         "spikes": int(len(captured_steps)), "spike_count_method": "capture_spikes(all neurons, node 0)",
         "spike_count_cost": "primitive-only trace capture; extra host memory/copy work",
+        "simulator": stats["simulator"],
+        "simulator_mode": {key: stats[key] for key in ("observe_every", "graph_steps", "graph_active",
+                                                        "graph_fallback_reason", "delivery", "delays") if key in stats},
         "wrong": wrong, "missing": missing, "duplicates": duplicates,
         "invalid": stats["bad_outputs"], "faults": stats["faults"], "timeouts": stats["timeouts"],
         "host_stalls": stats["host_stalls"], "truncated": stats["truncated"], "max_neural_s": max_neural_s,
@@ -214,10 +219,12 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
 def _render_run(workload: str, cfg: dict[str, Any], *, out: Path, profile_steps: int = 0,
                 workloads: dict[str, dict[str, Any]] = None) -> dict[str, Any]:
     spec = (SMALL_WORKLOADS if workloads is None else workloads)[workload]
+    fast = {"graph_steps": int(cfg.get("graph_steps") or 0), "observe_every": cfg.get("observe_every"),
+            "delivery": cfg.get("delivery", "auto")} if cfg["backend"] == "torch-fast" else {}
     rec = render(RenderConfig(source=spec["source"], width=spec["width"], height=spec["height"], frames=spec["frames"],
                               inputs=spec["inputs"], nodes=cfg["copies"], backend=cfg["backend"], device=cfg["device"],
                               dtype=cfg["dtype"], pacing=cfg["pacing"], mul=cfg["mul"], progress=0,
-                              profile_steps=profile_steps, out=str(out)))
+                              profile_steps=profile_steps, out=str(out), **fast))
     timing = rec["timing"]
     steps = timing["frame_complete_step"]
     first_neural = None if not steps or steps[0] is None else steps[0] * Params().dt / 1000
@@ -235,6 +242,7 @@ def _render_run(workload: str, cfg: dict[str, Any], *, out: Path, profile_steps:
         "invalid": rec["invalid_outputs"], "faults": rec["faults"], "timeouts": rec["timeouts"],
         "host_stalls": rec["host_stalls"], "truncated": rec["truncated"], "timing": timing,
         "profile": rec["profile"], "profiled": bool(profile_steps), "reproducibility": rec,
+        "simulator": rec.get("simulator_effective", rec.get("simulator")), "simulator_mode": rec.get("simulator_mode", {}),
     }
 
 
@@ -377,8 +385,20 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("--copies must be positive integers")
     baseline = {"backend": args.backend, "device": args.device, "dtype": args.dtype, "mul": args.mul,
                 "copies": copies[0], "pacing": args.pacing}
-    campaign = CampaignConfig(baseline, [Variant(f"copies-{n}", {"copies": n}) for n in copies[1:]])
-    configs = campaign.configurations()
+    fast_mode = {"graph_steps": int(getattr(args, "graph_steps", 0) or 0), "observe_every": getattr(args, "observe_every", None),
+                 "delivery": getattr(args, "delivery", "auto") or "auto"}
+    if args.backend != "torch-fast" and getattr(args, "variant_backend", None) != "torch-fast" and (
+            fast_mode["graph_steps"] or fast_mode["observe_every"] or fast_mode["delivery"] != "auto"):
+        raise ValueError("--graph-steps, --observe-every and --delivery apply to torch-fast configurations only")
+    variants = [Variant(f"copies-{n}", {"copies": n}) for n in copies[1:]]
+    variant_backend = getattr(args, "variant_backend", None)
+    if variant_backend:
+        if variant_backend == args.backend:
+            raise ValueError("--variant-backend must differ from --backend")
+        variants.append(Variant(f"backend-{variant_backend}", {"backend": variant_backend}))
+    campaign = CampaignConfig(baseline, variants)
+    configs = [(name, {**cfg, **(fast_mode if cfg["backend"] == "torch-fast" else {})}, variant_names)
+               for name, cfg, variant_names in campaign.configurations()]
     planned = [{"name": name, **cfg} for name, cfg, _variants in configs]
 
     work: list[tuple[str, str]] = []
@@ -470,7 +490,16 @@ def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--levels", default="primitive", help="comma-separated: primitive, small, historical "
                     "(small/historical are cluster workloads; see --allow-cpu-renders)")
-    ap.add_argument("--backend", choices=("torch",), default="torch", help="batched runner backend")
+    ap.add_argument("--backend", choices=("torch", "torch-fast"), default="torch",
+                    help="batched runner backend: TorchSim, or FastSim (docs/perf_campaign.md §4 Track A)")
+    ap.add_argument("--graph-steps", type=int, default=0,
+                    help="torch-fast only: K-step blocks (a CUDA graph on CUDA; eager blocks elsewhere)")
+    ap.add_argument("--observe-every", type=int, default=None,
+                    help="torch-fast only: spike transfer interval in steps (default: the decode window)")
+    ap.add_argument("--delivery", default="auto", choices=("auto", "sparse", "scatter"),
+                    help="torch-fast only: synaptic delivery kernel (auto: CSR product on CUDA, scatter elsewhere)")
+    ap.add_argument("--variant-backend", default=None, choices=("torch", "torch-fast"),
+                    help="add a one-key backend variant against the baseline (a simulator-only comparison)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--dtype", choices=("float64", "float32"), default="float64")
     ap.add_argument("--mul", choices=("array", "pipelined"), default="array")

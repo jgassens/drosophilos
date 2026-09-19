@@ -829,7 +829,9 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
 
 
 def _pipeline_observation_ids(pl: Pipeline, capture_ids=()) -> np.ndarray:
-    """The complete host-visible set used by the pipeline runners."""
+    """Every neuron the pipeline runners read: READY of each input stream, the completion and
+    the R-bit rail taps of each output master, the fault latches, the producers' watchdog
+    timeouts, plus any diagnostic capture ids."""
     ids = set(int(x) for x in capture_ids)
     ids.update(reg.stage.ready for reg, _ in pl.inputs.values())
     for output in pl.outputs:
@@ -841,27 +843,74 @@ def _pipeline_observation_ids(pl: Pipeline, capture_ids=()) -> np.ndarray:
     return np.asarray(sorted(ids), dtype=np.int64)
 
 
-def _step_observed(sim, observer) -> None:
-    """Advance once and feed Observer from either direct or legacy simulator output."""
-    sim.step()
-    if getattr(sim, "observer", None) is not observer:
-        observer.feed_legacy(sim)
+def _attach_observer(sim, pl: Pipeline, B: int, *, window: int, full_trace: bool = False,
+                     observe_every: int | None = None, capture: "tuple[int, object] | None" = None):
+    """The observer a runner reads spikes through (docs/perf_campaign.md §4 Track A1). A
+    FastSim gets it installed and writes it from the device; RefSim/TorchSim are read after
+    each step through `Observer.feed_legacy`. Watched: `_pipeline_observation_ids` (all
+    neurons with `full_trace`); retained: 8 windows (everything with `full_trace`; the
+    capture subset for the whole run)."""
+    from ..sim.lif_fast import FastSim
+    from ..sim.observe import Observer
+    n = pl.net.n
+    cap = None
+    if capture is not None:
+        node, ids = capture
+        cap = (int(node), np.asarray(sorted(set(int(x) for x in ids)), dtype=np.int64))
+    watch = np.arange(n, dtype=np.int64) if full_trace else _pipeline_observation_ids(pl, cap[1] if cap else ())
+    fast = isinstance(sim, FastSim)
+    every = int(observe_every) if observe_every else int(window)
+    if fast and sim.graph_steps:
+        every = max(every, sim.graph_steps)  # a block commits its observation when it ends
+    observer = Observer(watch, B, n_neurons=n, device=sim.device if fast else "cpu", observe_every=every,
+                        full_trace=full_trace, retain_steps=None if full_trace else 8 * window, capture=cap)
+    if fast:
+        sim.set_observer(observer)
+    return observer
+
+
+def _advance(sim, observer, block: int, trim_chunks: int | None) -> None:
+    """Move the simulation `block` steps forward and make those steps observable. A FastSim
+    observes as it steps (its observer flushes every K steps, or at the end of a block);
+    a RefSim/TorchSim is read after each step and trimmed to `trim_chunks` recent chunks
+    (the old runner's memory bound: a 128-copy run retaining every spike was OOM-killed)."""
+    if getattr(sim, "observer", None) is observer:
+        if block == 1:
+            sim.step()
+        else:
+            sim.run(block)
+    else:
+        for _ in range(block):
+            sim.step()
+            observer.feed_legacy(sim, trim_chunks=trim_chunks)
+
+
+def _sim_stats(sim, observer) -> dict:
+    out = {"simulator": type(sim).__name__, "observer": type(observer).__name__,
+           "observe_every": observer.observe_every, "full_trace": observer.full_trace}
+    if hasattr(sim, "delivery_path"):
+        out.update({"graph_steps": sim.graph_steps, "graph_active": sim.graph_active,
+                    "graph_fallback_reason": sim.graph_fallback_reason, "delivery": sim.delivery_path,
+                    "delays": list(sim.delays)})
+    return out
 
 
 def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 60000, gap_ms: float = 0.0,
                  sim=None, per_token: int | None = None, expect_outputs: int | None = None,
                  on_output=None, should_stop=None, wall_limit: float = 0.0,
-                 full_trace: bool = False) -> tuple[list, RefSim, dict]:
+                 full_trace: bool = False, observe_every: int | None = None) -> tuple[list, RefSim, dict]:
     """Streams `tokens` into the input producers and decodes every completion of each output
     cell's master in order. A token is a value (the first stream), a pair (stream, value), or
     a triple (stream, value, min_outputs): the host schedule; a triple is loaded only once the
     outputs so far (all cells) number at least min_outputs, which is how the host paces a
     parameter's producer (a world-update tick) behind the readers in flight (a frame's
     columns). Every token goes in after its stream's READY and no sooner than `gap_ms` after
-    the previous load. Steps the simulator one step at a time and reads the per-step spike
-    lists (a trace rebuild per poll is quadratic). Returns the first output's list of (step,
-    value); `stats["outputs_by_cell"]` holds every output's list. The run ends when the outputs
-    number `expect_outputs` in total (default: `per_token` per token, default one) or at `max_ms`."""
+    the previous load. Steps the simulator one step at a time and reads the watched spikes
+    through an `Observer` (`_attach_observer`; a trace rebuild per poll is quadratic). Returns
+    the first output's list of (step, value); `stats["outputs_by_cell"]` holds every output's
+    list. The run ends when the outputs number `expect_outputs` in total (default: `per_token`
+    per token, default one) or at `max_ms`. `full_trace` retains every spike (reference runs;
+    `sim.trace` of a FastSim needs it); `observe_every` is a FastSim's transfer interval."""
     net, drive = pl.net, pl.drive
     runner_started = time.perf_counter()
     deadline = runner_started + wall_limit if wall_limit and wall_limit > 0 else None
@@ -870,19 +919,17 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
         return bool((should_stop is not None and should_stop()) or
                     (deadline is not None and time.perf_counter() >= deadline))
 
-    from ..sim.observe import Observer
     sim = sim or RefSim(net.topology(), params)
-    watch_ids = np.arange(net.n, dtype=np.int64) if full_trace else _pipeline_observation_ids(pl)
-    observer = getattr(sim, "observer", None)
-    if observer is None or not np.isin(watch_ids, observer.watch_ids).all():
-        observer = Observer(watch_ids, 1, n_neurons=net.n, full_trace=full_trace)
-    sim.observer = observer
+    window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
+    observer = _attach_observer(sim, pl, 1, window=window, full_trace=full_trace, observe_every=observe_every)
+    trim = None if full_trace else 4 * window
+    block = sim.graph_steps if getattr(sim, "observer", None) is observer and sim.graph_steps else 1
     load_started = time.perf_counter()
     load_pipeline_image(sim, pl)
-    for _ in range(3000):  # the image's completions settle; stepwise so signals stop cleanly
-        if stop_requested():
-            break
-        _step_observed(sim, observer)
+    settle = 3000  # the image's completions settle; stepwise so signals stop cleanly
+    while settle and not stop_requested():
+        _advance(sim, observer, min(block, settle), trim)
+        settle -= min(block, settle)
     observer.flush()
     t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
@@ -892,7 +939,6 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
             sched.append((t[0], t[1], t[2] if len(t) > 2 else 0))
         else:
             sched.append((first_stream, t, 0))
-    window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
     gap = int(gap_ms / params.dt)
     ready_of = {st: reg.stage.ready for st, (reg, _) in pl.inputs.items()}
     n_ready = {st: 0 for st in pl.inputs}
@@ -907,24 +953,12 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     seen_f, seen_t = set(), set()
     want = expect_outputs or (per_token or len(pl.outputs)) * len(sched)  # total outputs over all cells: one per output cell per token
-    truncated = stop_requested()
-    while not stop_requested() and sim.step_index < int(max_ms / params.dt):
-        if k < len(sched):
-            st, value, min_outs = sched[k]
-            n_out = sum(len(v) for v in outs.values())
-            if n_ready[st] >= loaded[st] and n_out >= min_outs and (not loads or sim.step_index >= loads[-1] + gap):
-                t = sim.step_index + 5
-                Pst = pl.inputs[st][1]
-                for i, r in rails_for(value, pl.n):
-                    sim.add_events(0, [t], [Pst.rails[i][r].u], [drive.ignite])
-                loads.append(t)
-                load_events.append({"schedule_index": k, "stream": st, "value": value,
-                                    "injected_step": sim.step_index, "event_step": t,
-                                    "injected_wall_s": time.perf_counter()})
-                loaded[st] += 1
-                k += 1
-        _step_observed(sim, observer)
-        s_ = sim.step_index - 1
+    processed_through = observer.available_through
+
+    def observe_step(s_: int) -> bool:
+        """The host's reading of one observed step: decode due completions, count faults and
+        timeouts, READY rises and completion rises. True once the run is done."""
+        nonlocal bad
         while pending and s_ >= pending[0][0] + window:
             stp, cell = pending.pop(0)
             v, status = decode_recent(observer, cell.master.rail_taps[: pl.n], stp + window, window)  # R bits; C Z V follow
@@ -934,7 +968,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 on_output(0, cell.name, stp, value, time.perf_counter())
             bad += status != "valid"
         if k >= len(sched) and sum(len(v) for v in outs.values()) >= want:
-            break
+            return True
         _, fired = observer.fired_at(s_)
         for x in fired.tolist():
             if x in fault_n:
@@ -951,8 +985,42 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                 if last_wm[u] is None or s_ - last_wm[u] > 3 * period:
                     pending.append((s_, next(o for o in pl.outputs if o.master is master)))
                 last_wm[u] = s_
+        return False
+
+    def process_observed() -> bool:
+        nonlocal processed_through
+        done = False
+        while processed_through < observer.available_through and not done:
+            processed_through += 1
+            done = observe_step(processed_through)
+        return done
+
+    truncated = stop_requested()
+    finished = False
+    while not stop_requested() and sim.step_index < int(max_ms / params.dt):
+        if k < len(sched):
+            st, value, min_outs = sched[k]
+            n_out = sum(len(v) for v in outs.values())
+            if n_ready[st] >= loaded[st] and n_out >= min_outs and (not loads or sim.step_index >= loads[-1] + gap):
+                t = sim.step_index + 5
+                Pst = pl.inputs[st][1]
+                for i, r in rails_for(value, pl.n):
+                    sim.add_events(0, [t], [Pst.rails[i][r].u], [drive.ignite])
+                loads.append(t)
+                load_events.append({"schedule_index": k, "stream": st, "value": value,
+                                    "injected_step": sim.step_index, "event_step": t,
+                                    "injected_wall_s": time.perf_counter()})
+                loaded[st] += 1
+                k += 1
+        _advance(sim, observer, block, trim)
+        finished = process_observed()
+        if finished:
+            break
         truncated = stop_requested()
     truncated = stop_requested()
+    observer.flush()
+    if not finished:
+        process_observed()
     first = outs[pl.outputs[0].name]
     n_fault, n_timeout = len(seen_f), len(seen_t)
     work_outstanding = k < len(sched) or sum(len(v) for v in outs.values()) < want or bool(pending)
@@ -966,7 +1034,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
              "per_token_ms": ((first[-1][0] - first[0][0]) / max(1, len(first) - 1)) * params.dt if len(first) > 1 else None,
              "profile": {"profiled_steps": 0, "regions": {}},
-             "simulator": type(sim).__name__, "observer": type(observer).__name__}
+             **_sim_stats(sim, observer)}
     return first, sim, stats
 
 
@@ -977,7 +1045,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                          on_output=None, profile_steps: int | None = None,
                          should_stop=None, wall_limit: float = 0.0,
                          backend: str = "torch", graph_steps: int = 0,
-                         observe_every: int | None = None,
+                         observe_every: int | None = None, delivery: str = "auto",
                          full_trace: bool = False) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
@@ -985,6 +1053,15 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     outputs node b owes (default: one per token). `gap_ms` is run_pipeline's: no load sooner
     than that after the node's previous load. Returns per node the dict of output lists
     (cell -> [(step, value)]), the simulator, and stats.
+
+    `backend`: "torch" (`TorchSim`, the comparison backend) or "torch-fast" (`FastSim`:
+    static-shape step, docs/perf_campaign.md §4 Track A) when no `sim` is given; a given
+    `sim` is used as is (a perturbed simulator: campaigns). `graph_steps=K` runs a FastSim in
+    K-step blocks (a CUDA graph on CUDA; the same block eagerly elsewhere): the host schedule
+    runs once per block and the block's observations are read when it ends. `observe_every`:
+    a FastSim's device-to-host transfer interval in steps (default: the decode window; a
+    block transfers when it ends). `delivery` is FastSim's ("auto" | "sparse" | "scatter").
+    `full_trace` retains every spike (reference runs).
 
     `progress`: the interval in wall seconds between calls (default 300; None or 0 disables,
     uses the default printer), a callable(dict) (called at the default 300 s interval), or a
@@ -998,14 +1075,13 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     wants to assemble and write a partial result while the run continues). Wall time is
     polled only every ~1000 steps, so the per-step cost of the run loop is unchanged.
 
-    `capture_spikes=(node, neuron_ids)` retains every matching `(step, neuron)` before the
-    runner trims the simulator's trace.  The arrays are returned in
-    `stats["captured_spikes"]`; campaigns use this for a narrow role-filtered handshake dump
-    without retaining every spike of a 100-copy run."""
+    `capture_spikes=(node, neuron_ids)` retains every matching `(step, neuron)` for the whole
+    run (the observer watches them in addition to what the runner needs). The arrays are
+    returned in `stats["captured_spikes"]`; campaigns use this for a narrow role-filtered
+    handshake dump without retaining every spike of a 100-copy run."""
     import torch
     from ..sim.lif_fast import FastSim
     from ..sim.lif_torch import TorchSim
-    from ..sim.observe import Observer
     from ..sim.profile import Profiler
     net, drive = pl.net, pl.drive
     B = len(schedules)
@@ -1017,7 +1093,9 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     (deadline is not None and time.perf_counter() >= deadline))
 
     if backend not in ("torch", "torch-fast"):
-        raise ValueError("backend must be 'torch' or 'torch-fast'")
+        raise ValueError(f"backend must be 'torch' or 'torch-fast', not {backend!r}")
+    if sim is not None and backend == "torch-fast" and not isinstance(sim, FastSim):
+        raise ValueError(f"backend='torch-fast' needs a FastSim, but a {type(sim).__name__} was given")
     dev = torch.device(device if sim is None else getattr(sim, "device", device))
     sync = None
     if dev.type == "cuda":
@@ -1027,41 +1105,27 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     profiler = Profiler(False, sync=sync)
     kw = {"dtype": dtype} if dtype is not None else {}
     window, period = 2 * drive.loop_period_steps, drive.loop_period_steps
-    capture_node, capture_ids = (None, np.empty(0, dtype=np.int64))
-    if capture_spikes is not None:
-        capture_node, ids = capture_spikes
-        capture_ids = np.asarray(sorted(set(int(x) for x in ids)), dtype=np.int64)
-    watch_ids = (np.arange(net.n, dtype=np.int64) if full_trace
-                 else _pipeline_observation_ids(pl, capture_ids))
-    transfer_steps = int(observe_every if observe_every is not None else window)
-    observer = getattr(sim, "observer", None) if sim is not None else None
-    if observer is None or not np.isin(watch_ids, observer.watch_ids).all():
-        observer = Observer(
-            watch_ids, B, n_neurons=net.n, device=dev, observe_every=transfer_steps,
-            full_trace=full_trace,
-        )
     if sim is None:
-        cls = FastSim if backend == "torch-fast" else TorchSim
-        sim_kw = {"observer": observer, "observe_every": transfer_steps,
-                  "graph_steps": graph_steps} if cls is FastSim else {}
-        sim = cls(net.topology(), params, n_nodes=B, device=device, profiler=profiler,
-                  **kw, **sim_kw)
-    elif backend == "torch-fast" and not isinstance(sim, FastSim):
-        raise ValueError("backend='torch-fast' is incompatible with the supplied simulator")
-    sim.observer = observer
-    if isinstance(sim, FastSim):
-        sim._spk_step = observer._spk_step
-        sim._spk_node = observer._spk_node
-        sim._spk_neuron = observer._spk_neuron
+        if backend == "torch-fast":
+            sim = FastSim(net.topology(), params, n_nodes=B, device=device, profiler=profiler,
+                          graph_steps=graph_steps, delivery=delivery, **kw)
+        else:
+            sim = TorchSim(net.topology(), params, n_nodes=B, device=device, profiler=profiler, **kw)
+    elif graph_steps and getattr(sim, "graph_steps", 0) != graph_steps:
+        raise ValueError("graph_steps applies to a FastSim built here; build the given simulator with it")
     if hasattr(sim, "profiler"):
         sim.profiler = profiler
+    observer = _attach_observer(sim, pl, B, window=window, full_trace=full_trace, observe_every=observe_every,
+                                capture=capture_spikes)
+    trim = None if full_trace else 4 * window
+    block = sim.graph_steps if getattr(sim, "observer", None) is observer and sim.graph_steps else 1
     load_started = time.perf_counter()
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
-    for _ in range(3000):
-        if stop_requested():
-            break
-        _step_observed(sim, observer)
+    settle = 3000  # the image's completions settle
+    while settle and not stop_requested():
+        _advance(sim, observer, min(block, settle), trim)
+        settle -= min(block, settle)
     observer.flush()
     t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
@@ -1167,17 +1231,20 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                 last_wm[b][what.name] = s_
         return False
 
-    truncated = stop_requested()
-    processed_through = sim.step_index - 1
+    processed_through = observer.available_through
 
     def process_observed() -> bool:
+        """Read every step that became observable since the last call (one step for a
+        RefSim/TorchSim; a FastSim's block, or K steps at a transfer)."""
         nonlocal processed_through
         done = False
-        for observed_step in range(processed_through + 1, observer.available_through + 1):
-            done = decode_and_watch(observed_step) or done
-        processed_through = max(processed_through, observer.available_through)
+        while processed_through < observer.available_through and not done:
+            processed_through += 1
+            done = decode_and_watch(processed_through)
         return done
 
+    truncated = stop_requested()
+    finished = False
     while not stop_requested() and sim.step_index < int(max_ms / params.dt):
         profiling_this_step = profiler.enabled
         if profiling_this_step:
@@ -1185,8 +1252,8 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                 host_schedule()
         else:
             host_schedule()
-        _step_observed(sim, observer)
-        steps_since_check += 1
+        _advance(sim, observer, block, trim)
+        steps_since_check += block
         if progress_interval and steps_since_check >= STEP_CHECK:
             steps_since_check = 0
             now = time.perf_counter()
@@ -1202,7 +1269,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
         if profiling_this_step:
             with profiler.region("decode"):
                 finished = process_observed()
-            profiled_steps += 1
+            profiled_steps += block
             if profiled_steps >= profile_target:
                 profiler.enabled = False
         else:
@@ -1211,8 +1278,8 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             break
     truncated = stop_requested()
     observer.flush()
-    for observed_step in range(processed_through + 1, observer.available_through + 1):
-        decode_and_watch(observed_step)
+    if not finished:
+        process_observed()
     work_outstanding = any(k[b] < len(scheds[b]) or
                            sum(len(v) for v in outs[b].values()) < want[b] for b in range(B)) or bool(pending)
     hit_max_ms = sim.step_index >= int(max_ms / params.dt) and work_outstanding and not truncated
@@ -1224,8 +1291,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
              "profile": {"profiled_steps": profiled_steps, "regions": profile_regions},
-             "simulator": type(sim).__name__, "observer": type(observer).__name__,
-             "observe_every": transfer_steps, "graph_steps": int(graph_steps)}
+             **_sim_stats(sim, observer)}
     if capture_spikes is not None:
-        stats["captured_spikes"] = observer.capture_spikes(capture_node, capture_ids)
+        stats["captured_spikes"] = observer.capture_spikes()
     return outs, sim, stats
