@@ -4,6 +4,8 @@ from .model import D_MAX, QUANTA_PER_SYNAPSE, Params, Topology
 from .trace import SpikeTrace
 from .ref64 import RefSim
 from .lif_torch import TorchSim
+from .lif_fast import FastSim
+from .observe import Observer
 
 __all__ = [
     "D_MAX",
@@ -13,4 +15,6 @@ __all__ = [
     "SpikeTrace",
     "RefSim",
     "TorchSim",
+    "FastSim",
+    "Observer",
 ]
