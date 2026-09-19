@@ -1,19 +1,22 @@
 #!/bin/bash
-# Submit a drosophilos module run to G2 from this laptop.
+# Submit a drosophilos module run to a cluster from this laptop (campus VPN must be connected).
 #
-#   slurm/submit.sh [sbatch options...] -- drosophilos.<module> [args...]
-#   slurm/submit.sh --gres=gpu:nvidia_h200_nvl:1 --time=6:00:00 -- drosophilos.bench.perf_campaign --device cuda --out data/perf/g2-h200
+#   slurm/submit.sh [--cluster juno|g2] [sbatch options...] -- drosophilos.<module> [args...]
+#   slurm/submit.sh --time=6:00:00 -- drosophilos.bench.perf_campaign --device cuda --out data/perf/juno-h200
 #
-# Pushes HEAD to origin, fast-forwards ~/drosophilos on G2 to it, submits slurm/g2.sbatch, and
-# prints the job id. Refuses a dirty tree: the cluster runs exactly the committed code.
-# GPU choices on gpu-preempt (sinfo -o "%N %G"): nvidia_h200_nvl (g-08-01, 4), nvidia_h100_nvl,
-# nvidia_a100-sxm4-80gb, nvidia_geforce_rtx_3090 (slow at float64; use --dtype float32).
+# Pushes HEAD to origin, checks it out in ~/drosophilos on the cluster, submits slurm/<cluster>.sbatch,
+# and prints the job id. Refuses a dirty tree: the cluster runs exactly the committed code.
+# juno (default): partition h200, 26 nodes x 2 H200 NVL, 2-day limit, MCNS data present.
+# g2: partition gpu-preempt; pick a GPU with --gres=gpu:nvidia_h100_nvl:1 etc. (sinfo -o "%N %G");
+#     nvidia_geforce_rtx_3090 is slow at float64. Queue waits of days are normal there.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+cluster=juno
+if [ "${1:-}" = "--cluster" ]; then cluster=$2; shift 2; fi
 if [ -n "$(git status --porcelain)" ]; then echo "working tree is dirty; commit first" >&2; exit 1; fi
 opts=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
 [ "${1:-}" = "--" ] && shift
 [ $# -gt 0 ] || { echo "usage: $0 [sbatch options] -- drosophilos.module [args]" >&2; exit 1; }
 sha=$(git rev-parse HEAD)
 git push -q origin HEAD
-ssh g2 "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch ${opts[*]} slurm/g2.sbatch $*" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
+ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch ${opts[*]} slurm/$cluster.sbatch $*" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
