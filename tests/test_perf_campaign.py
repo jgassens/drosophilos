@@ -75,12 +75,13 @@ def test_bare_defaults_run_the_primitive_smoke_set(tmp_path):
     assert args.repeats == 1
     assert args.primitive_blocks == "cells,fanout,tick"
     assert args.copies == "1,8"
-    # Keep the actual run itself small (fewer tokens, one copy); the assertions above already
-    # pin down what a truly bare invocation would select.
-    args = _args(tokens=3, copies="1", out=str(tmp_path / "smoke"))
+    # The assertions above pin down what a bare invocation selects; the run itself is kept to
+    # the cells block (the tick kernel is 13.7k neurons: minutes per token on a CPU, and the
+    # blocks are exercised for real on the cluster).
+    args = _args(primitive_blocks="cells", tokens=3, copies="1", out=str(tmp_path / "smoke"))
     report = run_campaign(args)
     assert {x["workload"] for x in report["summaries"]} == {
-        "cells-add", "cells-and", "cells-xor", "cells-mov", "fanout", "tick"}
+        "cells-add", "cells-and", "cells-xor", "cells-mov"}
 
 
 def test_small_level_on_cpu_is_refused_without_allow_cpu_renders(tmp_path):
