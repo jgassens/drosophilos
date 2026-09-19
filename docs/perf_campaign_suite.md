@@ -99,14 +99,18 @@ two frames). It is disabled without `--historical` and is H200-only: it can take
 root:
 
 ```
-slurm/submit.sh --gres=gpu:nvidia_h100_nvl:1 --time=4:00:00 -- \
+slurm/submit.sh --time=4:00:00 -- \
   drosophilos.bench.perf_campaign --levels primitive --device cuda --out data/perf/<name>
 ```
 
-pushes HEAD, checks it out on G2, and submits `slurm/g2.sbatch`; `slurm/fetch.sh <jobid>` brings
+pushes HEAD, checks it out on Juno (default; `--cluster g2` for ganymede2 with a `--gres` GPU
+choice), and submits `slurm/<cluster>.sbatch`; `slurm/fetch.sh <jobid>` brings
 the log and results back. Size `--time` from a `--dry-run` cost estimate on the same `--levels`
 and `--copies` first, remembering the 2-15x wall/neural multiplier.
 
-<!-- measured-on-cluster placeholder: fill in with the queued-job cost once it finishes -->
-Measured cluster cost: pending — no queued cluster run has completed yet. Replace this line with
-the observed neural/wall time from `data/perf/<name>.json` once one has.
+Measured cluster cost (Juno job 412136, one H200 NVL, commit 23a8966, 2026-09-18): the full
+primitive level — cells, fanout, perspective (array and pipelined multiplier), tick; copies 1 and
+8; one repeat — took **1 h 16 min of wall time** for ~640 s of neural time per copy set; the
+largest block (perspective, pipelined, 8 copies) is 417 s wall. The report is
+`docs/perf/juno-h200-primitive.{md,json}`. The `small` level has not completed yet (Juno 412137).
+Every configuration finished with 0 wrong, 0 missing, nothing truncated.

@@ -9,7 +9,7 @@ the ledger at the top records what has been done against them and where the evid
 | order | status | evidence |
 |---|---|---|
 | §2 backend selection, timing, reproducibility record, profiling regions | done 2026-09-17 (openai-sol, cleanup openai-terra) | `fe2f07a`, `f95bcdc`; `bench/render_doom.py`, `bench/repro.py`, `sim/profile.py` |
-| §3 fixed comparison suite (`bench/perf_campaign.py`) | built 2026-09-17 (openai-terra); sized for the cluster 2026-09-18 (claude-sonnet, openai-luna) after a default run consumed 14 h of laptop CPU; baseline jobs queued on Juno (412136 primitive, 412137 small) and G2 (3953900 primitive) | `docs/perf_campaign_suite.md`; results land in `data/perf/` when the jobs run |
+| §3 fixed comparison suite (`bench/perf_campaign.py`) | built 2026-09-17 (openai-terra); sized for the cluster 2026-09-18 (claude-sonnet, openai-luna) after a default run consumed 14 h of laptop CPU; primitive baseline measured on Juno (412136, 1 h 16 min on one H200; `docs/perf/juno-h200-primitive.md`): wall/neural 5.1–5.3× at 3k neurons, 5.9× at 28k, 6.2–8.0× at 47k–110k; 8 copies cost the same wall time as 1 below ~50k neurons; the pipelined multiplier is 2.1× faster per token in isolation. Small level queued (412137) | `docs/perf_campaign_suite.md`; results land in `data/perf/` when the jobs run |
 | §4 Track A (simulator) | not started: waits on the §2 baseline and profile | — |
 | §4 Track B (specialized cells) | not started: waits on the §2 baseline | — |
 | §5 multiplier diagnostic | not started | — |
