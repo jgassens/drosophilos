@@ -84,6 +84,22 @@ def _effective_backend(cfg: RenderConfig):
     return backend, str(device), dtype_name, torch_dtype, simulator, gpu_name
 
 
+def count_duplicates(ks, scheds: list, outs: list) -> int:
+    """Outputs delivered beyond what each node's schedule owes: an output cell owes one word
+    per token of its stream. Cells carry the stream *key* (`ks.stream_keys[name]`, e.g.
+    `input:f`) while schedules carry the stream *name* (`f`); the lookup goes through the map."""
+    name_of_key = {key: name for name, key in ks.stream_keys.items()}
+    cell_stream = {c["name"]: name_of_key[c["stream"]] for c in ks.cells if c.get("op") != "RING" and "stream" in c}
+    dup = 0
+    for sched, node_outs in zip(scheds, outs):
+        counts = {name: 0 for name in ks.streams}
+        for stream, _value, _barrier in sched:
+            counts[stream] += 1
+        for cell_name, values in node_outs.items():
+            dup += max(0, len(values) - counts[cell_stream[cell_name]])
+    return dup
+
+
 def render(cfg: RenderConfig) -> dict:
     """Compile, render, simulate, and return the complete benchmark record."""
     total_started = time.perf_counter()
@@ -315,13 +331,7 @@ def render(cfg: RenderConfig) -> dict:
                     value = pixel_values[b][pos]
                     if value is not None and value != ref_frames[f][at((r << 8) | c)]:
                         wrong += 1
-    for b in range(B):
-        stream_counts = {stream: 0 for stream in ks.streams}
-        for stream, _value, _barrier in scheds[b]:
-            stream_counts[stream] += 1
-        for cell_name, values in outs[b].items():
-            owed = stream_counts[cell_by_name[cell_name]["stream"]]
-            duplicates += max(0, len(values) - owed)
+    duplicates = count_duplicates(ks, scheds, outs)
 
     runtime_inputs = [{
         "index": f,

@@ -80,3 +80,18 @@ def test_disabled_profiler_has_no_regions():
     with profiler.region("unused"):
         pass
     assert profiler.regions() == {}
+
+
+def test_count_duplicates_maps_stream_keys_to_schedule_names():
+    """Regression: Juno job 412137 crashed after 2.5 h with KeyError 'input:f' because cells
+    carry stream keys and schedules carry stream names (the doom programs have several)."""
+    from types import SimpleNamespace
+    from drosophilos.bench.render_doom import count_duplicates
+
+    ks = SimpleNamespace(streams=["f", "p"], stream_keys={"f": "input:f", "p": "input:p"},
+                         cells=[{"name": "tick", "op": "ADD", "stream": "input:f"},
+                                {"name": "pix", "op": "ADD", "stream": "input:p"},
+                                {"name": "ring", "op": "RING"}])
+    scheds = [[("f", 1, 0), ("p", 5, 0), ("p", 6, 0)]]
+    outs = [{"tick": [(1, 1)], "pix": [(2, 5), (3, 6), (4, 6)]}]
+    assert count_duplicates(ks, scheds, outs) == 1
