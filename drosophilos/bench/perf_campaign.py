@@ -152,7 +152,8 @@ def primitive_block(name: str, params: Params, *, mul: str, tokens: int) -> tupl
     return spec, pl, values, kernel_outputs(spec, values)
 
 
-def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps: int = 0) -> dict[str, Any]:
+def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps: int = 0,
+                   max_neural_s: float = 150) -> dict[str, Any]:
     import torch
 
     params = Params()
@@ -170,7 +171,7 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
     # Capturing every neuron on node 0 is intentionally limited to short primitive runs.  It
     # adds trace-copy/memory cost, which is recorded rather than pretending spikes are free.
     outs, _sim, stats = run_pipeline_batched(
-        pl, params, [list(values) for _ in range(copies)], max_ms=30000,
+        pl, params, [list(values) for _ in range(copies)], max_ms=max_neural_s * 1000,
         device=cfg["device"], dtype=dtype, expect_outputs=[len(values) * len(spec.outputs)] * copies,
         progress=0, on_output=observed, profile_steps=profile_steps,
         capture_spikes=(0, range(pl.net.n)),
@@ -204,7 +205,8 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
         "spike_count_cost": "primitive-only trace capture; extra host memory/copy work",
         "wrong": wrong, "missing": missing, "duplicates": duplicates,
         "invalid": stats["bad_outputs"], "faults": stats["faults"], "timeouts": stats["timeouts"],
-        "host_stalls": stats["host_stalls"], "truncated": stats["truncated"], "t_load": stats["t_load"],
+        "host_stalls": stats["host_stalls"], "truncated": stats["truncated"], "max_neural_s": max_neural_s,
+        "t_load": stats["t_load"],
         "load_events": stats["load_events"], "profile": stats["profile"], "profiled": bool(profile_steps),
     }
 
@@ -279,12 +281,17 @@ def _section(records: list[dict[str, Any]], title: str) -> list[str]:
         lines.append("| no selected configurations |" + "—|" * len(REPORT_COLUMNS))
     for record in records:
         headline = record.get("headline", record)
+        truncated = record.get("truncated")
+        # A capped primitive block hits max_neural_s and reads as a host stall unless the
+        # table names the cap explicitly; a plain truthy "truncated" looks like a measurement.
+        if truncated and record.get("host_stalls") and record.get("max_neural_s") is not None:
+            truncated = "stalled@cap"
         row = [f"{record['workload']} / {record['config_name']}", headline.get("first_neural_s"),
                headline.get("first_wall_s"), [record.get("interval_neural_s"), record.get("interval_wall_s")],
                record.get("neural_s"), headline.get("wall_s"), record.get("wall_neural"), record.get("neurons"),
                record.get("edges"), record.get("spikes"), record.get("wrong"), record.get("missing"),
                record.get("duplicates"), record.get("invalid"), record.get("faults"), record.get("timeouts"),
-               record.get("truncated")]
+               truncated]
         lines.append("| " + " | ".join(_fmt(x) for x in row) + " |")
     return lines + [""]
 
@@ -292,7 +299,10 @@ def _section(records: list[dict[str, Any]], title: str) -> list[str]:
 def write_report(out: Path, report: dict[str, Any]) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.with_suffix(".json").write_text(json.dumps(report, indent=2, default=_jsonable) + "\n")
-    lines = ["# DrosophilOS performance comparison", "",
+    status = ("partial — {done}/{planned} configurations, still running"
+             .format(done=report.get("configurations_done"), planned=report.get("configurations_planned"))
+             if not report.get("complete", True) else "complete")
+    lines = ["# DrosophilOS performance comparison", "", f"Status: {status}.", "",
              "Headline medians/min/max come only from unprofiled repeats. Primitive spikes are captured "
              "for all neurons on node 0 only, adding trace-copy cost; renders do not capture spikes.", ""]
     for level in ("primitive", "small", "historical"):
@@ -309,6 +319,47 @@ def write_report(out: Path, report: dict[str, Any]) -> None:
     out.with_suffix(".md").write_text("\n".join(lines))
 
 
+def _expand_config_sets(level: str, workload: str,
+                        configs: list[tuple[str, dict[str, Any], tuple[str, ...]]],
+                        ) -> list[tuple[str, dict[str, Any], tuple[str, ...], str]]:
+    """The multiplier is a circuit choice only for the perspective kernel.  Each named
+    variant itself changes exactly one key; pairing it with a copies variant is the
+    explicit combined comparison, not an accidental two-key variant."""
+    config_sets: list[tuple[str, dict[str, Any], tuple[str, ...], str]] = []
+    for config_name, cfg, variant_names in configs:
+        config_sets.append((config_name, cfg, variant_names, "simulator-only"))
+        if level == "primitive" and workload == "perspective":
+            alternative = "pipelined" if cfg["mul"] == "array" else "array"
+            changed = dict(cfg); changed["mul"] = alternative
+            tags = variant_names + (f"mul-{alternative}",)
+            comparison = "circuit-only" if not variant_names else "combined"
+            config_sets.append((f"{config_name}+mul-{alternative}", changed, tags, comparison))
+    return config_sets
+
+
+CPU_RENDER_COST_NOTE = ("small/historical renders are cluster workloads (slurm/submit.sh); an "
+                        "8x5x3-frame doom2 render took ~2h43m on four CPU copies per RESULTS.md")
+
+# Sizing constants only, not measurements: per-token neural seconds for primitive blocks (the
+# 16-bit perspective multiplier is far more expensive than the single-cell/fanout/tick blocks),
+# and per-pixel-per-frame neural seconds for small/historical renders at one copy.
+_PRIMITIVE_NEURAL_S_PER_TOKEN = {"perspective": 6.6}
+_PRIMITIVE_NEURAL_S_PER_TOKEN_DEFAULT = 1.2
+_RENDER_NEURAL_S_PER_PIXEL_FRAME = {"doom4": 30.0, "doom2": 15.0}
+
+
+def _estimate_neural_s(level: str, workload: str, cfg: dict[str, Any], args: argparse.Namespace) -> float:
+    """A sizing estimate for --dry-run, not a measurement: see docs/perf_campaign_suite.md."""
+    if level == "primitive":
+        per_token = _PRIMITIVE_NEURAL_S_PER_TOKEN.get(workload, _PRIMITIVE_NEURAL_S_PER_TOKEN_DEFAULT)
+        return min(args.tokens * per_token, args.primitive_max_s)
+    workloads = SMALL_WORKLOADS if level == "small" else HISTORICAL_WORKLOADS
+    spec = workloads[workload]
+    per_pixel_frame = next(s for name, s in _RENDER_NEURAL_S_PER_PIXEL_FRAME.items() if name in spec["source"])
+    copies = int(cfg["copies"])
+    return spec["width"] * spec["height"] * spec["frames"] * per_pixel_frame / copies
+
+
 def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
     levels = [x.strip() for x in args.levels.split(",") if x.strip()]
     invalid = set(levels) - {"primitive", "small", "historical"}
@@ -316,6 +367,11 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"unknown level(s): {', '.join(sorted(invalid))}")
     if "historical" in levels and not args.historical:
         raise ValueError("historical workloads are H200-only and require --historical")
+    gated_levels = {"small", "historical"} & set(levels)
+    if gated_levels and args.device == "cpu" and not args.allow_cpu_renders:
+        raise ValueError(
+            f"{', '.join(sorted(gated_levels))} on --device cpu requires --allow-cpu-renders: "
+            f"{CPU_RENDER_COST_NOTE}")
     copies = [int(x) for x in args.copies.split(",") if x]
     if not copies or any(x < 1 for x in copies):
         raise ValueError("--copies must be positive integers")
@@ -324,17 +380,7 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
     campaign = CampaignConfig(baseline, [Variant(f"copies-{n}", {"copies": n}) for n in copies[1:]])
     configs = campaign.configurations()
     planned = [{"name": name, **cfg} for name, cfg, _variants in configs]
-    if args.dry_run:
-        return {"dry_run": True, "levels": levels, "configurations": planned,
-                "historical_note": "H200-only; omitted unless --historical"}
 
-    report: dict[str, Any] = {"campaign": "docs/perf_campaign.md §3", "generated_at": time.time(),
-                              "arguments": vars(args), "historical_note": "H200-only and off by default",
-                              "coverage": [], "records": [], "summaries": []}
-    out = Path(args.out)
-    if "small" in levels:
-        for workload, item in SMALL_WORKLOADS.items():
-            report["coverage"].append(coverage_check(RenderConfig(**item)))
     work: list[tuple[str, str]] = []
     if "primitive" in levels:
         requested_blocks = [x.strip() for x in args.primitive_blocks.split(",") if x.strip()]
@@ -353,25 +399,37 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
     if "historical" in levels:
         work += [("historical", n) for n in HISTORICAL_WORKLOADS]
 
+    if args.dry_run:
+        estimates = []
+        for level, workload in work:
+            for config_name, cfg, _variant_names, comparison in _expand_config_sets(level, workload, configs):
+                estimates.append({"level": level, "workload": workload, "config_name": config_name,
+                                  "comparison": comparison,
+                                  "estimated_neural_s": _estimate_neural_s(level, workload, cfg, args)})
+        return {"dry_run": True, "levels": levels, "configurations": planned,
+                "historical_note": "H200-only; omitted unless --historical",
+                "cost_estimate": estimates,
+                "cost_estimate_note": ("sizing estimate only, not a measurement; "
+                                       "wall ≈ 2–15× neural depending on device")}
+
+    report: dict[str, Any] = {"campaign": "docs/perf_campaign.md §3", "generated_at": time.time(),
+                              "arguments": vars(args), "historical_note": "H200-only and off by default",
+                              "coverage": [], "records": [], "summaries": [],
+                              "complete": False, "configurations_done": 0,
+                              "configurations_planned": sum(
+                                  len(_expand_config_sets(level, workload, configs)) for level, workload in work)}
+    out = Path(args.out)
+    if "small" in levels:
+        for workload, item in SMALL_WORKLOADS.items():
+            report["coverage"].append(coverage_check(RenderConfig(**item)))
+
     for level, workload in work:
-        # The multiplier is a circuit choice only for the perspective kernel.  Each named
-        # variant itself changes exactly one key; pairing it with a copies variant is the
-        # explicit combined comparison, not an accidental two-key variant.
-        config_sets: list[tuple[str, dict[str, Any], tuple[str, ...], str]] = []
-        for config_name, cfg, variant_names in configs:
-            config_sets.append((config_name, cfg, variant_names, "simulator-only"))
-            if level == "primitive" and workload == "perspective":
-                alternative = "pipelined" if cfg["mul"] == "array" else "array"
-                changed = dict(cfg); changed["mul"] = alternative
-                tags = variant_names + (f"mul-{alternative}",)
-                comparison = "circuit-only" if not variant_names else "combined"
-                config_sets.append((f"{config_name}+mul-{alternative}", changed, tags, comparison))
-        for config_name, cfg, variant_names, comparison in config_sets:
+        for config_name, cfg, variant_names, comparison in _expand_config_sets(level, workload, configs):
             repeats = 1 if level == "historical" else args.repeats
             batch: list[dict[str, Any]] = []
             for repeat in range(repeats):
                 if level == "primitive":
-                    record = _primitive_run(workload, cfg, tokens=args.tokens)
+                    record = _primitive_run(workload, cfg, tokens=args.tokens, max_neural_s=args.primitive_max_s)
                 elif level == "small":
                     record = _render_run(workload, cfg, out=out.parent / f"{out.name}_{workload}_{config_name}_{repeat}")
                 else:
@@ -388,7 +446,9 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
             report["summaries"].append(summary)
             if args.profile_steps:
                 if level == "primitive":
-                    profile_record = _primitive_run(workload, cfg, tokens=args.tokens, profile_steps=args.profile_steps)
+                    profile_record = _primitive_run(workload, cfg, tokens=args.tokens,
+                                                     profile_steps=args.profile_steps,
+                                                     max_neural_s=args.primitive_max_s)
                 elif level == "small":
                     profile_record = _render_run(workload, cfg, out=out.parent / f"{out.name}_{workload}_{config_name}_profile",
                                                  profile_steps=args.profile_steps)
@@ -397,25 +457,38 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
                 profile_record.update({"config_name": config_name, "repeat": None, "profiled": True,
                                        "headline_excluded": True, "comparison": comparison})
                 report["records"].append(profile_record)
+            # Write after every completed configuration so a job killed by its time limit
+            # (a laptop run or a Slurm job hitting --time) still leaves the results so far.
+            report["configurations_done"] += 1
+            write_report(out, report)
+    report["complete"] = True
     write_report(out, report)
     return report
 
 
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--levels", default="primitive,small", help="comma-separated: primitive, small, historical")
+    ap.add_argument("--levels", default="primitive", help="comma-separated: primitive, small, historical "
+                    "(small/historical are cluster workloads; see --allow-cpu-renders)")
     ap.add_argument("--backend", choices=("torch",), default="torch", help="batched runner backend")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--dtype", choices=("float64", "float32"), default="float64")
     ap.add_argument("--mul", choices=("array", "pipelined"), default="array")
     ap.add_argument("--copies", default="1,8")
     ap.add_argument("--pacing", choices=("host", "neural"), default="host")
-    ap.add_argument("--repeats", type=int, default=3)
+    ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--tokens", type=int, default=16, help="primitive tokens per block (minimum 16)")
-    ap.add_argument("--primitive-blocks", default="cells,fanout,perspective,tick",
-                    help="comma-separated primitive blocks; 'cells' expands to ADD, AND, XOR, MOV")
+    ap.add_argument("--primitive-blocks", default="cells,fanout,tick",
+                    help="comma-separated primitive blocks; 'cells' expands to ADD, AND, XOR, MOV; "
+                    "'perspective' is selectable but not in the default smoke set (~6.6 neural s/token)")
+    ap.add_argument("--primitive-max-s", type=float, default=150,
+                    help="neural-time cap per primitive block, sized to its token count (default 150s; "
+                    "the 16-bit perspective multiplier needs ~6.6 neural s/token)")
     ap.add_argument("--profile-steps", type=int, default=0)
     ap.add_argument("--historical", action="store_true", help="enable H200-only historical workloads")
+    ap.add_argument("--allow-cpu-renders", action="store_true",
+                    help="permit small/historical levels on --device cpu; these are cluster workloads "
+                    "(slurm/submit.sh) — an 8x5x3-frame doom2 render took ~2h43m on four CPU copies")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--out", default="data/perf/campaign")
     return ap
