@@ -88,6 +88,7 @@ class Cell:
     commit_pulse: int = -1
     feedback: set = field(default_factory=set)  # sources that are feedback edges
     wport: object = None  # STORE cells: the write port (its selects, copies and copy relays: shared-RAM marks)
+    datapath: str = "generic"  # actual implementation for this cell (generic or specialized)
 
     @property
     def sources(self) -> list:
@@ -117,6 +118,7 @@ class Pipeline:
     in_creq: list = None
     outputs: list = field(default_factory=list)  # output cells
     inputs: dict = field(default_factory=dict)  # stream name -> (StagedRegister, producer P)
+    datapath: str = "generic"  # requested fixed-operation datapath implementation
 
     @property
     def output(self) -> Cell:
@@ -246,7 +248,8 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
 def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None = None, mems: dict | None = None,
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
-                   phases: list | None = None, relight_requests: bool = True) -> Pipeline:
+                   phases: list | None = None, relight_requests: bool = True,
+                   datapath: str = "generic") -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -260,7 +263,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     every done of the named cell (None: of the stream's register). The host then only deals
     tokens in program order; the phase order is the substrate's. `relight_requests=True`
     is the standard build: request-priority pairs and delayed, live-rail-vetoed repair of
-    dark no-request rails (§10.5). False selects the §10.3 request kill pairs and netlist."""
+    dark no-request rails (§10.5). False selects the §10.3 request kill pairs and netlist.
+    `datapath="specialized"` replaces fixed AND/OR/XOR/MOV and LOAD cells' general ALU,
+    unit-select rails and mux with their single resident unit. Other cells remain generic."""
+    if datapath not in ("generic", "specialized"):
+        raise ValueError("datapath must be 'generic' or 'specialized'")
     drive = drive or Drive.from_params(params)
     net = Netlist(params)
     image: list = []
@@ -325,6 +332,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     for cs in expanded:
         c = Cell(cs["name"], cs["op"], cs["a"], b=cs.get("b"), c=cs.get("c"), mem=mem_objs.get(cs.get("mem")), init=cs.get("init"),
                  trigger=tuple(cs.get("trigger", ())), imm=cs.get("imm"), row=cs.get("row"), prev=cs.get("prev"))
+        if datapath == "specialized" and c.op in ("AND", "OR", "XOR", "MOV", "LOAD"):
+            c.datapath = "specialized"
         width = 3 * n + 3 if c.op == "MULP_ROW" else n + 3  # a row's word: acc | C Z V | A | B
         c.stage = add_register(net, drive, f"{c.name}.Q", width, with_completion=True)
         c.act = add_latch(net, drive, f"{c.name}.act")
@@ -513,12 +522,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             # the data token to the master through the ALU's PASSB (a MOV), so the cell has the
             # standard stage, commit, done; the write (~130 ms after ACT^d) lands long before the
             # done pulse (~500 ms): readers requested by it find the word written
-            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
             A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
             for i in range(n):
                 G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
+            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
         elif c.op == "LOAD" and c.mem[0] == "ram":  # RAM read: the machine's read port from the word masters
             A_rails = rails_of(c.a)
@@ -527,13 +536,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             a_bits = max(1, (mem.n_words - 1).bit_length())
             add_read_port(net, drive, f"{name}.rd", mem, act_d, [[A_rails[j][0].u, A_rails[j][1].u] for j in range(a_bits)],
                           [[l for l in pair] for pair in Bt], extra_vetoes=[A_rails[j][1].u for j in range(a_bits, n)])
-            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
             A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
             for i in range(n):
                 G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
-            R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+            if c.datapath == "specialized":
+                R, C, V = add_specialized_alu_logic_tokens(
+                    G, name, A_tok, [Rail2(*pair) for pair in Bt], SUB, act_d, "MOV")
+            else:
+                U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
+                R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
         elif c.op == "LOAD":  # address = A (a level): ROM read driven by ACT^d into token latches, PASSB through the ALU
             A_rails = rails_of(c.a)
             Bt = [[G.latch(f"{name}.b{i}r0"), G.latch(f"{name}.b{i}r1")] for i in range(n)]
@@ -553,13 +566,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                         continue
                     r = (value >> i) & 1
                     add_veto_relay(net, drive, f"{name}.rom.w{w}.b{i}", act_d, [], Bt[i][r], veto_neurons=[vn])
-            U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub0.g", act_d, [], SUB.r0)
             A_tok = [Rail2(G.latch(f"{name}.a{i}r0"), G.latch(f"{name}.a{i}r1")) for i in range(n)]
             for i in range(n):
                 G.veto(f"{name}.a{i}r0.g", act_d, [], A_tok[i].r0)
-            R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
+            if c.datapath == "specialized":
+                R, C, V = add_specialized_alu_logic_tokens(
+                    G, name, A_tok, [Rail2(*pair) for pair in Bt], SUB, act_d, "MOV")
+            else:
+                U = _unit_rails(net, drive, f"{name}.u", "MOV", G)
+                R, C, V = add_alu_logic_tokens(G, name, A_tok, [Rail2(*pair) for pair in Bt], U, SUB, act_d)
         elif c.op in ("SHL", "SHR"):  # a shift by a constant is wiring: bit i <- bit i -/+ k, zeros shifted in
             A_rails = rails_of(c.a)
             k = c.imm
@@ -593,9 +610,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             G.veto(f"{name}.c0.g", act_d, [], C.r0)
             G.veto(f"{name}.v0.g", act_d, [], V.r0)
         else:
-            unit, sub = ALU_OPS[c.op]
+            _, sub = ALU_OPS[c.op]
             A_rails, B_rails = rails_of(c.a), rails_of(c.b)
-            U = _unit_rails(net, drive, f"{name}.u", c.op, G)
             SUB = Rail2(G.latch(f"{name}.sub0"), G.latch(f"{name}.sub1"))
             G.veto(f"{name}.sub.g", act_d, [], SUB.r1 if sub else SUB.r0)
             A_tok, B_tok = [], []
@@ -607,7 +623,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 G.veto(f"{name}.b{i}r0.g", act_d, [B_rails[i][1].u], b0)
                 G.veto(f"{name}.b{i}r1.g", act_d, [B_rails[i][0].u], b1)
                 A_tok.append(Rail2(a0, a1)); B_tok.append(Rail2(b0, b1))
-            R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
+            if c.datapath == "specialized":
+                R, C, V = add_specialized_alu_logic_tokens(G, name, A_tok, B_tok, SUB, act_d, c.op)
+            else:
+                U = _unit_rails(net, drive, f"{name}.u", c.op, G)
+                R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
         wire_alu(net, drive, R, C, V, Sc)
         extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
         built.add(c.name)
@@ -677,7 +697,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             gate_commit(key, creq, reg.commit_in, readers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
-                  {st: (reg, P_) for st, (reg, P_, _) in inputs.items()})
+                  {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
@@ -805,6 +825,37 @@ def add_alu_logic_tokens(G: Gates, name: str, A_tok, B_tok, U, SUB, act_d, mul: 
     return R, gated_flag(f"{name}.c", cout), gated_flag(f"{name}.v", vraw)
 
 
+def add_specialized_alu_logic_tokens(G: Gates, name: str, A_tok, B_tok, SUB, act_d, op: str):
+    """One fixed logic/PASSB unit on already-tokenised operands.
+
+    This deliberately retains the general ALU's operand timing: B takes six delay hops,
+    ``bx = SUB xor B^d`` is an ordered gate, and A takes seventeen delay hops.  The selected
+    AND/OR/XOR ordered gate therefore sees the same EARLY/LATE margin.  MOV uses ``bx``
+    directly; its ordered-XOR output latches, like the logic-unit output latches, already
+    belong to ``G``'s stage-reset domain and can safely replace the removed mux latches.
+    C and V are transaction tokens driven from ACT^d, never image-lit constants.
+    """
+    assert op in ("AND", "OR", "XOR", "MOV")
+    n = len(A_tok)
+    assert len(B_tok) == n
+    Bd = [G.delayed(f"{name}.b{i}d", B_tok[i], 6) for i in range(n)]
+    bx = [G.xor2_ordered(f"{name}.bx{i}", SUB, Bd[i]) for i in range(n)]
+    Ad = [G.delayed(f"{name}.a{i}d", A_tok[i], 17) for i in range(n)]
+    if op == "AND":
+        R = [G.and2_ordered(f"{name}.and{i}", bx[i], Ad[i]) for i in range(n)]
+    elif op == "OR":
+        R = [G.or2_ordered(f"{name}.or{i}", bx[i], Ad[i]) for i in range(n)]
+    elif op == "XOR":
+        R = [G.xor2_ordered(f"{name}.xor{i}", bx[i], Ad[i]) for i in range(n)]
+    else:
+        R = bx
+    C = Rail2(G.latch(f"{name}.c0"), G.latch(f"{name}.c1"))
+    V = Rail2(G.latch(f"{name}.v0"), G.latch(f"{name}.v1"))
+    G.veto(f"{name}.c0.na", act_d, [], C.r0)
+    G.veto(f"{name}.v0.na", act_d, [], V.r0)
+    return R, C, V
+
+
 # ------------------------------------------------------------------------------ running
 def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None:
     """Constants, memories, state inits, every cell's unit-select rails and the handshake's
@@ -820,7 +871,7 @@ def load_pipeline_image(sim, pl: Pipeline, node: int = 0, step: int = 1) -> None
     for l in pl.image_latches:  # "no request", "idle", "nothing to commit", feedback requests, state values
         sim.add_events(node, [step], [l.u], [pl.drive.ignite])
     for c in pl.cells:
-        if c.op in ("SEL", "SHL", "SHR", "MULP_ROW"):
+        if c.datapath != "generic" or c.op in ("SEL", "SHL", "SHR", "MULP_ROW"):
             continue
         unit, _ = ALU_OPS["MOV" if c.op in ("LOAD", "STORE") else c.op]
         for k in range(N_UNITS):

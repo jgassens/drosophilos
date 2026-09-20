@@ -27,7 +27,7 @@ from .kernel_campaign import block as campaign_block
 from .render_doom import RenderConfig, render
 
 
-ONE_KEY_VARIANT_KEYS = frozenset({"backend", "device", "dtype", "mul", "copies", "pacing"})
+ONE_KEY_VARIANT_KEYS = frozenset({"backend", "device", "dtype", "mul", "copies", "pacing", "datapath"})
 REPORT_COLUMNS = ("first-frame latency (neural s)", "first-frame latency (wall s)",
                   "subsequent frame intervals (neural s / wall s)", "total neural s", "wall s",
                   "wall/neural", "neurons", "edges", "spikes", "wrong", "missing", "duplicates",
@@ -136,7 +136,8 @@ def _primitive_spec(op: str, width: int = 8) -> tuple[KernelSpec, list[int]]:
     return spec, list(range(16))
 
 
-def primitive_block(name: str, params: Params, *, mul: str, tokens: int) -> tuple[KernelSpec, Any, list[int], list[tuple[int, ...]]]:
+def primitive_block(name: str, params: Params, *, mul: str, tokens: int,
+                    datapath: str = "generic") -> tuple[KernelSpec, Any, list[int], list[tuple[int, ...]]]:
     """Build the four single fixed-operation cells and the established composition blocks."""
     if name.startswith("cells-"):
         spec, values = _primitive_spec(name.removeprefix("cells-").upper())
@@ -145,10 +146,11 @@ def primitive_block(name: str, params: Params, *, mul: str, tokens: int) -> tupl
         spec = compile_kernel(prog, loop_body(prog), "col", params={"heading": 3}, mul="array")
         values = list(range(16))
     else:
-        spec, _pl, values, _ref = campaign_block(name, params)
+        spec, _pl, values, _ref = campaign_block(name, params, datapath=datapath)
     # Kernel-campaign samples are eight tokens; make the fixed suite visibly repetitive.
     values = (list(values) * ((tokens + len(values) - 1) // len(values)))[:max(16, tokens)]
-    pl = build_pipeline(params, spec.width, spec.cells, consts=spec.consts, mems=spec.mems, outputs=spec.outputs)
+    pl = build_pipeline(params, spec.width, spec.cells, consts=spec.consts, mems=spec.mems,
+                        outputs=spec.outputs, datapath=datapath)
     return spec, pl, values, kernel_outputs(spec, values)
 
 
@@ -157,7 +159,8 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
     import torch
 
     params = Params()
-    spec, pl, values, reference = primitive_block(name, params, mul=cfg["mul"], tokens=tokens)
+    spec, pl, values, reference = primitive_block(
+        name, params, mul=cfg["mul"], tokens=tokens, datapath=cfg.get("datapath", "generic"))
     copies = int(cfg["copies"])
     first_wall: float | None = None
     started = time.perf_counter()
@@ -224,7 +227,7 @@ def _render_run(workload: str, cfg: dict[str, Any], *, out: Path, profile_steps:
     rec = render(RenderConfig(source=spec["source"], width=spec["width"], height=spec["height"], frames=spec["frames"],
                               inputs=spec["inputs"], nodes=cfg["copies"], backend=cfg["backend"], device=cfg["device"],
                               dtype=cfg["dtype"], pacing=cfg["pacing"], mul=cfg["mul"], progress=0,
-                              profile_steps=profile_steps, out=str(out), **fast))
+                              profile_steps=profile_steps, out=str(out), datapath=cfg.get("datapath", "generic"), **fast))
     timing = rec["timing"]
     steps = timing["frame_complete_step"]
     first_neural = None if not steps or steps[0] is None else steps[0] * Params().dt / 1000
@@ -335,7 +338,8 @@ def _expand_config_sets(level: str, workload: str,
     explicit combined comparison, not an accidental two-key variant."""
     config_sets: list[tuple[str, dict[str, Any], tuple[str, ...], str]] = []
     for config_name, cfg, variant_names in configs:
-        config_sets.append((config_name, cfg, variant_names, "simulator-only"))
+        comparison = "circuit-only" if any(v.startswith("datapath-") for v in variant_names) else "simulator-only"
+        config_sets.append((config_name, cfg, variant_names, comparison))
         if level == "primitive" and workload == "perspective":
             alternative = "pipelined" if cfg["mul"] == "array" else "array"
             changed = dict(cfg); changed["mul"] = alternative
@@ -384,7 +388,8 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
     if not copies or any(x < 1 for x in copies):
         raise ValueError("--copies must be positive integers")
     baseline = {"backend": args.backend, "device": args.device, "dtype": args.dtype, "mul": args.mul,
-                "copies": copies[0], "pacing": args.pacing}
+                "copies": copies[0], "pacing": args.pacing,
+                "datapath": getattr(args, "datapath", "generic")}
     fast_mode = {"graph_steps": int(getattr(args, "graph_steps", 0) or 0), "observe_every": getattr(args, "observe_every", None),
                  "delivery": getattr(args, "delivery", "auto") or "auto"}
     if args.backend != "torch-fast" and getattr(args, "variant_backend", None) != "torch-fast" and (
@@ -396,6 +401,11 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
         if variant_backend == args.backend:
             raise ValueError("--variant-backend must differ from --backend")
         variants.append(Variant(f"backend-{variant_backend}", {"backend": variant_backend}))
+    variant_datapath = getattr(args, "variant_datapath", None)
+    if variant_datapath:
+        if variant_datapath == baseline["datapath"]:
+            raise ValueError("--variant-datapath must differ from --datapath")
+        variants.append(Variant(f"datapath-{variant_datapath}", {"datapath": variant_datapath}))
     campaign = CampaignConfig(baseline, variants)
     configs = [(name, {**cfg, **(fast_mode if cfg["backend"] == "torch-fast" else {})}, variant_names)
                for name, cfg, variant_names in campaign.configurations()]
@@ -500,6 +510,10 @@ def _parser() -> argparse.ArgumentParser:
                     help="torch-fast only: synaptic delivery kernel (auto: CSR product on CUDA, scatter elsewhere)")
     ap.add_argument("--variant-backend", default=None, choices=("torch", "torch-fast"),
                     help="add a one-key backend variant against the baseline (a simulator-only comparison)")
+    ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic",
+                    help="baseline fixed-operation cell datapath")
+    ap.add_argument("--variant-datapath", default=None, choices=("generic", "specialized"),
+                    help="add a one-key datapath variant against the baseline (a circuit-only comparison)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--dtype", choices=("float64", "float32"), default="float64")
     ap.add_argument("--mul", choices=("array", "pipelined"), default="array")

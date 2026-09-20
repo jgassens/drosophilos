@@ -47,6 +47,7 @@ class RenderConfig:
     graph_steps: int = 0
     observe_every: int | None = None
     delivery: str = "auto"
+    datapath: str = "generic"
 
 
 def _effective_backend(cfg: RenderConfig):
@@ -207,7 +208,8 @@ def render(cfg: RenderConfig) -> dict:
     P = Params()
     t = time.perf_counter()
     pl = build_pipeline(P, prog.width, ks.cells, consts=ks.consts, mems=ks.mems,
-                        outputs=ks.outputs, streams=ks.streams, phases=ks.phases)
+                        outputs=ks.outputs, streams=ks.streams, phases=ks.phases,
+                        datapath=cfg.datapath)
     compile_s += time.perf_counter() - t
 
     pixel_values = [[] for _ in range(B)]
@@ -410,6 +412,7 @@ def render(cfg: RenderConfig) -> dict:
         perturbation=None, seed=None,
     )
     rec.update({
+        "datapath": pl.datapath,
         "backend_selected_by_default": cfg.backend is None,
         # the effective simulator class and its execution mode, from the runner itself
         "simulator_effective": stats.get("simulator", simulator_name),
@@ -460,6 +463,8 @@ def _parser() -> argparse.ArgumentParser:
                     help="torch-fast only: device-to-host spike transfer interval in steps (default: the decode window)")
     ap.add_argument("--delivery", default=RenderConfig.delivery, choices=["auto", "sparse", "scatter"],
                     help="torch-fast only: synaptic delivery kernel (auto: CSR product on CUDA, edge-wise scatter elsewhere)")
+    ap.add_argument("--datapath", default=RenderConfig.datapath, choices=["generic", "specialized"],
+                    help="fixed-operation cell datapath implementation")
     ap.add_argument("--profile-steps", type=int, default=RenderConfig.profile_steps,
                     help="profile this many post-settle neural steps (0 disables)")
     ap.add_argument("--out", default=RenderConfig.out)
