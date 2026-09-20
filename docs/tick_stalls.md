@@ -325,8 +325,16 @@ Build with both kernel fixes as well (`b4e6905`: power-up veto, commit idle rail
 (4 %, 127 outputs unfinished).** The two wrong-value mechanisms and the refusal class are
 gone from three realizations; what remains is stalls, whose one localized cause (a fast
 latch slipping through the kill train, copy 8) is unfixed and whose other instances are
-unread. Each needs its own capture (~20 min of H200 per copy); copy 73 of seed 110, which
-never produced its first output, is the first to take.
+unread. Each needs its own capture (~20 min of H200 per copy). Copy 73 of seed 110, which
+never produced its first output (Juno 413875, `docs/a2/tick_s110_node73_stall_diag.md`), is
+the kill-margin class again: the image-lit false rail of `c2_sel`'s request from `c1_and`
+(neuron 11845, loop period 41 steps against 47 nominal) survived the clear train at the very
+first request (35,103 / 35,153 / 35,197) and vetoed `c2_sel`'s first START for the whole run.
+Two of the three stalls read so far are this one mechanism. Since the stronger trains failed
+in the kernel (above), the next trial is four pulses at the original 0.75 strength (+1 relay
+per kill train, 3.0 loop units of charge against 3 × 1.5's 4.5): in isolation it kills every
+latch down to 39 steps at every phase and 38 steps at 5 of 12 phases, and it runs the control
+machine; seeds 108–110 on the cluster decide.
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
