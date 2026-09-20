@@ -317,7 +317,7 @@ and the runner's decoder, which reads a master completion rise as an output, rec
 (88, 88, 86, 86, …). **Classification: a spurious DONE — a state cell's master completion
 re-rising without a commit, before the first tick.** The completion latch itself
 (`c9_sel.M.comp.c3_0.L.u`) and the master's reset are not in that capture's role filter; a
-second capture with `M\.comp|M\.reset` in the filter is queued (Juno 413709) to see whether
+second capture with `M\.comp|M\.reset` in the filter is queued (Juno 413719) to see whether
 the latch dropped and was re-ignited by its AND gate's edge relay (a doublet from a stray
 spike collapsing the loop) or the master was reset and re-lit. Until then the report's "no
 silent wrong value" claim has this counter-example (the campaign scores it as 8 wrong), and
