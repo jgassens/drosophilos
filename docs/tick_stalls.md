@@ -353,6 +353,30 @@ SEL's condition request evidently tolerates less reordering than the go chain's 
 assume, and that ordering — not the kill train — is the thing to read next (a capture of one
 of those wrong copies on the trial build).
 
+### The ordering, read (seed-108 copy 5 on the retry build, Juno 413989)
+
+`c1_and` (`px & 128`) ran nine transactions for eight tokens. At 260,754 `c0_add`'s DONE
+lit `c1_and`'s request; the retry gate fired at 261,527 — both rails still live, the first
+clear train not yet through — and `c1_and` STARTed at 261,544, seventeen steps later, which
+re-lit the false rail ("consumed"). The retry's train then landed on that freshly re-lit rail
+and killed it; START's own kill had taken the true rail; both dark. The guards read "not
+false" as pending, so after this transaction's DONE and IDLE the go fired again (274,302): an
+extra `c1_and` transaction and DONE (284,882) on the same `px`, which `c2_sel` consumed as
+token 6's condition — and every condition after was one token late, until token 8, where
+`px & 128` of 107 (instead of 147) left `px = 147` unzeroed.
+
+**Nothing ordered a DONE's clear of a request's false rail against START's re-light of the
+same rail.** With a three-pulse train and a cell that starts within a few ms of the request
+(all other requests and IDLE already true) the train's ~15 ms tail ends before the go chain
+gets to START; a fourth pulse, a stronger pulse, or a retry reaches past it. That is why
+each of the four trials produced the same wrong value. Fix (`build_pipeline`,
+`start_relight_hops=5`, recorded): START re-lights the false rails through a 5-hop delay
+(~27 ms), after any clear train has ended; in between the pair is dark on both rails, which
+the go chain cannot act on (IDLE was killed at START) and which delays a producer's commit
+gate by the same ~27 ms. On top of it the kill train is **4 × 0.75** (Juno 413917 showed
+four pulses remove every stall on seed 108; 40-step loops die at every phase). Seeds 108–110
+on this build (`3cc733b`, Juno 414205–7) decide.
+
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
 8 copies for three seeds of the same build). No refusal occurred in the three fixed runs, so
