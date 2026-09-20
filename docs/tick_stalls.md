@@ -309,6 +309,17 @@ realization, so the comparison is per-seed totals):
 | seed | ok | wrong | missing | refusals / retries | failing copies |
 |---|---:|---:|---:|---|---|
 | 108 (413703) | 1,596 | 0 | 4 | 0 / 0 | 24 (stalls after token 6) |
+| 109 (413704) | 1,546 | 0 | 54 | 0 / 0 | 36, 49, 81, 87 (stalls) |
+| 110 (413705) | 1,532 | **2** | 66 | 0 / 0 | 20, 42, 43, 57, 69, 74, 76 (stalls), **55** |
+
+Over 300 copies: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
+kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
+8 copies for three seeds of the same build). No refusal occurred in the three fixed runs, so
+the resend path was not exercised on the cluster; it is exercised by the tests. Seed 110's
+copy 55 is the copy-61 family again, mid-run: at token 7 `mx` moves +4 instead of +2 (78 →
+82, then 80 at token 8, consistent with `mx` = 82), i.e. one extra `mx` transaction — with
+`px` right throughout and no fault or timeout. A capture with the master roles is queued
+(Juno 413720) alongside copy 61's.
 
 Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9_sel` commits
 its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
