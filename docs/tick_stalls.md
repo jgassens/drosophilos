@@ -216,6 +216,25 @@ out whole (refusals 1, retries 1, faults 0); without it the outputs are `[1, 3, 
 seed-108 shape; a permanently dark rail blocks the node after three retries. Capture
 `wd\.timeout` in `--dump-roles` so `stall_diag` can count refusals from a dump.
 
+**Review (openai-sol, 2026-09-20) and what it changed.** Two findings held. (1) A resend on
+every TIMEOUT rise would replay a word the kernel had already accepted if a stray spike lit the
+TIMEOUT latch later — a duplicate output and a shifted remainder. The runner now watches each
+input register's stage-to-master commit as well: a word is resent only if no commit followed
+its load, and the *next* word goes in only once the previous one has committed (READY alone
+ran the host a word ahead whenever a stray reset re-raised it — the copy-77 shape from another
+direction). A READY rise over a word that neither committed nor timed out means the stage
+was reset under it: that word is resent too (`reason: "reset"`). (2) Constructing the stray
+case (`tests/test_input_refusal.py`, a TIMEOUT doublet in the ~800-step window between the
+stage's reset and the next load — while the stage is complete its completion train holds the
+watchdog's cancel on the latch) exposed a kernel gap: the stray resets the stage but not the
+producer, whose reset trigger is still depressed by the completion train that just ended, so
+the TIMEOUT latch stays lit; the spoiled next word then sits in the producer with the
+watchdog's final pulse landing on an already-lit latch — no TIMEOUT rise, no fail-stop, a
+stuck stream. The stage's reset now clears the TIMEOUT latch too (`protocol/handshake.py
+add_liveness`); the chain re-lights it ~460 ms after the spoiled load, both registers reset,
+and the word is resent (three loads of the same word, one output, in the test). The
+runner-side rules above are what keep this from duplicating anything.
+
 Restated headline: seed 108, current build, 1,600 outputs — 0 silent wrong values; 1
 detected refusal (copy 77, now resent); 29 unfinished in three stalled copies (3, 8, 98). The
 report's "0 wrong in 4,000" stands as a statement about the kernel; the host runner is what
@@ -260,7 +279,21 @@ train they were run with. Regression: `tests/test_kill_margin.py` (the old train
 pair still reloads).
 Validation on the cluster: seed 108–110 campaigns on the new build against the old build's
 stall counts (a netlist change is a new noise realization, so the comparison is per-seed
-totals, not per copy).
+totals, not per copy). Old build (3 × 0.75, commit `128d982`), 100 copies each:
+
+| seed | ok | wrong | missing | failing copies |
+|---|---:|---:|---:|---|
+| 108 (413471) | 1,566 | 5 (= 1 refused word, copy 77) | 29 | 3, 8, 77, 98 |
+| 109 (413666) | 1,567 | **8** (copy 61) | 25 | 8, 61, 78, 98 |
+| 110 (413667) | 1,574 | 0 | 26 | 0, 45 |
+
+Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9_sel` commits
+its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
+6.7 s, and from then on `mx` steps every other tick (88, 88, 86, 86, 84, 84, 86) while `px`
+is right throughout — the state feedback lags a token. No fault, no timeout. A handshake
+capture of that copy is queued on the old build (Juno 413685, with `wd\.timeout` in the role
+filter) for `stall_diag`; until it is read, the report's "no silent wrong value" claim has a
+second, unexplained counter-example (the campaign scores it as 8 wrong).
 
 ### `--backend torch-fast` is not a step-identical substitute in the campaign (Juno 413583)
 

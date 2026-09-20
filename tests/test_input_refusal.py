@@ -54,11 +54,15 @@ def test_refused_word_is_resent_and_the_schedule_is_delivered_whole():
     assert [e["retry"] for e in loads] == [False, False, True, False, False]
 
 
-def test_without_retry_the_refused_word_is_dropped_and_later_outputs_shift():
-    # the pre-fix behaviour, kept as the description of what the seed-108 campaign scored
-    got, st = _run_batched(retry_refused=False)
-    assert got == [1, 3, 5], got
+def test_without_retry_the_refused_word_blocks_the_stream():
+    # Before 2026-09-20 the host moved on to the next token here and the outputs came out as
+    # [1, 3, 5] — the seed-108 shape. A next word now goes in only once the previous one
+    # reached its master, so with the retry off the stream stops at the refused word instead
+    # of silently shifting.
+    got, st = _run_batched(retry_refused=False, max_ms=8000)
+    assert got == [1], got
     assert st["refusals"] == 1 and st["retries"] == 0 and st["faults"] == 0
+    assert st["blocked_nodes"] == [0] and st["host_stalls"]
 
 
 def test_a_word_refused_past_max_retries_blocks_the_node_instead_of_skipping_it():
@@ -74,3 +78,38 @@ def test_single_runner_resends_too():
     out, _, st = run_pipeline(pl, P, TOKENS, max_ms=20000, rail_filter=_dark_bit0(1))
     assert [v for _, v in out] == TOKENS
     assert st["refusals"] == 1 and st["retries"] == 1
+
+
+def test_a_stray_timeout_after_the_commit_is_not_a_refusal_and_nothing_is_duplicated():
+    # review finding (sol, 2026-09-20): a TIMEOUT after the word reached its master must not
+    # resend the word — that would duplicate an output and shift the rest. The stray is counted
+    # (committed=True, retried=False), the next word still goes in only after the previous one's
+    # commit, and the schedule comes out whole. The exposed window is narrow: while the stage
+    # is complete its completion train holds the watchdog's cancel on TIMEOUT, so a stray can
+    # only take between the stage's reset and the next load (~800 steps); a stray there can
+    # also spoil that next load, which is then a genuine refusal and is resent.
+    from drosophilos.sim.lif_torch import TorchSim
+
+    pl = _mov_kernel()
+    _, _, base = run_pipeline_batched(pl, P, [TOKENS], max_ms=20000, device="cpu", progress=0)
+    loads = [e["event_step"] for e in base["load_events"][0]]
+    assert len(loads) == 4 and base["refusals"] == 0
+    stray_at = loads[1] - 250
+    assert stray_at > loads[0] + 2500, loads
+    sim = TorchSim(pl.net.topology(), P, n_nodes=1, device="cpu")
+    timeout_u = pl.inputs["input"][1].watchdog.timeout.u
+    # a doublet: one pulse does not lift the latch out of the reset train's after-hyperpolarisation
+    sim.add_events(0, [stray_at, stray_at + 16], [timeout_u] * 2, [pl.drive.ignite] * 2)
+    outs, _, st = run_pipeline_batched(pl, P, [TOKENS], max_ms=25000, device="cpu", progress=0, sim=sim)
+    got = [v for _, v in outs[0]["out"]]
+    assert got == TOKENS, (got, st["refused"])
+    assert st["blocked_nodes"] == [] and st["faults"] == 0
+    first = st["refused"][0][0]
+    assert first["committed"] and not first["retried"] and first["schedule_index"] == 0, first
+    # the stray may spoil load 2: the READY its reset raises resends it (a no-op while the
+    # producer still holds the rails), then the watchdog refuses it properly and the third
+    # load goes through — three loads of the same word, one output
+    values = [e["value"] for e in st["load_events"][0]]
+    assert [v for v in values if v != 2] == [1, 3, 5] and 1 <= values.count(2) <= 3, values
+    assert st["retries"] == values.count(2) - 1
+    assert {r["reason"] for r in st["refused"][0]} <= {"timeout", "reset"}

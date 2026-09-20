@@ -170,6 +170,17 @@ def add_liveness(net: Netlist, drive: Drive, P: Register, Q: Register, watchdog_
     too slowly to beat READY. Stale state stays harness-observed (and rare: 8 per 10^6)."""
     P.watchdog = add_watchdog(net, drive, "P.wd", [rail_of(l) for pair in P.rails for l in pair],  # a flip-flop producer's rails read through their proxies
                               [Q.completion.u, Q.fault_latch.u], watchdog_hops, P.reset_trigger, P.reset_edge, P.reset_inh)
+    # The stage's reset clears TIMEOUT too. A TIMEOUT lit while the producer is empty (a stray
+    # spike in the window between the stage's reset and the next load) resets the stage but
+    # not the producer — the producer's reset trigger is still depressed by the completion
+    # train that just ended — and then stays lit: the next word sits in the producer, its
+    # watchdog's final pulse lands on an already-lit latch, no TIMEOUT rise is ever seen
+    # again, and the word is stuck with no fail-stop signal (tests/test_input_refusal.py,
+    # stray-TIMEOUT case, 2026-09-20). Cleared with the stage, it is re-lit by the chain
+    # ~460 ms after the spoiled load, which then resets both registers as a refusal should.
+    q = -int(round(0.75 * drive.loop))
+    for x in P.watchdog.timeout.members:
+        net.synapse(Q.reset_inh, x, q)
     if monitor:
         for name, reg in (("P", P), ("Q", Q)):
             taps = [rail_of(l) for l in reg.all_latches()] + ([reg.fault_latch.u] if reg.fault_latch is not None else [])
