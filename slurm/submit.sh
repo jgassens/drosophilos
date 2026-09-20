@@ -19,4 +19,4 @@ opts=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
 [ $# -gt 0 ] || { echo "usage: $0 [sbatch options] -- drosophilos.module [args]" >&2; exit 1; }
 sha=$(git rev-parse HEAD)
 git push -q origin HEAD
-ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch ${opts[*]} slurm/$cluster.sbatch $*" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
+ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch ${opts[*]} slurm/$cluster.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
