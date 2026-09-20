@@ -5,8 +5,8 @@
 #   slurm/submit.sh --script juno-cpu -- pytest -q tests        # the test suite on a CPU node (dev partition, 2 h)
 #   slurm/submit.sh --time=6:00:00 -- drosophilos.bench.perf_campaign --device cuda --out data/perf/juno-h200
 #
-# Pushes HEAD to origin, checks it out in ~/drosophilos on the cluster, submits slurm/<cluster>.sbatch,
-# and prints the job id. Refuses a dirty tree: the cluster runs exactly the committed code.
+# Pushes HEAD to origin, fetches it on the cluster, submits slurm/<cluster>.sbatch and prints the job
+# id; the job checks its commit out in a worktree of its own when it starts. Refuses a dirty tree: the cluster runs exactly the committed code.
 # juno (default): partition h200, 26 nodes x 2 H200 NVL, 2-day limit, MCNS data present.
 # g2: partition gpu-preempt; pick a GPU with --gres=gpu:nvidia_h100_nvl:1 etc. (sinfo -o "%N %G");
 #     nvidia_geforce_rtx_3090 is slow at float64. Queue waits of days are normal there.
@@ -29,4 +29,4 @@ opts=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
 sha=$(git rev-parse "$ref")
 git push -q origin HEAD
 git merge-base --is-ancestor "$sha" HEAD || { echo "$ref is not an ancestor of HEAD; push it first" >&2; exit 1; }
-ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch --export=ALL,DROSO_SHA=$sha ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
+ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && mkdir -p runs && sbatch --export=ALL,DROSO_SHA=$sha ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
