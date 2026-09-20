@@ -151,3 +151,30 @@ python -m drosophilos.bench.kernel_campaign tick \
   --device cuda --backend torch-fast \
   --out data/a2/kc_tick_B90s108.json
 ```
+
+## Seed 108 on the current build (2026-09-20, Juno 413471 / 413581 / 413582)
+
+The recorded failure set does not transfer. The campaign report's seed-108 run (Juno 409236:
+1,569 ok / 0 wrong / 31 missing, copies 21, 22, 27, 47, 53) and today's run of the same
+command on `main` differ in every copy's output timing (100 of 100), because the merge of
+Track B re-ordered neuron and edge indices and the per-seed noise is drawn by index: same
+mix, same seed, a different realization. Today's build is deterministic — two reruns agree
+with the replay in every copy, step for step (100 / 100) — and its realization is:
+
+| | ok | wrong | missing | failing copies |
+|---|---|---|---|---|
+| Juno 409236 (report) | 1,569 | 0 | 31 | 21, 22, 27, 47, 53 |
+| today (413471 = 413581) | 1,566 | **5** | 29 | 3 (1 missing), 8 (12), **77 (5 wrong, 2 missing)**, 98 (14) |
+
+So the "0 wrong values in 4,000 outputs" of the report was one realization of the noise; the
+present one shows five silent wrong values on one copy in 1,600 outputs. Copy 27's captured
+dump (`tick_s108_node27.npz`) is of a copy that completed and is not useful. Handshake
+captures of copy 77 (the wrong values) and copy 8 (12 missing) are queued (Juno 413584,
+413585); `stall_diag` reads them with:
+
+```sh
+python -m drosophilos.bench.stall_diag data/a2/tick_s108_node77.npz --campaign docs/a2/kc_tick_B90s108_current.json --node 77 --out docs/a2/tick_s108_node77_stall_diag.md
+```
+
+The report's headline must be restated as "0 wrong in 4,000 outputs on one realization;
+5 wrong in 1,600 on another" until the copy-77 mechanism is found and fixed.
