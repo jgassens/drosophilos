@@ -398,7 +398,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False)  # §10.3 count control
-    assert (legacy.net.n, legacy.net.nnz) == (7108, 12400)
+    assert (legacy.net.n, legacy.net.nnz) == (7108, 12402)  # +2 synapses 2026-09-20 (stage reset clears the producer's TIMEOUT latch)
     pl = build_pipeline(PARAMS, 1,
                         [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                           "trigger": ["input", "input:other"]}],
