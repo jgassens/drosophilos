@@ -66,6 +66,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
           "trigger": ["input", "input:other"]}],
         consts={"zero": 0},
         streams=["input", "other"],
+        retry_clear=False,  # the conditional second clear (2026-09-20) rescues this very state; pinned off here
     )
     cell = pl.cells[0]
     req = cell.reqs["input"]
