@@ -29,7 +29,7 @@ def _upper95(errors: int, n: int) -> float:
     return float(beta.ppf(0.95, errors + 1, n - errors)) if n else float("nan")
 
 
-def block(name: str, params: Params):
+def block(name: str, params: Params, *, datapath: str = "generic"):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -54,7 +54,8 @@ def block(name: str, params: Params):
     else:
         raise SystemExit(name)
     width = prog.width if prog is not None else ks.width
-    pl = build_pipeline(params, width, ks.cells, consts=ks.consts, mems=ks.mems, outputs=ks.outputs)
+    pl = build_pipeline(params, width, ks.cells, consts=ks.consts, mems=ks.mems,
+                        outputs=ks.outputs, datapath=datapath)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -67,6 +68,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-ms", type=float, default=30000, help="ceiling on the neural time (the run stops when every copy has delivered)")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
@@ -74,7 +76,7 @@ def main():
     ap.add_argument("--dump-out", default=None, help="write the selected step/neuron/role arrays to this .npz")
     a = ap.parse_args()
     P = Params()
-    ks, pl, tokens, ref = block(a.block, P)
+    ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath)
     B = a.copies
     dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
     if any(dump_given) and not all(dump_given):
@@ -122,7 +124,7 @@ def main():
         ok += node_ok; wrong += node_wrong; missing += node_missing
         per_node.append((node_ok, node_wrong, node_missing))
     n = ok + wrong + missing
-    rec = {"block": a.block, "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
+    rec = {"block": a.block, "datapath": pl.datapath, "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
            "nodes_with_errors": sum(1 for x in per_node if x[1] or x[2]), "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0),
