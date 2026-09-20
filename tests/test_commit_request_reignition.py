@@ -12,10 +12,13 @@ fault. The fix is a second ignition ~85 ms after the commit pulse. This test mod
 failed first ignition by zeroing that synapse on one of two copies."""
 
 import numpy as np
+import pytest
 
 from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
 from drosophilos.sim.lif_torch import TorchSim
 from drosophilos.sim.model import Params
+
+pytestmark = pytest.mark.slow  # minutes of TorchSim on a CPU: the daily suite, not every push
 
 P = Params()
 TOKENS = [1, 2, 3, 5]

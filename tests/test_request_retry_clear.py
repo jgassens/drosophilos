@@ -15,10 +15,13 @@ kill trains made. Every change so far that moves when a request rail can be reli
 this; that ordering is the thing to understand before the next attempt."""
 
 import numpy as np
+import pytest
 
 from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
 from drosophilos.sim.lif_torch import TorchSim
 from drosophilos.sim.model import Params
+
+pytestmark = pytest.mark.slow  # minutes of TorchSim on a CPU: the daily suite, not every push
 
 P = Params()
 TOKENS = [1, 2, 3]

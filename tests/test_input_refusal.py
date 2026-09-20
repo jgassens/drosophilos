@@ -13,6 +13,8 @@ import pytest
 from drosophilos.lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
 from drosophilos.sim.model import Params
 
+pytestmark = pytest.mark.slow  # minutes of TorchSim on a CPU: the daily suite, not every push
+
 P = Params()
 TOKENS = [1, 2, 3, 5]
 

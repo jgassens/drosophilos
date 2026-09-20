@@ -10,10 +10,13 @@ token from then on; scored as 8 wrong values). The fix vetoes the root's ignitio
 power-up until the master's first reset (its first commit)."""
 
 import numpy as np
+import pytest
 
 from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
 from drosophilos.sim.lif_torch import TorchSim
 from drosophilos.sim.model import Params
+
+pytestmark = pytest.mark.slow  # minutes of TorchSim on a CPU: the daily suite, not every push
 
 P = Params()
 TOKENS = [1, 2, 3]

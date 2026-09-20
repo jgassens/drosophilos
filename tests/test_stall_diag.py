@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from drosophilos.bench.stall_diag import analyze_dump, render_markdown
@@ -21,7 +22,8 @@ def _artifact(name: str) -> Path:
     # The isolated worktree excludes large data, but the task's read-only precedent lives in
     # the source checkout on the laptop. CI/integration checkouts take the local branch above.
     source_checkout = Path("/Users/jeremiahgassensmith/programming/drosophilos/data/a2") / name
-    assert source_checkout.exists(), f"missing required precedent artifact {local}"
+    if not source_checkout.exists():  # CI has no data/ (35 MB, untracked): the precedent is a laptop/cluster test
+        pytest.skip(f"precedent artifact {local} not available here")
     return source_checkout
 
 
