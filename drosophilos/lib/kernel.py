@@ -924,13 +924,36 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     observer = _attach_observer(sim, pl, 1, window=window, full_trace=full_trace, observe_every=observe_every)
     trim = None if full_trace else 4 * window
     block = sim.graph_steps if getattr(sim, "observer", None) is observer and sim.graph_steps else 1
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
+    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
+    seen_f, seen_t = set(), set()
+    processed_through = observer.available_through
+
+    def count_latches(s_: int) -> None:
+        _, fired = observer.fired_at(s_)
+        for x in fired.tolist():
+            if x in fault_n:
+                seen_f.add(x)
+            elif x in timeout_n:
+                seen_t.add(x)
+
+    def drain_latches() -> None:
+        """Settle time: faults and timeouts are counted (the old runner scanned every chunk);
+        READY rises before the first load are not tokens and are not counted."""
+        nonlocal processed_through
+        while processed_through < observer.available_through:
+            processed_through += 1
+            count_latches(processed_through)
+
     load_started = time.perf_counter()
     load_pipeline_image(sim, pl)
     settle = 3000  # the image's completions settle; stepwise so signals stop cleanly
     while settle and not stop_requested():
         _advance(sim, observer, min(block, settle), trim)
         settle -= min(block, settle)
+        drain_latches()
     observer.flush()
+    drain_latches()
     t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
     sched = []
@@ -949,11 +972,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     last_wm = {u: None for u in comp}
     loads, load_events, k, bad = [], [], 0, 0
     pending = []  # (completion step, output cell)
-    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
-    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
-    seen_f, seen_t = set(), set()
     want = expect_outputs or (per_token or len(pl.outputs)) * len(sched)  # total outputs over all cells: one per output cell per token
-    processed_through = observer.available_through
 
     def observe_step(s_: int) -> bool:
         """The host's reading of one observed step: decode due completions, count faults and
@@ -967,14 +986,10 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
             if on_output is not None:
                 on_output(0, cell.name, stp, value, time.perf_counter())
             bad += status != "valid"
+        count_latches(s_)  # before the exit test: a fault on the terminal step counts (review)
         if k >= len(sched) and sum(len(v) for v in outs.values()) >= want:
             return True
         _, fired = observer.fired_at(s_)
-        for x in fired.tolist():
-            if x in fault_n:
-                seen_f.add(x)
-            elif x in timeout_n:
-                seen_t.add(x)
         for st, rn in ready_of.items():
             if rn in fired:
                 if last_ready[st] is None or s_ - last_ready[st] > 3 * period:
@@ -1119,6 +1134,27 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                                 capture=capture_spikes)
     trim = None if full_trace else 4 * window
     block = sim.graph_steps if getattr(sim, "observer", None) is observer and sim.graph_steps else 1
+    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
+    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
+    fault_ids = np.array(sorted(fault_n | timeout_n), dtype=np.int64)
+    seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
+    processed_through = observer.available_through
+
+    def count_latches(s_: int) -> tuple[np.ndarray, np.ndarray]:
+        nd, nr = observer.fired_at(s_)
+        mf = np.isin(nr, fault_ids)
+        for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
+            (seen_t if u in timeout_n else seen_f).add((b, u))
+        return nd, nr
+
+    def drain_latches() -> None:
+        """Settle time: faults and timeouts are counted (the old runner scanned every chunk);
+        READY rises before the first load are not tokens and are not counted."""
+        nonlocal processed_through
+        while processed_through < observer.available_through:
+            processed_through += 1
+            count_latches(processed_through)
+
     load_started = time.perf_counter()
     for b in range(B):
         load_pipeline_image(sim, pl, node=b)
@@ -1126,7 +1162,9 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     while settle and not stop_requested():
         _advance(sim, observer, min(block, settle), trim)
         settle -= min(block, settle)
+        drain_latches()
     observer.flush()
+    drain_latches()
     t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
     scheds = []
@@ -1152,10 +1190,6 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     load_events = [[] for _ in range(B)]
     k = [0] * B
     pending = []  # (step, node, cell)
-    fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
-    timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
-    fault_ids = np.array(sorted(fault_n | timeout_n), dtype=np.int64)
-    seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
     want = expect_outputs or [len(sc) for sc in scheds]
     done_nodes = [False] * B
 
@@ -1209,15 +1243,12 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             if on_output is not None:
                 on_output(b, cell.name, stp, value, time.perf_counter())
             bad += status != "valid"
+        nd, nr = count_latches(s_)  # before the exit test: a fault on the terminal step counts (review)
         for b in range(B):
             if not done_nodes[b] and k[b] >= len(scheds[b]) and sum(len(v) for v in outs[b].values()) >= want[b]:
                 done_nodes[b] = True
         if all(done_nodes) and not pending:
             return True
-        nd, nr = observer.fired_at(s_)
-        mf = np.isin(nr, fault_ids)
-        for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
-            (seen_t if u in timeout_n else seen_f).add((b, u))
         m = np.isin(nr, watch_ids)
         for u, b in zip(nr[m].tolist(), nd[m].tolist()):
             kind, what = watch[u]
@@ -1230,8 +1261,6 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     pending.append((s_, b, what))
                 last_wm[b][what.name] = s_
         return False
-
-    processed_through = observer.available_through
 
     def process_observed() -> bool:
         """Read every step that became observable since the last call (one step for a

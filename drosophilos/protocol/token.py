@@ -39,7 +39,10 @@ def recent_active(sim, step: int, window: int, node: int | None = None) -> set:
     lists (of one node of a batched simulator when `node` is given). For polling a live
     simulator: `sim.trace` rebuilds and sorts the whole event array on every access, which
     made a runner quadratic in the run length (measured: a 40 s run of 13k neurons took 50+
-    minutes in the sort and 70 s without it)."""
+    minutes in the sort and 70 s without it). An observer (`sim/observe.py`) is read through
+    its `active_in`, which refuses a window that is not observed yet or already trimmed."""
+    if hasattr(sim, "active_in"):
+        return sim.active_in(step, window, node)
     active = set()
     nodes = getattr(sim, "_spk_node", None) if node is not None else None
     for k in range(len(sim._spk_step) - 1, -1, -1):

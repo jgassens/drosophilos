@@ -154,6 +154,26 @@ Refused for capture (eager blocks with the reason logged): `stray_rate_hz > 0` (
 must be registered with the graph — TODO below), `record=` (per-step host copies), and while the
 profiler is timing regions.
 
+### Review findings (Kimi A–B, openai-sol C–F; fixed in `bcb1f10` and the commit after it)
+
+- `set_observer` after a capture left the graph gathering into the old observer's buffer:
+  the graph is now dropped and re-captured.
+- A failed capture (any exception during warm-up or capture) fell back to eager blocks from
+  the advanced state, with the staged events consumed: the state is now restored on every
+  exit of `_capture_graph`.
+- `Observer.active_in` clamped a window that reached into trimmed steps and read it silently;
+  it now raises, and `protocol.token.recent_active` reads an observer through `active_in`, so
+  `decode_recent(observer, …)` cannot decode from a partial window.
+- Both runners count faults and timeouts during the 3,000-step settle and on the terminal
+  step (the single-node runner had lost both in the refactor).
+- **Neural pacing under K-step observation** (`render_doom --pacing neural`: no host barrier,
+  tokens dealt after READY): the host sees READY at the end of the block it rose in, so a
+  token is loaded up to K steps (9.4 ms at K = 94) later than with per-step observation, and
+  at most one token per stream per block. A cell's cycle is ~1 s, so the throttle is below
+  1 % of the token period; a run bounded by `max_ms` can nonetheless end with work
+  outstanding that a per-step run finished. Not a value change; a schedule shift. The doom
+  small-render twin (`--backend torch-fast`) measures it against the `torch` run.
+
 ### TODO(cluster) — what only the H200 can verify
 
 1. **Capture works**: `stats["graph_active"] is True` on a `--backend torch-fast --graph-steps 94`

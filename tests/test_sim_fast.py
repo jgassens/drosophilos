@@ -197,7 +197,10 @@ PARAMS = Params()
 
 
 def _mov_kernel():
-    spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
+    # MOV is PASSB: the output is operand B. B is the input stream, so the output is the token
+    # itself and the parity tests check real values (with B a constant they compared zeros:
+    # review finding).
+    spec = [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}]
     return build_pipeline(PARAMS, 4, spec, consts={"zero": 0})
 
 
@@ -213,6 +216,7 @@ def test_batched_runner_backends_agree_on_a_kernel():
     outs_f, sim_f, st_f = run_pipeline_batched(pl, PARAMS, sched, backend="torch-fast", full_trace=True,
                                                observe_every=1, **kw)
     assert st_t["simulator"] == "TorchSim" and st_f["simulator"] == "FastSim"
+    assert _values(outs_t) == [[1, 5], [0, 3]]  # the MOV kernel's outputs, not merely equal-and-empty
     assert outs_t == outs_f  # same (step, value) pairs
     assert st_t["load_steps"] == st_f["load_steps"]
     assert len(sim_t.trace) > 1000 and sim_t.trace == sim_f.trace
@@ -320,3 +324,73 @@ def test_set_observer_after_capture_drops_the_captured_graph(small_circuit):
     assert sim._graph is None and sim.graph_active is False
     sim.run(20)  # eager blocks with the new observer; nothing raises and steps are observed
     assert sim.observer.available_through >= 19
+
+
+def test_capture_failure_restores_the_state_it_advanced(small_circuit, monkeypatch):
+    """Review finding (sol, F): a failed capture used to leave V/g/r/ring/slot advanced by the
+    warm-up blocks and the staged events consumed, and the eager fallback ran from there.
+    CPU stand-in: the CUDA stream/graph API is faked and the block mutates state, then raises."""
+    topo, params, _, events = small_circuit
+    sim = FastSim(topo, params, n_nodes=2, graph_steps=10)
+    sim.add_events(0, [3], [1], [500]); sim.add_events(1, [7], [2], [500])
+    sim._stage_events(0, 10)
+    before = sim._state_clone()
+
+    class _Fake:
+        def wait_stream(self, *_): pass
+    class _Ctx:
+        def __init__(self, *_): pass
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+    monkeypatch.setattr(torch.cuda, "Stream", lambda: _Fake())
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda: _Fake())
+    monkeypatch.setattr(torch.cuda, "stream", _Ctx)
+    monkeypatch.setattr(torch.cuda, "CUDAGraph", lambda: object())
+    monkeypatch.setattr(torch.cuda, "graph", _Ctx)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda: None)
+
+    def poisoned(count):
+        sim.V.add_(1.0); sim.ring.add_(1); sim._slot.add_(5)
+        raise RuntimeError("cuSPARSE: capture not permitted")
+    monkeypatch.setattr(sim, "_block_eager", poisoned)
+    with pytest.raises(RuntimeError, match="capture"):
+        sim._capture_graph()
+    after = sim._state_clone()
+    for key in ("V", "g", "r", "ring", "slot"):
+        assert torch.equal(before[key], after[key]), key
+    assert sim._graph is None
+
+
+def test_active_in_refuses_a_window_into_trimmed_steps(small_circuit):
+    """Review finding (sol, C): a window reaching before the oldest retained step raised
+    nowhere and decoded from a partial read."""
+    from drosophilos.protocol.token import recent_active
+    topo, params, _, events = small_circuit
+    obs = Observer(range(topo.n), 2, n_neurons=topo.n, device="cpu", full_trace=False, retain_steps=50, observe_every=1)
+    sim = FastSim(topo, params, n_nodes=2, observer=obs)
+    for node, ev in enumerate(events):
+        sim.add_events(node, *ev)
+    sim.run(400)
+    assert obs.retained_from > 300
+    assert obs.active_in(399, 20) == recent_active(obs, 399, 20)  # the checked path is the one token.py takes
+    with pytest.raises(RuntimeError, match="trimmed"):
+        obs.active_in(399, 200)
+    with pytest.raises(RuntimeError, match="trimmed"):
+        recent_active(obs, 399, 200)
+    with pytest.raises(RuntimeError, match="not observed"):
+        obs.active_in(1000, 5)
+
+
+def test_runner_counts_a_fault_during_the_settle():
+    """Review finding (sol, C addendum): the single-node runner lost faults raised during the
+    3,000-step settle and on the terminal step."""
+    pl = _mov_kernel()
+    latch = pl.cells[0].stage.fault_latch.u
+    sim = RefSim(pl.net.topology(), PARAMS)
+    sim.add_events(0, [100], [latch], [pl.drive.ignite])  # fires the fault latch inside the settle
+    outs, _, st = run_pipeline(pl, PARAMS, [1], max_ms=4000, sim=sim)
+    assert st["faults"] >= 1
+    simb = TorchSim(pl.net.topology(), PARAMS, n_nodes=1)
+    simb.add_events(0, [100], [latch], [pl.drive.ignite])
+    _, _, stb = run_pipeline_batched(pl, PARAMS, [[1]], max_ms=4000, sim=simb, progress=0)
+    assert stb["faults"] >= 1

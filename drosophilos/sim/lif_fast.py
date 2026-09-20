@@ -410,18 +410,27 @@ class FastSim:
         the next commit anyway."""
         K = self.graph_steps
         saved = self._state_clone()
-        side = torch.cuda.Stream()
-        side.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(side):
-            for _ in range(2):
+        try:
+            side = torch.cuda.Stream()
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                for _ in range(2):
+                    self._block_eager(K)
+            torch.cuda.current_stream().wait_stream(side)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
                 self._block_eager(K)
-        torch.cuda.current_stream().wait_stream(side)
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            self._block_eager(K)
-        torch.cuda.synchronize()
-        self._state_restore(saved)
-        self._graph = graph
+            torch.cuda.synchronize()
+            self._graph = graph
+        finally:
+            # the warm-up and the capture advance V/g/r/ring/slot and consume the staged
+            # events; a failure must not leave the eager fallback running from that state
+            # (review finding): restore on every exit, success or exception
+            try:
+                torch.cuda.synchronize()
+            except Exception:  # pragma: no cover - a device error is the reason we are here
+                pass
+            self._state_restore(saved)
 
     @torch.no_grad()
     def run(self, n_steps: int) -> None:

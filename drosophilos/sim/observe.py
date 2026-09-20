@@ -246,8 +246,14 @@ class Observer:
         what ``decode_recent`` reads."""
         step, window = int(step), int(window)
         self._check_available(step)
+        start = max(step - window + 1, 0)
+        if start < self.retained_from:
+            raise RuntimeError(
+                f"window ({step - window}, {step}] reaches into trimmed steps (oldest retained {self.retained_from}); "
+                "a partial read would decode silently"
+            )
         active: set[int] = set()
-        for at in range(max(step - window + 1, self.retained_from), step + 1):
+        for at in range(start, step + 1):
             ev = self._events_by_step.get(at)
             if ev is None:
                 continue

@@ -37,21 +37,23 @@ def test_unavailable_cuda_is_rejected(monkeypatch):
 def test_profiled_batched_run_observes_outputs_without_changing_spikes():
     import torch
 
-    spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
+    spec = [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}]  # MOV = PASSB: output is the token
     pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
     schedules = [[1], [0]]
 
     observed = []
     profiled, profiled_sim, stats = run_pipeline_batched(
         pl, PARAMS, schedules, max_ms=3000, device="cpu", dtype=torch.float64,
-        progress=0, profile_steps=200,
+        progress=0, profile_steps=200, full_trace=True,
         on_output=lambda node, cell, step, value, wall: observed.append(
             (node, cell, step, value, wall)),
     )
     plain, plain_sim, _ = run_pipeline_batched(
         pl, PARAMS, schedules, max_ms=3000, device="cpu", dtype=torch.float64,
-        progress=0,
+        progress=0, full_trace=True,
     )
+    assert [[v for _, v in node["out"]] for node in plain] == [[1], [0]]  # real values, not zeros
+    assert len(plain_sim.trace) > 100  # the whole trace, not the runner's retained tail
 
     assert len(observed) == sum(len(values) for node in profiled for values in node.values())
     assert all(b[-1] >= a[-1] for a, b in zip(observed, observed[1:]))
