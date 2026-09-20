@@ -297,7 +297,12 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
     assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # +16 neurons/+17 synapses: the commit idle rail's second ignition
-    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
+    from drosophilos.lib import control
+    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
+    try:
+        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0)
+    finally:
+        control.KILL_PULSES, control.KILL_STRENGTH = 4, 0.75
     cell = pl.cells[0]
     req = cell.reqs["input"]
     roles = pl.net.roles

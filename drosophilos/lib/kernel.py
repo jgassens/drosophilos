@@ -250,7 +250,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = False) -> Pipeline:
+                   retry_clear: bool = False, start_relight_hops: int = 5) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -451,8 +451,26 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             else:
                 image.append(pair[0])
         _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
-        for l in [c.act, c.idle[0]] + [pr[0] for pr in c.reqs.values()]:
+        for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
+        # START re-lights each request's false rail ("consumed") — but not at once. The DONE's
+        # clear train on that same rail (3 pulses, ~15 ms; 4 pulses, ~20 ms) is still running
+        # when a cell that was otherwise ready starts within a few ms of the request, and its
+        # tail then kills the rail START just re-lit: both rails dark, which the guards read
+        # as "pending", an extra transaction, and the reader's condition one token late from
+        # then on (2026-09-20: every stronger or longer clear, and the conditional second
+        # clear, turned stalls into exactly that wrong value; the capture of seed-108 copy 5
+        # on the retry build shows the sequence, docs/tick_stalls.md). Nothing ordered the two.
+        # With the re-light `start_relight_hops` (~27 ms) after START the train has ended; in
+        # between the pair is dark on both rails, which the go chain cannot act on (IDLE was
+        # killed at START) and which only delays a producer's commit gate by the same ~27 ms.
+        if start_relight_hops and c.reqs:
+            start_d = add_delay_chain(net, drive, f"{c.name}.start.fd", c.start, start_relight_hops)
+            for pr in c.reqs.values():
+                net.synapse(start_d, pr[0].u, drive.ignite)
+        else:
+            for pr in c.reqs.values():
+                net.synapse(c.start, pr[0].u, drive.ignite)
         # A §10.3 kill pair's r0-driven kill may not recover during r0's ~60 ms silence
         # (<86 ms), so START must clear true explicitly. In request-priority pairs it is
         # the ONLY clear of true: neither the false rail nor its repair can consume a token.
