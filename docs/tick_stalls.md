@@ -380,6 +380,7 @@ on this build (`3cc733b`, Juno 414205–7):
 | seed | ok | wrong | missing | failing copies | wall |
 |---|---:|---:|---:|---|---:|
 | 108 (414205) | **1,600** | **0** | **0** | none | 572 s (nothing waited for the cap) |
+| 109 (414206) | **1,600** | **0** | **0** | none | 568 s |
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
