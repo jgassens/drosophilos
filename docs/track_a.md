@@ -220,6 +220,28 @@ faster because Python bookkeeping runs once per block). The H200 sits at the MPS
 picture (its step was launch- and sync-bound at every size), and A4 removes the launches as
 well, which no laptop device can show.
 
+## H200 results (Juno 413020 A/B, 413021 profile, 413022 eager/scatter; `docs/perf/`)
+
+Wall ÷ neural, identical circuits and inputs, every row 0 wrong / 0 missing:
+
+| block | neurons | `TorchSim` | `FastSim` graph + sparse | eager + scatter | gain |
+|---|---|---|---|---|---|
+| one cell | 3,172 | 5.6× | 1.05× | 1.55× | 5.3× |
+| fan-out | 10,888 | 6.0× | 1.32× | — | 4.5× |
+| tick | 28,439 | 6.7× | 1.87× | 2.2× (8 copies: 5.0×) | 3.6× |
+| perspective | 47,507 | 7.1× | 2.40× | 2.6× | 3.0× |
+| perspective, pipelined | 110,024 | 8.6× | 3.93× | — | 2.2× |
+
+Capture worked (`graph_active` true, cuSPARSE product inside the graph, no fallback). The
+profiled twin shows where the remaining time is, and it is **not the simulator step** for the
+larger blocks: the primitive campaign captures every neuron of node 0 to count spikes, so the
+observation buffer is K × B × n bools and its host unpack (`observe_commit`) is 45 % of the
+step at 47k neurons, 63 % at 110k, 79–84 % with 8 copies; the graph replay itself is
+8–22 ms per 94-step block, i.e. **0.09–0.23 ms per step from 3k to 880k neurons**. The renders
+watch ~24 neurons, so the A/B ratios above overstate `FastSim`'s cost for real workloads; the
+small-render twin (Juno 413097) is the uncontaminated number, and the primitive level needs a
+"no spike count" option to measure the step alone.
+
 ## Wiring
 
 - `run_pipeline_batched(..., backend="torch" | "torch-fast", graph_steps=0, observe_every=None,
