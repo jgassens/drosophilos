@@ -413,10 +413,17 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False)  # §10.3 count control
     assert (legacy.net.n, legacy.net.nnz) == (7245, 12581)  # 2026-09-20: TIMEOUT cleared by the stage reset, commit idle rail's second ignition, START re-light delay
-    pl = build_pipeline(PARAMS, 1,
-                        [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
-                          "trigger": ["input", "input:other"]}],
-                        consts={"zero": 0}, streams=["input", "other"])
+    # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
+    from drosophilos.lib import control
+    saved = control.KILL_PULSES, control.KILL_STRENGTH
+    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
+    try:
+        pl = build_pipeline(PARAMS, 1,
+                            [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
+                              "trigger": ["input", "input:other"]}],
+                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0)
+    finally:
+        control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert 2 * pl.net.n < 30000
     cell = pl.cells[0]
     req = cell.reqs["input"]
