@@ -178,3 +178,17 @@ python -m drosophilos.bench.stall_diag data/a2/tick_s108_node77.npz --campaign d
 
 The report's headline must be restated as "0 wrong in 4,000 outputs on one realization;
 5 wrong in 1,600 on another" until the copy-77 mechanism is found and fixed.
+
+### `--backend torch-fast` is not a step-identical substitute in the campaign (Juno 413583)
+
+Same seed, same perturbed copies: `FastSim` reproduced the `TorchSim` run's `(step, value)`
+outputs on 71 of 100 copies and its values on 96, with a different failing set (8, 39, 83, 98:
+0 wrong, 42 missing; `TorchSim`: 3, 8, 77, 98: 5 wrong, 29 missing) in 665 s of wall time
+against 969 s. The cause is the K-step observation lag (`observe_every` = 94 by default):
+under noise a token loaded up to 9.4 ms later meets a different stray-input sample, and which
+copies stall is sensitive to that. `observe_every=1` restores `TorchSim`'s schedule exactly
+(the parity tests use it) at the cost of the per-step host copy. Rule for the reliability
+campaigns: compare runs on one backend, or run `FastSim` with `--observe-every 1`; a change
+of backend is a change of realization, not a re-run. Copy 77's wrong values did not occur on
+the `FastSim` realization, so the mechanism is timing-sensitive — the capture on `TorchSim`
+(413584) is the one to read.
