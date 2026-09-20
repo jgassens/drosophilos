@@ -7,7 +7,7 @@ it against 30 s with the array multiplier (a3_kernels §11.2). Tool: `bench/mul_
 (captures every multiplier cell's request → START → ACT^d → completion → commit → DONE and
 its consumers' requests on node 0; `tests/test_mul_diag.py`). Runs: Juno 413027
 (perspective, pipelined, 16 tokens), 413025 (doom4 8 × 5 × 1 frame, array), 413026 (same,
-pipelined; **pending**). Records: `docs/perf/muldiag_*.json`.
+pipelined). Records: `docs/perf/muldiag_*.json`.
 
 ## 1. Standalone (perspective kernel, pipelined multiplier, 16 tokens)
 
@@ -45,11 +45,22 @@ last cell has started pixel k, `c2_0_and` behind it cannot either, and the pixel
 register waits for the whole pass. One token in flight; period = latency.
 
 That also explains the multiplier regression without any multiplier defect: when the period
-is the path latency, **latency is the cost and throughput is irrelevant**. The array
-multiplier adds ~5.3 s of latency per multiplier; the pipelined one ~1.5 s × 16 rows ≈ 24 s.
-Two multipliers in the pass: 26 s + 2 × (24 − 5.3) ≈ 63 s per pixel — the measured 63 s
-against 30 s. (Job 413026 captures the pipelined pass to confirm the row periods and the
-absence of overlap; this section is updated when it lands.)
+is the path latency, **latency is the cost and throughput is irrelevant**. Confirmed by the
+pipelined capture (Juno 413026, same 8 × 5 × 1 frame, 2,195 s neural against 1,407 s):
+
+| pipelined multiplier inside the pixel pass (each of 16 rows, 40 pixels) | ms |
+|---|---|
+| waiting for its input | ~41,000 |
+| go / compute / consumer wait / commit + reset | 72 / 580–760 / 80 / 529 |
+| **period per pixel (every row, both multipliers)** | **42,400** (array: 26,200) |
+| tokens entering row 0 before the previous left row 15 | **0 of 40** (`c2_40_mulp`), 1 of 40 (`c2_9_mulp`); standalone: 15 of 16 |
+
+The rows never overlap inside the pass, so the 16-row multiplier is pure latency: ~1.4 s per
+row × 16 ≈ 23 s from request to DONE against ~6 s for the array. The two multipliers sit on
+parallel branches (`c2_9_mul` at depth 4, `c2_40_mul` at depth 5, converging at the output
+selects), so the path grows by one multiplier's difference, 26.2 → 42.4 s per pixel (+16 s,
+1.62×). The 63 s against 30 s of a3_kernels §11.2 was the 24 × 15 render, whose longer pass
+multiplies the same per-token latency by more pixels per column.
 
 ## 4. Minimal reproducer (`tests/test_pipeline_retention.py`, RefSim, 4-bit)
 
