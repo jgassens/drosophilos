@@ -318,6 +318,15 @@ Build with both kernel fixes as well (`b4e6905`: power-up veto, commit idle rail
 | seed | ok | wrong | missing | failing copies |
 |---|---:|---:|---:|---|
 | 108 (413812) | 1,584 | 0 | 16 | 67, 72 (stalls) |
+| 109 (413813) | 1,548 | 0 | 52 | 29, 41, 50, 77 (stalls) |
+| 110 (413814) | 1,541 | 0 | 59 | 18, 20, 34, 67, 73, 86 (stalls; 73 produced no output at all) |
+
+**300 copies, 4,800 outputs, 0 silent wrong values, 0 refusals, 0 faults; 12 copies stalled
+(4 %, 127 outputs unfinished).** The two wrong-value mechanisms and the refusal class are
+gone from three realizations; what remains is stalls, whose one localized cause (a fast
+latch slipping through the kill train, copy 8) is unfixed and whose other instances are
+unread. Each needs its own capture (~20 min of H200 per copy); copy 73 of seed 110, which
+never produced its first output, is the first to take.
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and

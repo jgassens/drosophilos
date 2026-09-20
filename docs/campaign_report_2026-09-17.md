@@ -13,10 +13,13 @@ player from input — compiles through our own compiler into a network of leaky
 integrate-and-fire neurons, and that network computes the game update and draws the frame
 with nothing on the host doing game logic. The frames it produces are pixel-for-pixel equal
 to the C reference. Under 4 % synaptic noise, threshold and bias drift and stray spikes, the
-kernels now produce **no silent wrong value in 4,000 outputs**; what remains are fail-stops
-the machine itself can see. (One caveat found on 2026-09-20: the host runner could drop an
-input word the kernel had refused, which scored as wrong values downstream; it now resends
-it — `docs/tick_stalls.md`, copy 77.)
+kernels produce **no silent wrong value in 4,000 outputs** on that build and realization.
+Three more realizations on 2026-09-20 (`docs/tick_stalls.md`) found three ways a wrong value
+can still arise — a refused input word the host did not resend, a state cell's completion
+root lit by a stray coincidence, and a commit request's idle rail whose re-ignition failed —
+each localized from a spike capture and fixed with a regression test; the build with those
+fixes gives **0 wrong values in 4,800 outputs over three seeds**, with 4 % of copies stalled
+(fail-stops the machine itself can see).
 
 Three limits are also measured, and they do not move with more of the same work:
 
