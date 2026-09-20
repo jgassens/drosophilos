@@ -67,6 +67,28 @@ component and spike reduction: 974–1,102 neurons and 1,858–2,114 edges per s
 cell, with roughly 31–38% fewer whole-run spikes/token in these short runs. STORE is exactly
 unchanged.
 
+## H200 result (Juno 413149; `docs/perf/juno-h200-trackB-prim.md`)
+
+`FastSim` (graph + sparse), one H200, `--no-spike-count`, generic baseline against the
+one-key `datapath=specialized` variant, 16 tokens, every row 0 wrong / 0 missing / 0 faults:
+
+| cell | neurons generic → specialized | first output (s) | interval (s) | wall ÷ neural |
+|---|---|---|---|---|
+| ADD (control, stays generic) | 3,172 → 3,172 | 1.681 → 1.681 | 1.191 → 1.191 | 1.00× → 0.94× |
+| AND | 3,172 → 2,166 (−32 %) | 1.778 → 1.770 | 1.157 → 1.149 | 0.94× → 0.93× |
+| XOR | 3,172 → 2,198 (−31 %) | 1.646 → 1.638 | 1.131 → 1.123 | 0.94× → 0.95× |
+| MOV | 3,172 → 2,070 (−35 %) | 1.719 → 1.711 | 1.073 → 1.064 | 0.94× → 0.93× |
+| fan-out kernel | 10,888 → 8,908 (−18 %) | 3.858 → 3.850 | 1.272 → 1.272 | 1.02× → 1.01× |
+| tick kernel | 28,439 → 24,479 (−14 %) | 6.449 → 6.433 | 5.947 → 5.930 | 1.08× → 1.08× |
+
+The result the spec anticipated, stated plainly: **a third fewer neurons per supported cell,
+no change in speed.** Neural latency moves by 8–16 ms in ~1,150–5,950 (the handshake, not
+the ALU, sets it), and wall time does not move because `FastSim`'s step at these sizes does
+not scale with the neuron count. The saving is a capacity result — fewer components per
+cell for Stage H's placement budget and for runs large enough that arithmetic binds — not a
+frame-time result on its own. The 100-copy noisy campaign (`kernel_campaign --datapath
+specialized`) is still to run before the option can be a default.
+
 ## Cluster handoff
 
 Run the matched generic baseline and one-key specialized circuit variant with:
