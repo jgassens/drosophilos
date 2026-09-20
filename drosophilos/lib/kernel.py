@@ -1021,18 +1021,20 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
                     ev_ = last_load[st]
                     committed = (ev_ is not None and last_commit[st] is not None
                                  and last_commit[st] > ev_["event_step"])  # a stray TIMEOUT, not a refusal
-                    again = (ev_ is not None and retry_refused and not committed and ev_ not in retry
+                    duplicate = ev_ is not None and (ev_ in retry or bool(ev_.get("refused")))
+                    again = (ev_ is not None and retry_refused and not committed and not duplicate
                              and ev_["attempts"] < max_retries)
                     refused.append({"node": 0, "stream": st, "step": s_,
                                     "value": None if ev_ is None else ev_["value"],
                                     "schedule_index": None if ev_ is None else ev_["schedule_index"],
                                     "attempt": None if ev_ is None else ev_["attempts"] + 1,
-                                    "committed": committed, "reason": "timeout", "retried": again})
+                                    "committed": committed, "reason": "duplicate" if duplicate else "timeout",
+                                    "retried": again})
                     if ev_ is not None and not committed:
                         ev_["refused"] = True
                     if again:
                         retry.append(ev_)
-                    elif ev_ is not None and not committed:
+                    elif ev_ is not None and not committed and not duplicate:
                         blocked = True
                 last_timeout[st] = s_
 
@@ -1164,7 +1166,7 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
              "load_events": load_events, "t_load": t_load,
              "faults": n_fault, "timeouts": n_timeout, "bad_outputs": bad,
              "refusals": len(refused), "refused": [refused],
-             "retries": sum(1 for e in refused if e["retried"]), "blocked_nodes": [0] if blocked else [],
+             "retries": sum(1 for e in load_events if e["retry"]), "blocked_nodes": [0] if blocked else [],
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
@@ -1275,6 +1277,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     timeout_of = {P_.watchdog.timeout.u: st for st, (_, P_) in pl.inputs.items() if P_.watchdog is not None}
     last_timeout = [{st: None for st in pl.inputs} for _ in range(B)]
     last_commit = [{st: None for st in pl.inputs} for _ in range(B)]  # last stage->master commit rise
+    n_commit = [0] * B  # commit rises: words the kernel took in (their outputs are still owed)
     last_load = [{st: None for st in pl.inputs} for _ in range(B)]  # the word each stream holds
     refused = [[] for _ in range(B)]  # detected refusals: TIMEOUT rises on a loaded word
     retry = [[] for _ in range(B)]  # load events to deliver again on the READY the reset raises
@@ -1295,18 +1298,20 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     # resend — a resend would duplicate the word (review finding)
                     committed = (ev_ is not None and last_commit[b][st] is not None
                                  and last_commit[b][st] > ev_["event_step"])
-                    again = (ev_ is not None and retry_refused and not committed and ev_ not in retry[b]
+                    duplicate = ev_ is not None and (ev_ in retry[b] or bool(ev_.get("refused")))
+                    again = (ev_ is not None and retry_refused and not committed and not duplicate
                              and ev_["attempts"] < max_retries)
                     refused[b].append({"node": b, "stream": st, "step": s_,
                                        "value": None if ev_ is None else ev_["value"],
                                        "schedule_index": None if ev_ is None else ev_["schedule_index"],
                                        "attempt": None if ev_ is None else ev_["attempts"] + 1,
-                                       "committed": committed, "reason": "timeout", "retried": again})
+                                       "committed": committed, "reason": "duplicate" if duplicate else "timeout",
+                                       "retried": again})
                     if ev_ is not None and not committed:
                         ev_["refused"] = True
                     if again:
                         retry[b].append(ev_)
-                    elif ev_ is not None and not committed:
+                    elif ev_ is not None and not committed and not duplicate:
                         blocked[b] = True  # not resent (retries exhausted or off): the stream stops here
                 last_timeout[b][st] = s_
             else:
@@ -1453,6 +1458,10 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
             bad += status != "valid"
         nd, nr = count_latches(s_)  # before the exit test: a fault on the terminal step counts (review)
         for b in range(B):
+            if not done_nodes[b] and blocked[b] and not any(p_[1] == b for p_ in pending):
+                per_token = want[b] // max(1, len(scheds[b]))
+                if sum(len(v) for v in outs[b].values()) >= n_commit[b] * per_token:
+                    done_nodes[b] = True  # fail-stop once the words it did take in have produced their outputs
             if (not done_nodes[b] and k[b] >= len(scheds[b]) and not retry[b]
                     and sum(len(v) for v in outs[b].values()) >= want[b]):
                 done_nodes[b] = True
@@ -1467,6 +1476,8 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     lost_word(b, what, s_)
                 last_ready[b][what] = s_
             elif kind == "commit":
+                if last_commit[b][what] is None or s_ - last_commit[b][what] > 3 * period:
+                    n_commit[b] += 1
                 last_commit[b][what] = s_
             else:
                 if last_wm[b][what.name] is None or s_ - last_wm[b][what.name] > 3 * period:
@@ -1531,7 +1542,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
              "load_steps": loads, "load_events": load_events, "t_load": t_load,
              "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad,
              "refusals": sum(len(r) for r in refused), "refused": refused,
-             "retries": sum(1 for r in refused for e in r if e["retried"]),
+             "retries": sum(1 for le in load_events for e in le if e["retry"]),
              "blocked_nodes": [b for b in range(B) if blocked[b]],
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,

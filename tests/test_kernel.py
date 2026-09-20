@@ -294,7 +294,9 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
     legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
-    assert (legacy.net.n, legacy.net.nnz) == (958, 1644)  # recorded before the fourth remedy
+    # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
+    # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
+    assert (legacy.net.n, legacy.net.nnz) == (958, 1646)
     pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
     cell = pl.cells[0]
     req = cell.reqs["input"]

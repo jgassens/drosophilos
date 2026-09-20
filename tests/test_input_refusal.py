@@ -62,7 +62,8 @@ def test_without_retry_the_refused_word_blocks_the_stream():
     got, st = _run_batched(retry_refused=False, max_ms=8000)
     assert got == [1], got
     assert st["refusals"] == 1 and st["retries"] == 0 and st["faults"] == 0
-    assert st["blocked_nodes"] == [0] and st["host_stalls"]
+    assert st["blocked_nodes"] == [0]
+    assert st["outputs"] == [1] and st["neural_ms"] < 8000  # finished as a fail-stop once token 1's output was in
 
 
 def test_a_word_refused_past_max_retries_blocks_the_node_instead_of_skipping_it():
@@ -70,7 +71,36 @@ def test_a_word_refused_past_max_retries_blocks_the_node_instead_of_skipping_it(
     assert got == [1], got  # nothing after the refused word: unfinished, not shifted
     assert st["refusals"] == 3 and st["retries"] == 2 and st["blocked_nodes"] == [0]
     assert [e["attempt"] for e in st["refused"][0]] == [1, 2, 3]
-    assert st["host_stalls"]
+    assert st["neural_ms"] < 8000  # a blocked node is finished (fail-stop); the run does not wait for max_ms
+
+
+def test_two_nodes_one_refusal_and_a_refused_last_token():
+    # review (claude-fable): node 1 alone refuses; the refused word is the last of its
+    # schedule (no later token to hide behind); node 0 is untouched and both come out whole
+    pl = _mov_kernel()
+    seen = {"n": 0}
+
+    def rail_filter(node, index, stream, value, rails):
+        if node == 1 and index == 3 and seen["n"] == 0:
+            seen["n"] += 1
+            return [(i, r) for i, r in rails if i != 0]
+        return rails
+    outs, _, st = run_pipeline_batched(pl, P, [TOKENS, TOKENS], max_ms=25000, device="cpu", progress=0,
+                                       rail_filter=rail_filter)
+    assert [[v for _, v in o["out"]] for o in outs] == [TOKENS, TOKENS]
+    assert [len(r) for r in st["refused"]] == [0, 1] and st["retries"] == 1
+    assert st["refused"][1][0]["schedule_index"] == 3 and st["blocked_nodes"] == []
+
+
+def test_fast_backend_in_blocks_resends_too():
+    # the FastSim path observes in K-step blocks: the TIMEOUT rise and the READY it causes can
+    # arrive in one block, in step order
+    got_pl = _mov_kernel()
+    outs, _, st = run_pipeline_batched(got_pl, P, [TOKENS], max_ms=20000, device="cpu", progress=0,
+                                       backend="torch-fast", graph_steps=94, rail_filter=_dark_bit0(1))
+    assert st["simulator"] == "FastSim"
+    assert [v for _, v in outs[0]["out"]] == TOKENS
+    assert st["refusals"] == 1 and st["retries"] == 1 and st["blocked_nodes"] == []
 
 
 def test_single_runner_resends_too():

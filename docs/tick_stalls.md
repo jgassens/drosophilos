@@ -235,6 +235,15 @@ add_liveness`); the chain re-lights it ~460 ms after the spoiled load, both regi
 and the word is resent (three loads of the same word, one output, in the test). The
 runner-side rules above are what keep this from duplicating anything.
 
+A second review (claude-fable, of the same commit) confirmed the retry logic's ordering on
+both runners and added: a repeated TIMEOUT rise for a word already queued is a duplicate,
+not a block; `retries` counts retry loads that went in, not queue entries; a blocked node
+finishes as a fail-stop once the words it did take in have produced their outputs, so one
+blocked copy no longer holds a 100-copy batch to `max_ms`; and the retry path now has tests
+for two nodes, a refused last token, and the `torch-fast` block path. Not done: a two-stream
+kernel test, and the reload margin of a kill pair at the commit gate's ~50 ms (the kernel
+tests are the check for that).
+
 Restated headline: seed 108, current build, 1,600 outputs — 0 silent wrong values; 1
 detected refusal (copy 77, now resent); 29 unfinished in three stalled copies (3, 8, 98). The
 report's "0 wrong in 4,000" stands as a statement about the kernel; the host runner is what
