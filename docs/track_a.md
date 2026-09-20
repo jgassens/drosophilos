@@ -220,27 +220,33 @@ faster because Python bookkeeping runs once per block). The H200 sits at the MPS
 picture (its step was launch- and sync-bound at every size), and A4 removes the launches as
 well, which no laptop device can show.
 
-## H200 results (Juno 413020 A/B, 413021 profile, 413022 eager/scatter; `docs/perf/`)
+## H200 results (Juno 413148 clean A/B; 413020 first A/B, 413021 profile, 413022 eager/scatter; `docs/perf/`)
 
-Wall ÷ neural, identical circuits and inputs, every row 0 wrong / 0 missing:
+Wall ÷ neural on one H200 NVL, identical circuits and inputs, `--no-spike-count` (the runner
+watches only its own neurons, as a render does), every row 0 wrong / 0 missing / 0 faults:
 
-| block | neurons | `TorchSim` | `FastSim` graph + sparse | eager + scatter | gain |
-|---|---|---|---|---|---|
-| one cell | 3,172 | 5.6× | 1.05× | 1.55× | 5.3× |
-| fan-out | 10,888 | 6.0× | 1.32× | — | 4.5× |
-| tick | 28,439 | 6.7× | 1.87× | 2.2× (8 copies: 5.0×) | 3.6× |
-| perspective | 47,507 | 7.1× | 2.40× | 2.6× | 3.0× |
-| perspective, pipelined | 110,024 | 8.6× | 3.93× | — | 2.2× |
+| block | neurons | `TorchSim` | `FastSim` graph + sparse | gain |
+|---|---|---|---|---|
+| one cell (ADD / AND / XOR / MOV) | 3,172 | 5.5–5.6× | 0.93–0.95× | 5.9× |
+| fan-out | 10,888 | 5.8× | 1.01× | 5.7× |
+| tick | 28,439 | 5.9× | 1.08× | 5.5× |
+| perspective | 47,507 | 6.0× | 1.13× | 5.3× |
+| perspective, pipelined multiplier | 110,024 | 6.0× | 1.21× | 4.9× |
 
-Capture worked (`graph_active` true, cuSPARSE product inside the graph, no fallback). The
-profiled twin shows where the remaining time is, and it is **not the simulator step** for the
-larger blocks: the primitive campaign captures every neuron of node 0 to count spikes, so the
-observation buffer is K × B × n bools and its host unpack (`observe_commit`) is 45 % of the
-step at 47k neurons, 63 % at 110k, 79–84 % with 8 copies; the graph replay itself is
-8–22 ms per 94-step block, i.e. **0.09–0.23 ms per step from 3k to 880k neurons**. The renders
-watch ~24 neurons, so the A/B ratios above overstate `FastSim`'s cost for real workloads; the
-small-render twin (Juno 413097) is the uncontaminated number, and the primitive level needs a
-"no spike count" option to measure the step alone.
+Every kernel from 3k to 110k neurons now simulates within ~20 % of real time; the one-cell
+blocks run faster than the neurons they simulate. Capture worked (`graph_active` true, the
+cuSPARSE product inside the graph, no fallback). The first A/B (413020) had shown the gain
+shrinking with size (2.2× at 110k): that was the primitive level's own all-neuron spike
+capture, whose host unpack was 45–84 % of the measured step (profile 413021) — the graph
+replay itself is 0.09–0.23 ms per step at every size. The eager/scatter twin (413022) shows
+the graph is worth ~⅓ of the step and the scatter path collapses at 8 copies (5.0× on tick).
+
+At frame scale (small-render level, `docs/perf/juno-h200-small*.md`): doom2 8 × 5 × 3 frames,
+664k neurons, 1 copy — 9,126 s wall on `TorchSim`, 2,997 s on `FastSim` (3.0×), pixels
+identical; at 8 copies (5.3 M neurons) 3,775 s vs 3,196 s (1.18×). Above ~1 M neurons the
+step is bound by the arithmetic, which both simulators pay; the launch overhead `FastSim`
+removes is then a small share. The next simulator lever is that arithmetic (the product's
+memory traffic, float32), not the host.
 
 ## Wiring
 
