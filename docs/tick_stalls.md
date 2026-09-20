@@ -319,7 +319,7 @@ the resend path was not exercised on the cluster; it is exercised by the tests. 
 copy 55 is the copy-61 family again, mid-run: at token 7 `mx` moves +4 instead of +2 (78 →
 82, then 80 at token 8, consistent with `mx` = 82), i.e. one extra `mx` transaction — with
 `px` right throughout and no fault or timeout. A capture with the master roles is queued
-(Juno 413720) alongside copy 61's.
+(Juno 413725) alongside copy 61's.
 
 Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9_sel` commits
 its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
