@@ -249,7 +249,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
-                   datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True) -> Pipeline:
+                   datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
+                   retry_clear: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -416,6 +417,28 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 received = net.neuron(f"{req_name}.received")
                 net.synapse(trig, received, drive.ignite)
                 add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]])
+                if retry_clear:
+                    # Conditional second clear (2026-09-20). A false rail whose loop came out
+                    # fast under noise (33-41 steps against 47) can slip between the three
+                    # pulses of that train (tests/test_kill_margin.py); both request rails
+                    # then stay live, the false one vetoes go, and the cell never starts
+                    # again (seed-108 copy 8, seed-110 copy 73: two of the three stalls
+                    # read). Stronger or longer trains broke the kernel elsewhere. So: ~64 ms
+                    # after the receipt, if BOTH rails are still live — the stuck state and
+                    # nothing else; START has killed true by then in the healthy case — a
+                    # gate fires a second train at a different phase of the loop. The gate
+                    # needs the delayed pulse (0.5 x need) and both rails' trains (0.35 x
+                    # threshold each in rate mode): any two of the three stay below threshold.
+                    late = add_delay_chain(net, drive, f"{req_name}.retry_d", received, 12)
+                    gate = net.neuron(f"{req_name}.retry_gate")
+                    net.synapse(late, gate, int(round(0.5 * drive.single_need)))
+                    net.synapse(pair[0].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
+                    net.synapse(pair[1].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
+                    # at the register reset's strength: a rail this fast survives 0.75 x pulses at
+                    # every phase; the after-hyperpolarisation cost is paid only in the stuck case,
+                    # and a false rail that then fails to re-light at START is repaired by the
+                    # ACT^d relight below
+                    add_kill_train(net, drive, f"{req_name}.k1b", gate, [pair[0]], strength=1.5)
             if stream_of(src) is None and src not in built:  # feedback: the state is there at power-up
                 c.feedback.add(src)
                 image.append(pair[1])
