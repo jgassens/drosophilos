@@ -306,9 +306,23 @@ Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9
 its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
 6.7 s, and from then on `mx` steps every other tick (88, 88, 86, 86, 84, 84, 86) while `px`
 is right throughout — the state feedback lags a token. No fault, no timeout. A handshake
-capture of that copy is queued on the old build (Juno 413685, with `wd\.timeout` in the role
-filter) for `stall_diag`; until it is read, the report's "no silent wrong value" claim has a
-second, unexplained counter-example (the campaign scores it as 8 wrong).
+capture of that copy (Juno 413685, reproduced exactly) shows the mechanism's shape but not
+its trigger: at step 27,850 — 2.8 s in, with `c9_sel` idle and nothing committed
+(`creqr0` "nothing to commit" lit throughout, no START, no commit) — `c9_sel.done.edge`
+fires: its master's completion latch re-rose. The DONE is a real one to the consumers:
+`c7_add` and `c8_sub` take new requests at 27,932 and START extra transactions at 29,366
+and 29,395 on the master's unchanged initial value (90), `c10_xor` and `c5_sub` likewise,
+and the runner's decoder, which reads a master completion rise as an output, records the
+90. From then on the `mx` loop carries one extra transaction and the state lags a token
+(88, 88, 86, 86, …). **Classification: a spurious DONE — a state cell's master completion
+re-rising without a commit, before the first tick.** The completion latch itself
+(`c9_sel.M.comp.c3_0.L.u`) and the master's reset are not in that capture's role filter; a
+second capture with `M\.comp|M\.reset` in the filter is queued (Juno 413709) to see whether
+the latch dropped and was re-ignited by its AND gate's edge relay (a doublet from a stray
+spike collapsing the loop) or the master was reset and re-lit. Until then the report's "no
+silent wrong value" claim has this counter-example (the campaign scores it as 8 wrong), and
+it is a kernel mechanism, not a host one: the host's rules cannot tell a spurious DONE from
+a real one.
 
 ### `--backend torch-fast` is not a step-identical substitute in the campaign (Juno 413583)
 
