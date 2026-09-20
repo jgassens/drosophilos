@@ -207,18 +207,18 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
     return [r0, r1]
 
 
-# The kill train's shape. 3 x 0.75 (until 2026-09-20) killed a nominal latch at every phase but
-# not a fast one: a latch whose loop weights came out +8 % and threshold -0.8 mV (mix B) runs at
-# ~40 steps instead of 47 and survived the train at some phases; at +20 % / -0.8 mV (38 steps)
-# at every phase. Seed-108 copy 8 stalled that way (docs/tick_stalls.md): a request's false
-# rail, running at 33-41 steps, survived its third clear after two had worked. 3 x 1.5 (the
-# register reset's pulse strength, the same three pulses) kills every latch measured down to
-# 33 steps (+30 %, -1.2 mV) at every phase and 31 steps at 11 of 12; a killed rail reloads
-# ~150 ms later as before (tests/test_kill_margin.py). 4 x 1.5 kills down to 29 steps but its
-# after-hyperpolarisation stops the control machine after its first commit
-# (tests/test_compiler.py); 4 x 0.75 and 3 x 1.5 both run it.
+# The kill train's shape: 3 pulses x 0.75 loop, on both members. Known margin problem
+# (docs/tick_stalls.md, seed-108 copy 8): a latch whose loop came out fast under mix-B noise
+# (+20 % weights / -0.8 mV threshold: 38 steps instead of 47) survives this train at every
+# phase, and one such request rail stalled a copy. Stronger trains were measured on
+# 2026-09-20: 3 x 1.5 kills down to 33 steps at every phase in isolation, but in the 100-copy
+# mix-B tick campaign it stalled 85 of 100 copies (Juno 413672) — the extra
+# after-hyperpolarisation makes the rails' relights, ~190 ms after a kill, fail under noise —
+# and 4 x 1.5 stops the control machine outright. The train is unchanged; a kill that beats a
+# fast latch without slowing the relight is a separate experiment (tests/test_kill_margin.py
+# keeps the measurement). Campaign records carry the train as `kill_train`.
 KILL_PULSES = 3
-KILL_STRENGTH = 1.5
+KILL_STRENGTH = 0.75
 
 
 def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int | None = None,

@@ -276,16 +276,22 @@ scale × threshold offset):
 | 4 × 1.5 | 0 | 0 | 0 | 0 — but stops the control machine |
 
 With kill weights themselves 8 % low (the same noise) the old train fails from +4 % / −0.8 mV.
-A killed rail reloads ~150 ms after the kill with any of these trains (a reload 100 ms after a
-kill fails for all; the handshake's earliest relight, START after a request, is ~190 ms).
-4 × 1.5 kills the fastest latches but its after-hyperpolarisation leaves the control
-machine's ring stuck after the first commit (`tests/test_compiler.py`, found by the cluster
-test run 413662); 4 × 0.75 and 3 × 1.5 both run the machine. The default is now **3 × 1.5**
-(`lib/control.py KILL_PULSES / KILL_STRENGTH`; no new neurons, only stronger inhibitory
-weights). Campaign records carry `kill_train`, and `stall_diag` rebuilds older dumps with the
-train they were run with. Regression: `tests/test_kill_margin.py` (the old train lets the
-+20 % latch through at every phase; the default kills down to 33 steps at every phase; a kill
-pair still reloads).
+A killed rail reloads ~150 ms after the kill with any of these trains in isolation (a reload
+100 ms after a kill fails for all; the handshake's earliest relight, START after a request,
+is ~190 ms).
+
+**Neither stronger train survives contact with the kernel.** 4 × 1.5 leaves the control
+machine's ring stuck after its first commit (`tests/test_compiler.py`, cluster test run
+413662). 3 × 1.5 runs the machine and every local test, but in the 100-copy mix-B tick
+campaign it **stalled 85 of 100 copies**, most after the first token (Juno 413672: 676 ok,
+910 missing) — under noise the rails' relights ~190 ms after a kill no longer clear the
+extra after-hyperpolarisation. The train therefore stays **3 × 0.75**; the margin problem is
+recorded, not fixed (`tests/test_kill_margin.py`: the default train lets the +20 % latch
+through at every phase, a 3 × 1.5 train kills it in isolation, a kill pair reloads at 150 ms
+for nominal and slow loops). A kill that beats a fast latch without slowing the relight — a
+longer train at the old strength, or a relight drive that scales with the kill — is a
+separate experiment. Campaign records carry `kill_train`, and `stall_diag` rebuilds older
+dumps with the train they were run with.
 Validation on the cluster: seed 108–110 campaigns on the new build against the old build's
 stall counts (a netlist change is a new noise realization, so the comparison is per-seed
 totals, not per copy). Old build (3 × 0.75, commit `128d982`), 100 copies each:

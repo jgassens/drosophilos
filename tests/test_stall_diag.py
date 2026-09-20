@@ -56,7 +56,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
     from drosophilos.lib import control
 
     # the mechanism was measured on the 3 x 0.75 kill train of the time (its weights are set
-    # explicitly below); the default is 3 x 1.5 since 2026-09-20 (tests/test_kill_margin.py)
+    # explicitly below); pinned so the test does not depend on the default (tests/test_kill_margin.py)
     monkeypatch.setattr(control, "KILL_PULSES", 3)
     monkeypatch.setattr(control, "KILL_STRENGTH", 0.75)
     pl = build_pipeline(
