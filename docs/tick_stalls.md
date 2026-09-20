@@ -325,8 +325,24 @@ Build with both kernel fixes as well (`b4e6905`: power-up veto, commit idle rail
 (4 %, 127 outputs unfinished).** The two wrong-value mechanisms and the refusal class are
 gone from three realizations; what remains is stalls, whose one localized cause (a fast
 latch slipping through the kill train, copy 8) is unfixed and whose other instances are
-unread. Each needs its own capture (~20 min of H200 per copy); copy 73 of seed 110, which
-never produced its first output, is the first to take.
+unread. Each needs its own capture (~20 min of H200 per copy). Copy 73 of seed 110, which
+never produced its first output (Juno 413875, `docs/a2/tick_s110_node73_stall_diag.md`), is
+the kill-margin class again: the image-lit false rail of `c2_sel`'s request from `c1_and`
+(neuron 11845, loop period 41 steps against 47 nominal) survived the clear train at the very
+first request (35,103 / 35,153 / 35,197) and vetoed `c2_sel`'s first START for the whole run.
+Two of the three stalls read so far are this one mechanism. Since the stronger trains failed
+in the kernel (above), the next trial is four pulses at the original 0.75 strength (+1 relay
+per kill train, 3.0 loop units of charge against 3 × 1.5's 4.5): in isolation it kills every
+latch down to 39 steps at every phase and 38 steps at 5 of 12 phases, and it runs the control
+machine; seeds 108–110 on the cluster decide. **Seed 108 decided against it (Juno 413917):
+no stall at all in 100 copies, but 6 silent wrong values in 3 copies** — `c9_sel` twice
+selecting `mx − 2` where `dist & 128` said `mx + 2` (copies 19, 88: 76, 74 for 80, 78) and
+`c4_sel` once keeping `px = 147` where `px & 128` should have zeroed it (copy 37) — a SEL
+starting on a stale condition. The fourth pulse changes when the cleared request rail can be
+relit, and the request/clear ordering the cells rely on slipped. Reverted: a stall is a
+fail-stop, a wrong value is not. What is left to try is a *conditional* second clear —
+re-kill only if the false rail is still lit ~50 ms after the true rail's rise — which adds no
+charge to the nominal case.
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
