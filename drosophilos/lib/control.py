@@ -207,11 +207,25 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
     return [r0, r1]
 
 
-def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int = 3,
-                   strength: float = 0.75) -> int:
+# The kill train's shape. 3 x 0.75 (until 2026-09-20) killed a nominal latch at every phase but
+# not a fast one: a latch whose loop weights came out +8 % and threshold -0.8 mV (mix B) runs at
+# ~40 steps instead of 47 and survived the train at some phases; at +20 % / -0.8 mV (38 steps)
+# at every phase. Seed-108 copy 8 stalled that way (docs/tick_stalls.md): a request's false
+# rail, running at 33-41 steps, survived its third clear after two had worked. 4 x 1.5 (the
+# register reset's own pulse strength) kills every latch measured down to 29 steps (+60 %,
+# -1.2 mV) at every phase; a killed rail is reloadable ~150 ms later as before
+# (tests/test_kill_margin.py).
+KILL_PULSES = 4
+KILL_STRENGTH = 1.5
+
+
+def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int | None = None,
+                   strength: float | None = None) -> int:
     """`source`'s rise (one relay) starts a short train of `pulses` inhibitory pulses on every
     member of `latches` (like a reset train, without an edge detector: the source is a relay
-    pulse or a fresh latch's rise)."""
+    pulse or a fresh latch's rise). Defaults: KILL_PULSES x KILL_STRENGTH (see above)."""
+    pulses = KILL_PULSES if pulses is None else pulses
+    strength = KILL_STRENGTH if strength is None else strength
     relay = add_edge_relay(net, drive, f"{name}.start", source, fast_inhibitor=True)
     inh = net.neuron(f"{name}.inh")
     prev = relay

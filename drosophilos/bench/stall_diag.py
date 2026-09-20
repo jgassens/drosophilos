@@ -65,20 +65,30 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     """Rebuild exactly the kernel shape used by ``kernel_campaign tick``."""
     if campaign.get("block", "tick") != "tick":
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
+    from ..lib import control
+
     source = _repo_root() / "examples" / "tick2.c"
     prog = compile_c(source.read_text())
     ks = compile_kernel(prog, loop_body(prog), "i")
     params = Params()
-    pl = build_pipeline(
-        params,
-        prog.width,
-        ks.cells,
-        consts=ks.consts,
-        mems=ks.mems,
-        outputs=ks.outputs,
-        datapath=campaign.get("datapath", "generic"),
-        relight_requests=campaign.get("relight_requests", True),
-    )
+    # the kill train's shape is part of the netlist: campaigns record it since 2026-09-20;
+    # earlier ones (seeds 107, 108) were built with 3 x 0.75
+    pulses, strength = campaign.get("kill_train", (3, 0.75))
+    saved = control.KILL_PULSES, control.KILL_STRENGTH
+    control.KILL_PULSES, control.KILL_STRENGTH = int(pulses), float(strength)
+    try:
+        pl = build_pipeline(
+            params,
+            prog.width,
+            ks.cells,
+            consts=ks.consts,
+            mems=ks.mems,
+            outputs=ks.outputs,
+            datapath=campaign.get("datapath", "generic"),
+            relight_requests=campaign.get("relight_requests", True),
+        )
+    finally:
+        control.KILL_PULSES, control.KILL_STRENGTH = saved
     expected_n = campaign.get("neurons")
     if expected_n is not None and int(expected_n) != pl.net.n:
         raise AssertionError(f"campaign has {expected_n} neurons; rebuilt tick kernel has {pl.net.n}")
@@ -427,12 +437,17 @@ def _campaign_counts(campaign: dict[str, Any], node: int) -> dict[str, Any]:
         counts = [len(node_outputs[node].get(cell, [])) for cell in outputs]
         duplicates = sum(max(0, count - tokens) for count in counts)
         completed = sum(counts)
+    per_node_refusals = campaign.get("per_node_refusals")
+    refusals = None
+    if per_node_refusals is not None and 0 <= node < len(per_node_refusals):
+        refusals = int(per_node_refusals[node])
     return {
         "requested_transactions": tokens,
         "requested_outputs": requested_outputs,
         "completed_outputs": completed,
         "wrong": wrong,
         "duplicates": duplicates,
+        "campaign_refusals": refusals,  # the runner's count (TIMEOUT rises); None for older campaigns
         "unfinished": missing,
     }
 
@@ -681,7 +696,15 @@ def render_markdown(report: dict[str, Any]) -> str:
         "|---:|---:|---:|---:|---:|---:|---:|",
         f"| {counts['requested_transactions']} | {counts['requested_outputs']} | "
         f"{_n(counts['completed_outputs'])} | {_n(counts['wrong'])} | {counts['duplicates']} | "
-        f"{report['detected_refusals']} | {_n(counts['unfinished'])} |",
+        f"{report['detected_refusals']}"
+        + ("" if counts.get("campaign_refusals") is None else f" (runner: {counts['campaign_refusals']})")
+        + f" | {_n(counts['unfinished'])} |",
+        "",
+        "Detected refusals are counted from the dump's FAULT and `wd.timeout` latches (capture "
+        "`wd\\.timeout` in `--dump-roles` to see them) and, in parentheses, from the runner's "
+        "own count in the campaign record. A refused input word that the host does not resend "
+        "shifts every later output by one and scores as wrong values (copy 77, seed 108); the "
+        "runner resends it since 2026-09-20.",
         "",
         "A capture or campaign stopped by its neural-time or wall-time resource limit is "
         "**truncated**, not automatically stalled. The stall label above rests on a specific "

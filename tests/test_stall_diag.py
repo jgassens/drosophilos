@@ -44,7 +44,7 @@ def test_precedent_dump_localizes_live_false_repair_and_failed_clear():
     assert "**37,674**" in text and "11828" in text
 
 
-def test_live_false_repair_is_vetoed_and_done_clear_survives():
+def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
     """Encode the seed-107 mechanism directly; no impossible single-copy replay.
 
     Two RefSim copies share the measured source-DONE spacing and a bounded weak-clear
@@ -53,7 +53,12 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives():
     rails live, and no second START. The current copy 0 must survive and complete twice.
     """
     from drosophilos.sim.ref64 import RefSim
+    from drosophilos.lib import control
 
+    # the mechanism was measured on the 3 x 0.75 kill train of the time (its weights are set
+    # explicitly below); the default is 4 x 1.5 since 2026-09-20 (tests/test_kill_margin.py)
+    monkeypatch.setattr(control, "KILL_PULSES", 3)
+    monkeypatch.setattr(control, "KILL_STRENGTH", 0.75)
     pl = build_pipeline(
         PARAMS,
         1,

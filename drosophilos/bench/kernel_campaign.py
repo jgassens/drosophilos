@@ -16,6 +16,8 @@ import time
 
 import numpy as np
 
+from ..lib import control
+
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
@@ -135,6 +137,9 @@ def main(argv=None):
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
+           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH],
+           "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
+           "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
            "nodes_with_errors": sum(1 for x in per_node if x[1] or x[2]), "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0),
            "per_node": per_node, "reference": ref, "tokens_list": list(tokens), "output_cells": list(ks.outputs),

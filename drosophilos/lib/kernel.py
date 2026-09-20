@@ -949,7 +949,8 @@ def _sim_stats(sim, observer) -> dict:
 def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 60000, gap_ms: float = 0.0,
                  sim=None, per_token: int | None = None, expect_outputs: int | None = None,
                  on_output=None, should_stop=None, wall_limit: float = 0.0,
-                 full_trace: bool = False, observe_every: int | None = None) -> tuple[list, RefSim, dict]:
+                 full_trace: bool = False, observe_every: int | None = None,
+                 retry_refused: bool = True, max_retries: int = 3, rail_filter=None) -> tuple[list, RefSim, dict]:
     """Streams `tokens` into the input producers and decodes every completion of each output
     cell's master in order. A token is a value (the first stream), a pair (stream, value), or
     a triple (stream, value, min_outputs): the host schedule; a triple is loaded only once the
@@ -961,7 +962,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     the first output's list of (step, value); `stats["outputs_by_cell"]` holds every output's
     list. The run ends when the outputs number `expect_outputs` in total (default: `per_token`
     per token, default one) or at `max_ms`. `full_trace` retains every spike (reference runs;
-    `sim.trace` of a FastSim needs it); `observe_every` is a FastSim's transfer interval."""
+    `sim.trace` of a FastSim needs it); `observe_every` is a FastSim's transfer interval.
+    `retry_refused` / `rail_filter` / `stats["refusals"]`: see `run_pipeline_batched`."""
     net, drive = pl.net, pl.drive
     runner_started = time.perf_counter()
     deadline = runner_started + wall_limit if wall_limit and wall_limit > 0 else None
@@ -978,15 +980,37 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
     timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     seen_f, seen_t = set(), set()
+    timeout_of = {P_.watchdog.timeout.u: st for st, (_, P_) in pl.inputs.items() if P_.watchdog is not None}
+    last_timeout = {st: None for st in pl.inputs}
+    last_load = {st: None for st in pl.inputs}
+    refused: list = []  # detected refusals (see run_pipeline_batched)
+    retry: list = []
+    blocked = False
     processed_through = observer.available_through
 
     def count_latches(s_: int) -> None:
+        nonlocal blocked
         _, fired = observer.fired_at(s_)
         for x in fired.tolist():
             if x in fault_n:
                 seen_f.add(x)
             elif x in timeout_n:
                 seen_t.add(x)
+                st = timeout_of[x]
+                if last_timeout[st] is None or s_ - last_timeout[st] > 3 * period:
+                    ev_ = last_load[st]
+                    again = (ev_ is not None and retry_refused and ev_ not in retry
+                             and ev_["attempts"] < max_retries)
+                    refused.append({"node": 0, "stream": st, "step": s_,
+                                    "value": None if ev_ is None else ev_["value"],
+                                    "schedule_index": None if ev_ is None else ev_["schedule_index"],
+                                    "attempt": None if ev_ is None else ev_["attempts"] + 1,
+                                    "retried": again})
+                    if again:
+                        retry.append(ev_)
+                    elif ev_ is not None and retry_refused:
+                        blocked = True
+                last_timeout[st] = s_
 
     def drain_latches() -> None:
         """Settle time: faults and timeouts are counted (the old runner scanned every chunk);
@@ -1064,20 +1088,34 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     truncated = stop_requested()
     finished = False
     while not stop_requested() and sim.step_index < int(max_ms / params.dt):
-        if k < len(sched):
-            st, value, min_outs = sched[k]
+        if not blocked and (retry or k < len(sched)):
+            if retry:
+                ev_ = retry[0]
+                st, value, min_outs, index = ev_["stream"], ev_["value"], ev_["min_outs"], ev_["schedule_index"]
+                attempts = ev_["attempts"] + 1
+            else:
+                st, value, min_outs = sched[k]
+                index, attempts = k, 0
             n_out = sum(len(v) for v in outs.values())
             if n_ready[st] >= loaded[st] and n_out >= min_outs and (not loads or sim.step_index >= loads[-1] + gap):
                 t = sim.step_index + 5
                 Pst = pl.inputs[st][1]
-                for i, r in rails_for(value, pl.n):
+                rails = list(rails_for(value, pl.n))
+                if rail_filter is not None:
+                    rails = list(rail_filter(0, index, st, value, rails))
+                for i, r in rails:
                     sim.add_events(0, [t], [Pst.rails[i][r].u], [drive.ignite])
                 loads.append(t)
-                load_events.append({"schedule_index": k, "stream": st, "value": value,
-                                    "injected_step": sim.step_index, "event_step": t,
-                                    "injected_wall_s": time.perf_counter()})
+                event = {"schedule_index": index, "stream": st, "value": value, "min_outs": min_outs,
+                         "injected_step": sim.step_index, "event_step": t,
+                         "injected_wall_s": time.perf_counter(), "retry": bool(retry), "attempts": attempts}
+                load_events.append(event)
+                last_load[st] = event
                 loaded[st] += 1
-                k += 1
+                if retry:
+                    retry.pop(0)
+                else:
+                    k += 1
         _advance(sim, observer, block, trim)
         finished = process_observed()
         if finished:
@@ -1095,6 +1133,8 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
              "ready": dict(n_ready), "load_steps": loads,
              "load_events": load_events, "t_load": t_load,
              "faults": n_fault, "timeouts": n_timeout, "bad_outputs": bad,
+             "refusals": len(refused), "refused": [refused],
+             "retries": sum(1 for e in refused if e["retried"]), "blocked_nodes": [0] if blocked else [],
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
              "first_output_ms": (first[0][0] - loads[0]) * params.dt if first else None,
@@ -1112,7 +1152,8 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                          should_stop=None, wall_limit: float = 0.0,
                          backend: str = "torch", graph_steps: int = 0,
                          observe_every: int | None = None, delivery: str = "auto",
-                         full_trace: bool = False) -> tuple[list, object, dict]:
+                         full_trace: bool = False, retry_refused: bool = True, max_retries: int = 3,
+                         rail_filter=None) -> tuple[list, object, dict]:
     """`run_pipeline` on B copies of the kernel at once (the batched torch simulator: one
     node per copy, the cluster's "many brains running the same kernel on different tokens").
     `schedules[b]` is node b's host schedule (see run_pipeline); `expect_outputs[b]` the
@@ -1144,7 +1185,19 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     `capture_spikes=(node, neuron_ids)` retains every matching `(step, neuron)` for the whole
     run (the observer watches them in addition to what the runner needs). The arrays are
     returned in `stats["captured_spikes"]`; campaigns use this for a narrow role-filtered
-    handshake dump without retaining every spike of a 100-copy run."""
+    handshake dump without retaining every spike of a 100-copy run.
+
+    Refusals: a loaded word the input stage never completes (a rail that failed to latch)
+    is refused by the producer's watchdog, which resets the producer and the stage and
+    re-raises READY. That is a *detected refusal*, counted per rise of the watchdog's TIMEOUT
+    latch per node and stream in `stats["refusals"]` (`stats["refused"]` lists them). With
+    `retry_refused` (default) the same token is loaded again on the READY the reset raises,
+    so the schedule is delivered whole; without it the host used to move on to the next token
+    and the dropped word shifted every later output by one (100-copy tick campaign, seed 108,
+    copy 77: scored as 5 wrong values, docs/tick_stalls.md). A word refused `max_retries`
+    times over blocks its node (`stats["blocked_nodes"]`): the node then stays unfinished
+    instead of skipping the word. `rail_filter(node, index, stream, value, rails)` may drop
+    rail ignitions of a load (tests reproduce a refusal)."""
     import torch
     from ..sim.lif_fast import FastSim
     from ..sim.lif_torch import TorchSim
@@ -1189,13 +1242,37 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     fault_ids = np.array(sorted(fault_n | timeout_n), dtype=np.int64)
     seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
+    timeout_of = {P_.watchdog.timeout.u: st for st, (_, P_) in pl.inputs.items() if P_.watchdog is not None}
+    last_timeout = [{st: None for st in pl.inputs} for _ in range(B)]
+    last_load = [{st: None for st in pl.inputs} for _ in range(B)]  # the word each stream holds
+    refused = [[] for _ in range(B)]  # detected refusals: TIMEOUT rises on a loaded word
+    retry = [[] for _ in range(B)]  # load events to deliver again on the READY the reset raises
+    blocked = [False] * B  # a word refused max_retries times over: the node stops here
     processed_through = observer.available_through
 
     def count_latches(s_: int) -> tuple[np.ndarray, np.ndarray]:
         nd, nr = observer.fired_at(s_)
         mf = np.isin(nr, fault_ids)
         for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
-            (seen_t if u in timeout_n else seen_f).add((b, u))
+            if u in timeout_n:
+                seen_t.add((b, u))
+                st = timeout_of[u]
+                if last_timeout[b][st] is None or s_ - last_timeout[b][st] > 3 * period:
+                    ev_ = last_load[b][st]
+                    again = (ev_ is not None and retry_refused and ev_ not in retry[b]
+                             and ev_["attempts"] < max_retries)
+                    refused[b].append({"node": b, "stream": st, "step": s_,
+                                       "value": None if ev_ is None else ev_["value"],
+                                       "schedule_index": None if ev_ is None else ev_["schedule_index"],
+                                       "attempt": None if ev_ is None else ev_["attempts"] + 1,
+                                       "retried": again})
+                    if again:
+                        retry[b].append(ev_)
+                    elif ev_ is not None and retry_refused:
+                        blocked[b] = True
+                last_timeout[b][st] = s_
+            else:
+                seen_f.add((b, u))
         return nd, nr
 
     def drain_latches() -> None:
@@ -1269,19 +1346,36 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
 
     def host_schedule() -> None:
         for b in range(B):
-            if k[b] < len(scheds[b]):
+            if blocked[b]:
+                continue
+            if retry[b]:  # a refused word goes in again before the schedule advances
+                ev_ = retry[b][0]
+                st, value, min_outs, index = ev_["stream"], ev_["value"], ev_["min_outs"], ev_["schedule_index"]
+                attempts = ev_["attempts"] + 1
+            elif k[b] < len(scheds[b]):
                 st, value, min_outs = scheds[b][k[b]]
-                n_out = sum(len(v) for v in outs[b].values())
-                if n_ready[b][st] >= loaded[b][st] and n_out >= min_outs and (not loads[b] or sim.step_index >= loads[b][-1] + gap):
-                    t = sim.step_index + 5
-                    Pst = pl.inputs[st][1]
-                    ev_n = [Pst.rails[i][r].u for i, r in rails_for(value, pl.n)]
-                    sim.add_events(b, [t] * len(ev_n), ev_n, [drive.ignite] * len(ev_n))
-                    loads[b].append(t)
-                    load_events[b].append({"schedule_index": k[b], "stream": st, "value": value,
-                                           "injected_step": sim.step_index, "event_step": t,
-                                           "injected_wall_s": time.perf_counter()})
-                    loaded[b][st] += 1
+                index, attempts = k[b], 0
+            else:
+                continue
+            n_out = sum(len(v) for v in outs[b].values())
+            if n_ready[b][st] >= loaded[b][st] and n_out >= min_outs and (not loads[b] or sim.step_index >= loads[b][-1] + gap):
+                t = sim.step_index + 5
+                Pst = pl.inputs[st][1]
+                rails = list(rails_for(value, pl.n))
+                if rail_filter is not None:
+                    rails = list(rail_filter(b, index, st, value, rails))
+                ev_n = [Pst.rails[i][r].u for i, r in rails]
+                sim.add_events(b, [t] * len(ev_n), ev_n, [drive.ignite] * len(ev_n))
+                loads[b].append(t)
+                event = {"schedule_index": index, "stream": st, "value": value, "min_outs": min_outs,
+                         "injected_step": sim.step_index, "event_step": t,
+                         "injected_wall_s": time.perf_counter(), "retry": bool(retry[b]), "attempts": attempts}
+                load_events[b].append(event)
+                last_load[b][st] = event
+                loaded[b][st] += 1
+                if retry[b]:
+                    retry[b].pop(0)
+                else:
                     k[b] += 1
 
     def decode_and_watch(s_: int) -> bool:
@@ -1344,6 +1438,7 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     "outputs": sum(sum(len(v) for v in o.values()) for o in outs), "expected_outputs": sum(want),
                     "nodes_done": sum(done_nodes), "total_nodes": B,
                     "faults": len(seen_f), "timeouts": len(seen_t), "outs": outs,
+                    "refusals": sum(len(r) for r in refused),
                 })
                 t_last_report, step_last_report = now, sim.step_index
         if profiling_this_step:
@@ -1368,6 +1463,9 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
              "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
              "load_steps": loads, "load_events": load_events, "t_load": t_load,
              "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad,
+             "refusals": sum(len(r) for r in refused), "refused": refused,
+             "retries": sum(1 for r in refused for e in r if e["retried"]),
+             "blocked_nodes": [b for b in range(B) if blocked[b]],
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
              "profile": {"profiled_steps": profiled_steps, "regions": profile_regions},

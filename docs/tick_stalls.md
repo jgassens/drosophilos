@@ -176,8 +176,87 @@ captures of copy 77 (the wrong values) and copy 8 (12 missing) are queued (Juno 
 python -m drosophilos.bench.stall_diag data/a2/tick_s108_node77.npz --campaign docs/a2/kc_tick_B90s108_current.json --node 77 --out docs/a2/tick_s108_node77_stall_diag.md
 ```
 
-The report's headline must be restated as "0 wrong in 4,000 outputs on one realization;
-5 wrong in 1,600 on another" until the copy-77 mechanism is found and fixed.
+### Copy 77: one refused input word, resent by nobody (Juno 413584)
+
+The "five wrong values" are one dropped token. Copy 77's outputs are exactly what the kernel
+computes for the seven-token stream `[5, 5, 250, 0, 40, 40, 40]` — token 4 (`vel = 3`) is
+missing and everything after it is right for the stream it actually received (`px`: 25, 30,
+24, 24, 64, 104, 0; `mx`: 88, 86, 84, 82, 80, 82, 80). Scoring by position turns one missing
+token into 5 wrong + 2 unfinished.
+
+The capture (13.5 M spikes, `IN.*` handshake roles) shows the drop, step by step:
+
+| step | event |
+|---:|---|
+| 130,481 | stage DONE for token 3; stage reset; `IN.Q.ready` at 131,366 (READY #3) |
+| 131,852–131,903 | host loads token 4 (`3` = bits 0 and 1 true): valid latches rise on bits 1–7 — **bit 0 never latches** (`IN.Q.valid0` has no rise) |
+| — | the stage's completion tree never fires; no commit request; `IN.creq`, `IN.commit` silent |
+| 136,443 | 4,590 steps (459 ms) after the load, the producer's watchdog (`add_liveness`, 60 + 4·8 = 92 hops) times out and resets producer and stage together (`IN.P.ready_delay0` and `IN.Q.ready_delay0` both at 136,44x); the valid latches of bits 1–7 die at 136,47–136,55 |
+| 137,243 | `IN.Q.ready` fires again (READY #4): the reset's READY, not a consumption |
+| 137,732–137,789 | the host, which counts READY rises, loads **token 5** (`0`); all eight valid latches rise, completion at 139,341, commit at 139,386 — a clean word, one token late |
+
+No fault gate fired (`IN.Q.fault*` silent all run) — the kernel refused the half-latched word
+cleanly, as designed (fail-stop), and the runner even counted it (`timeouts 1` in the log).
+What was missing is the producer's half of the protocol: the host never resent the refused
+word. Which element lost the single ignition pulse (the `IN.P.b0r1` rail, its data relay or
+the stage rail) is not in this capture (rails are not in the role filter); it does not
+change the classification: **request** phase, producer side — a detected refusal with no
+retry. The `torch-fast` realization did not reproduce it because a K-step-shifted load meets
+different noise.
+
+**Fix (2026-09-20, `lib/kernel.py`, both runners):** the runner now counts every rise of the
+input watchdog's TIMEOUT latch per node and stream as a *detected refusal*
+(`stats["refusals"]`, `stats["refused"]`), and re-sends the refused word on the READY the
+reset raises (`retry_refused=True`, `max_retries=3`; a word refused more often blocks its
+node, `stats["blocked_nodes"]`, so the copy stays unfinished rather than skipping ahead).
+`kernel_campaign` records `refusals`, `retries`, `per_node_refusals`. Regression:
+`tests/test_input_refusal.py` constructs the refusal directly (one rail's ignition dropped
+from one load of a 4-bit MOV kernel, `rail_filter`): with the retry the four tokens come
+out whole (refusals 1, retries 1, faults 0); without it the outputs are `[1, 3, 5]`, the
+seed-108 shape; a permanently dark rail blocks the node after three retries. Capture
+`wd\.timeout` in `--dump-roles` so `stall_diag` can count refusals from a dump.
+
+Restated headline: seed 108, current build, 1,600 outputs — 0 silent wrong values; 1
+detected refusal (copy 77, now resent); 29 unfinished in three stalled copies (3, 8, 98). The
+report's "0 wrong in 4,000" stands as a statement about the kernel; the host runner is what
+dropped the word.
+
+### Copy 8: a fast false rail slips through the kill train (Juno 413616)
+
+`stall_diag` on the copy-8 capture (`docs/a2/tick_s108_node8_stall_diag.md`): first blocked
+cell `c4_sel`, third START; **stuck request**: the false rail of `c4_sel.req.c2_sel`
+(neuron 14087) stays lit after `c2_sel`'s third DONE delivers the request (true rail rises
+at 164,436, `received` at 164,439, the clear train fires at 164,535 / 164,581 / 164,624) —
+and no repair pulse is involved this time, unlike the seed-107 precedent. Both rails live,
+the false rail vetoes go, and the cell never starts again; the two earlier clears of the same
+latch (45,769; 101,036) had worked.
+
+What differs at the third clear is the latch's speed. Its loop period wanders between 33 and
+41 steps over the run (nominal 47; threshold and bias drift plus a +weight draw on the loop
+edges), and at the failed clear it was **34 steps** against 38–39 at the two that worked; the
+three 0.75×-loop pulses, 46 steps apart, slowed it (gaps 42, 65, 72) and it recovered.
+
+Measured on one latch in RefSim (`tests/test_kill_margin.py`; twelve kill phases; loop weight
+scale × threshold offset):
+
+| kill train | +8 % / −0.8 mV (40 steps) | +20 % / −0.8 mV (38) | +40 % / −1.2 mV (31) | +60 % / −1.2 mV (29) |
+|---|---:|---:|---:|---:|
+| 3 × 0.75 (until 2026-09-20) | survives 2–10 / 12 phases | 12 / 12 | 12 / 12 | 12 / 12 |
+| 4 × 1.0 | 0 | 0 | 11–12 / 12 | 12 / 12 |
+| 4 × 1.25 | 0 | 0 | 0 | 4–12 / 12 |
+| **4 × 1.5** (register reset strength) | 0 | 0 | 0 | **0** |
+
+With kill weights themselves 8 % low (the same noise) the old train fails from +4 % / −0.8 mV.
+A killed rail reloads ~150 ms after the kill with either train (a reload 100 ms after a kill
+fails for both; the handshake's earliest relight, START after a request, is ~190 ms). The
+default is now **4 × 1.5** (`lib/control.py KILL_PULSES / KILL_STRENGTH`, one relay neuron
+more per kill train: the tick kernel grows 28,439 → 28,637 neurons). Campaign records carry
+`kill_train`, and `stall_diag` rebuilds older dumps with the train they were run with.
+Regression: `tests/test_kill_margin.py` (the old train lets the +20 % latch through at every
+phase; the default kills down to 29 steps at every phase; a kill pair still reloads).
+Validation on the cluster: seed 108–110 campaigns on the new build against the old build's
+stall counts (a netlist change is a new noise realization, so the comparison is per-seed
+totals, not per copy).
 
 ### `--backend torch-fast` is not a step-identical substitute in the campaign (Juno 413583)
 

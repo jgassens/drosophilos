@@ -14,7 +14,9 @@ integrate-and-fire neurons, and that network computes the game update and draws 
 with nothing on the host doing game logic. The frames it produces are pixel-for-pixel equal
 to the C reference. Under 4 % synaptic noise, threshold and bias drift and stray spikes, the
 kernels now produce **no silent wrong value in 4,000 outputs**; what remains are fail-stops
-the machine itself can see.
+the machine itself can see. (One caveat found on 2026-09-20: the host runner could drop an
+input word the kernel had refused, which scored as wrong values downstream; it now resends
+it — `docs/tick_stalls.md`, copy 77.)
 
 Three limits are also measured, and they do not move with more of the same work:
 
@@ -237,7 +239,10 @@ interesting finding. C makes a slow thing wider.
 
 ## 7. Open items, in priority order
 
-1. The five remaining tick fail-stops (31 outputs in 100 copies) — one spike dump.
+1. The remaining tick fail-stops — the recorded five copies do not transfer to the current
+   build (a different noise realization); today's realization has three stalled copies and
+   one refused input word, the latter localized and fixed on the host side
+   (`docs/tick_stalls.md`, 2026-09-20); the copy-8 capture is the next spike dump.
 2. Why the pipelined multiplier doubles the per-pixel cost. (`docs/a2/doom4_24na_h200.json`
    holds aggregate counters only — neuron and node counts, neural ms, faults, wall time — not
    the inter-commit event history; that history has to be captured first:
