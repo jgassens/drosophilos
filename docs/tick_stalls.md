@@ -312,7 +312,14 @@ realization, so the comparison is per-seed totals):
 | 109 (413704) | 1,546 | 0 | 54 | 0 / 0 | 36, 49, 81, 87 (stalls) |
 | 110 (413705) | 1,532 | **2** | 66 | 0 / 0 | 20, 42, 43, 57, 69, 74, 76 (stalls), **55** |
 
-Over 300 copies: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
+Build with both kernel fixes as well (`b4e6905`: power-up veto, commit idle rail re-ignition;
+28,669 neurons, again a new realization):
+
+| seed | ok | wrong | missing | failing copies |
+|---|---:|---:|---:|---|
+| 108 (413812) | 1,584 | 0 | 16 | 67, 72 (stalls) |
+
+Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and
 8 copies for three seeds of the same build). No refusal occurred in the three fixed runs, so
 the resend path was not exercised on the cluster; it is exercised by the tests. Seed 110's
