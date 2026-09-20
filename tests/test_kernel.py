@@ -352,9 +352,11 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
                         self.events[node][self.watch[neuron]].append(step)
                     if neuron == cell.start and not self.injected[node]:
                         self.injected[node] = True
-                        # The event at +62 ms fires the trigger at +64.4 ms and true
-                        # at +68.9 ms, 5.3 ms before the 14-hop repair tap.
-                        self.add_events(node, [step + 620], [trigger], [pl.drive.ignite])
+                        # The event at +56 ms fires the trigger ~2.4 ms later and true
+                        # ~5–8 ms before the 14-hop repair tap (the 3 x 1.5 kill train of
+                        # 2026-09-20 leaves the rail ~3 ms slower to re-ignite than 3 x 0.75
+                        # did; the event was at +62 ms before).
+                        self.add_events(node, [step + 560], [trigger], [pl.drive.ignite])
 
     sim = Record()
     outs, sim, stats = run_pipeline_batched(pl, PARAMS, [[1], [1]], max_ms=3000,
