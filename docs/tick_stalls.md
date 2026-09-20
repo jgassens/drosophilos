@@ -318,8 +318,26 @@ kernel mechanisms the host fixes do not touch, and it swings with the realizatio
 the resend path was not exercised on the cluster; it is exercised by the tests. Seed 110's
 copy 55 is the copy-61 family again, mid-run: at token 7 `mx` moves +4 instead of +2 (78 →
 82, then 80 at token 8, consistent with `mx` = 82), i.e. one extra `mx` transaction — with
-`px` right throughout and no fault or timeout. A capture with the master roles is queued
-(Juno 413725) alongside copy 61's.
+`px` right throughout and no fault or timeout. Its capture (Juno 413725) shows a third
+mechanism, and it starts at power-up: `c7_add` (`mx + 2`) commits its initial-value result
+at 19,077; the commit pulse kills the commit request's "pending" rail and re-lights its
+"nothing to commit" rail — **54 ms after the autocommit's kill train dropped that rail**,
+inside its after-hyperpolarisation, and the single ignition produces one spike and no train
+(`c7_add.creqr0.u`: one spike at 19,081, then dark until 93,146). The pair is dark on both
+rails. The commit guard (`guarded_pulse`) fires on the reader's free-rail rise vetoed by the
+"nothing to commit" rail — it reads "not false" as true — so when `c9_sel` STARTs its first
+tick (91,942) and its request rail goes free, a **second commit pulse** goes out (93,107) with
+nothing new in the stage; its DONE (97,131) re-lights `c9_sel`'s request with the old value,
+`c9_sel`'s next START consumes that, and `c7_add`'s genuine value (autocommit 108,136) waits
+for the START after — from then on `c7_add` runs one token behind `c8_sub`, invisible while
+`c9_sel` selects `c8_sub` and wrong (82 for 80) the first time it selects `c7_add`, at token 7.
+**Fixed (`lib/kernel.py gate_commit`, `commit_reignite`):** a second ignition of the
+"nothing to commit" rail ~85 ms after the commit pulse (16 hops), past the recovery;
+`tests/test_commit_request_reignition.py` removes the immediate ignition on one copy and
+both on another and reads the rail's trains: nominal and fixed copies relight after every
+commit, the unfixed copy shows a lone spike (the two-cell kernels absorb the duplicate commit
+itself; the tick kernel's loop did not). Both fixes are recorded in the campaign record
+(`powerup_veto`, `commit_reignite`) and `stall_diag` rebuilds older dumps without them.
 
 Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9_sel` commits
 its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
@@ -336,12 +354,18 @@ and the runner's decoder, which reads a master completion rise as an output, rec
 (88, 88, 86, 86, …). **Classification: a spurious DONE — a state cell's master completion
 re-rising without a commit, before the first tick.** The completion latch itself
 (`c9_sel.M.comp.c3_0.L.u`) and the master's reset are not in that capture's role filter; a
-second capture with `M\.comp|M\.reset` in the filter is queued (Juno 413719) to see whether
-the latch dropped and was re-ignited by its AND gate's edge relay (a doublet from a stray
-spike collapsing the loop) or the master was reset and re-lit. Until then the report's "no
-silent wrong value" claim has this counter-example (the campaign scores it as 8 wrong), and
-it is a kernel mechanism, not a host one: the host's rules cannot tell a spurious DONE from
-a real one.
+second capture with `M\.comp|M\.reset` in the filter (Juno 413719) shows the cause. The
+image lights a state cell's initial value in its master but keeps the master's completion
+**root** dark on purpose (a complete master would fire DONE at power-up): the leaves and the
+inner levels of the completion tree are lit from step 0, the root AND gate has one lit input
+(the data half of the tree) and one dark (the flag half), and so sits at 65 % of threshold
+for the whole run. Its first spike ever came at 27,728 — one stray coincidence — and the
+ignition relay lit the root latch at 27,808; from a lit latch there is no way back. **Fixed
+(`lib/kernel.py build_pipeline`, `powerup_veto`):** a veto latch, lit by the image and killed
+by the master's first reset (its first commit), holds the root's ignition relay down until
+the first real value has landed. `tests/test_state_master_powerup.py` fires the root gate
+once at step 2,000 on a state kernel: before the fix the completion rose before the first
+token; after it no completion precedes the first load and the outputs are right.
 
 ### `--backend torch-fast` is not a step-identical substitute in the campaign (Juno 413583)
 

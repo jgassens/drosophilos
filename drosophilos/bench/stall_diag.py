@@ -86,6 +86,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             outputs=ks.outputs,
             datapath=campaign.get("datapath", "generic"),
             relight_requests=campaign.get("relight_requests", True),
+            powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
+            commit_reignite=campaign.get("commit_reignite", False),
         )
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved

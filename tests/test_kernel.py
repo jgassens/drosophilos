@@ -296,7 +296,7 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
-    assert (legacy.net.n, legacy.net.nnz) == (958, 1646)
+    assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # +16 neurons/+17 synapses: the commit idle rail's second ignition
     pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0})
     cell = pl.cells[0]
     req = cell.reqs["input"]
@@ -398,7 +398,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False)  # §10.3 count control
-    assert (legacy.net.n, legacy.net.nnz) == (7108, 12402)  # +2 synapses 2026-09-20 (stage reset clears the producer's TIMEOUT latch)
+    assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
     pl = build_pipeline(PARAMS, 1,
                         [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                           "trigger": ["input", "input:other"]}],

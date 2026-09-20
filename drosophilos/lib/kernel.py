@@ -249,7 +249,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    drive: Drive | None = None, act_hops: int = 11, watchdog_hops: int = 170, idle_hops: int = 20,
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
-                   datapath: str = "generic") -> Pipeline:
+                   datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -356,6 +356,22 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             for i, r in rails_for(c.init, n):  # rails; dark rails fired both arms: review finding). C and V
                 image.append(c.master.rails[i][r])  # stay dark on purpose: a complete master would fire its done
             image.append(c.master.rails[n + 1][1 if c.init == 0 else 0])  # pulse at power-up and request every reader
+            # Power-up veto on the completion root's ignition. With the data half of the tree
+            # lit and the flag half dark the root AND sits at 65 % of threshold for the whole
+            # run; one stray coincidence fires it once, the root latch is then lit for good, DONE
+            # fires and every reader runs a transaction on the initial value (seed-109 copy 61,
+            # seed-110 copy 55: mx lagged a token, scored as wrong values). The veto latch is
+            # lit by the image and killed by the master's first reset — its first commit —
+            # after which completions are the real ones (tests/test_state_master_powerup.py).
+            if not powerup_veto:  # builds before 2026-09-20 (stall_diag rebuilds old dumps)
+                continue
+            root = net.roles[c.master.completion.u][: -len(".L.u")]
+            edge = net.roles.index(f"{root}.ign.edge")
+            veto0 = add_latch(net, drive, f"{c.name}.M.comp.veto0")
+            net.synapse(veto0.u, edge, -int(round(2.2 * drive.loop)))
+            for x in veto0.members:
+                net.synapse(c.master.reset_inh, x, -int(round(0.75 * drive.loop)))
+            image.append(veto0)
 
     def stream_of(src):
         if src == "input":
@@ -649,6 +665,18 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         pulse = net.neuron(f"{pname}.commit_pulse")
         net.synapse(pulse, commit_in, drive.ignite)
         net.synapse(pulse, creq[0].u, drive.ignite)
+        # The "nothing to commit" rail is re-lit as little as ~50 ms after the autocommit's
+        # kill train dropped it (a commit whose readers were already free), inside the killed
+        # latch's after-hyperpolarisation; under mix-B noise that single ignition can fail
+        # (seed-110 copy 55: one spike, no train). The pair is then dark on both rails, and the
+        # guard reads "not false" as true: the reader's next START fires a second commit of an
+        # empty stage, the reader takes a stale value, and the producer runs one token behind
+        # for the rest of the run — silent wrong values. A second ignition ~85 ms later
+        # (16 hops) lands past the recovery; into an already-lit rail it is the harmless
+        # re-ignition of add_kill_pair (tests/test_commit_request_reignition.py).
+        if commit_reignite:  # builds before 2026-09-20 had none (stall_diag rebuilds old dumps)
+            again = add_delay_chain(net, drive, f"{pname}.commit.idle_again", pulse, 16)
+            net.synapse(again, creq[0].u, drive.ignite)
         add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])
         frees = [[r.reqs[pname][1], r.reqs[pname][0]] for r in readers]  # true when the reader has no pending request
         _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse)
