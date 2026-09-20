@@ -307,3 +307,16 @@ def test_perf_campaign_backend_variant_is_a_simulator_only_comparison(tmp_path):
     args.variant_backend, args.graph_steps = None, 94
     with pytest.raises(ValueError, match="torch-fast"):
         run_campaign(args)
+
+
+def test_set_observer_after_capture_drops_the_captured_graph(small_circuit):
+    """Review finding B1: a captured block gathers into the buffer of the observer it was
+    captured with, so installing another observer must invalidate the graph (CPU stand-in:
+    a dummy graph object)."""
+    topo, params, _, _ = small_circuit
+    sim = FastSim(topo, params, n_nodes=2, graph_steps=10)
+    sim._graph, sim.graph_active = object(), True
+    sim.set_observer(Observer(range(topo.n), 2, n_neurons=topo.n, device="cpu", full_trace=True, observe_every=10))
+    assert sim._graph is None and sim.graph_active is False
+    sim.run(20)  # eager blocks with the new observer; nothing raises and steps are observed
+    assert sim.observer.available_through >= 19

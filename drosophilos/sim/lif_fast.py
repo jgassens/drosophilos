@@ -170,6 +170,12 @@ class FastSim:
             raise ValueError("observer shape/device does not match this FastSim")
         if self.graph_steps and observer.observe_every < self.graph_steps:
             raise ValueError(f"observer buffer ({observer.observe_every}) is smaller than graph_steps ({self.graph_steps})")
+        if self._graph is not None:
+            # a captured block gathers into the buffer of the observer it was captured with (its
+            # address is baked into the graph): a new observer would see silent blocks with no
+            # error (review finding). Drop the graph; the next whole block re-captures.
+            self._graph = None
+            self.graph_active = False
         self.observer = observer
         # compatibility with protocol.token.recent_active & co. when handed the simulator
         self._spk_step = observer._spk_step
@@ -279,7 +285,8 @@ class FastSim:
         self._Vn.copy_(V).sub_(self.E_L).sub_(self.bias).mul_(self.a).add_(self._rest)
         torch.mul(g, self.k, out=self._tmp)
         self._Vn.add_(self._tmp)
-        torch.where(self._active, self._Vn, V, out=V)
+        torch.where(self._active, self._Vn, V, out=self._tmp)  # not out=V: V is also an input (review)
+        V.copy_(self._tmp)
         V.masked_fill_(self._held, self.V_reset)
         g.mul_(self.c)
         V.masked_fill_(self.silenced, self.E_L)
