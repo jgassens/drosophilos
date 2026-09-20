@@ -14,6 +14,9 @@
 #SBATCH --output=runs/slurm-%j.out
 set -euo pipefail
 cd ~/drosophilos
+# The commit is checked out when the job STARTS, not when it was submitted: several queued jobs
+# can each run their own commit (submit.sh passes it as DROSO_SHA).
+if [ -n "${DROSO_SHA:-}" ]; then git checkout -q --detach "$DROSO_SHA"; fi
 source ~/miniforge3/etc/profile.d/conda.sh
 conda activate drosophilos
 echo "job $SLURM_JOB_ID on $(hostname), commit $(git rev-parse --short HEAD), $(date -Is)"

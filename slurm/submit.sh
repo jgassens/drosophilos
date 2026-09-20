@@ -29,4 +29,4 @@ opts=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
 sha=$(git rev-parse "$ref")
 git push -q origin HEAD
 git merge-base --is-ancestor "$sha" HEAD || { echo "$ref is not an ancestor of HEAD; push it first" >&2; exit 1; }
-ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
+ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $sha && mkdir -p runs && sbatch --export=ALL,DROSO_SHA=$sha ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
