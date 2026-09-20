@@ -61,9 +61,10 @@ def test_the_old_train_lets_a_fast_latch_through():
     assert survived == len(PHASES), survived  # every phase: the clear never works on this latch
 
 
-@pytest.mark.parametrize("loop_scale,dvth", [(1.0, 0.0), (1.2, -0.8), (1.4, -1.2), (1.6, -1.2)])
+@pytest.mark.parametrize("loop_scale,dvth", [(1.0, 0.0), (1.2, -0.8), (1.3, -1.2)])
 def test_the_default_train_kills_at_every_phase(loop_scale, dvth):
-    assert (KILL_PULSES, KILL_STRENGTH) == (4, 1.5)
+    # 3 x 1.5: down to 33 steps at every phase (4 x 1.5 reaches 29 but stops the control machine)
+    assert (KILL_PULSES, KILL_STRENGTH) == (3, 1.5)
     period, survived = _survivors(KILL_PULSES, KILL_STRENGTH, loop_scale, dvth, kill_scale=0.92)
     assert period >= 28, period
     assert survived == 0, (loop_scale, dvth, period, survived)

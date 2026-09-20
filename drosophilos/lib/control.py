@@ -211,11 +211,13 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
 # not a fast one: a latch whose loop weights came out +8 % and threshold -0.8 mV (mix B) runs at
 # ~40 steps instead of 47 and survived the train at some phases; at +20 % / -0.8 mV (38 steps)
 # at every phase. Seed-108 copy 8 stalled that way (docs/tick_stalls.md): a request's false
-# rail, running at 33-41 steps, survived its third clear after two had worked. 4 x 1.5 (the
-# register reset's own pulse strength) kills every latch measured down to 29 steps (+60 %,
-# -1.2 mV) at every phase; a killed rail is reloadable ~150 ms later as before
-# (tests/test_kill_margin.py).
-KILL_PULSES = 4
+# rail, running at 33-41 steps, survived its third clear after two had worked. 3 x 1.5 (the
+# register reset's pulse strength, the same three pulses) kills every latch measured down to
+# 33 steps (+30 %, -1.2 mV) at every phase and 31 steps at 11 of 12; a killed rail reloads
+# ~150 ms later as before (tests/test_kill_margin.py). 4 x 1.5 kills down to 29 steps but its
+# after-hyperpolarisation stops the control machine after its first commit
+# (tests/test_compiler.py); 4 x 0.75 and 3 x 1.5 both run it.
+KILL_PULSES = 3
 KILL_STRENGTH = 1.5
 
 

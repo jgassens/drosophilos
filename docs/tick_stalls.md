@@ -244,16 +244,20 @@ scale × threshold offset):
 | 3 × 0.75 (until 2026-09-20) | survives 2–10 / 12 phases | 12 / 12 | 12 / 12 | 12 / 12 |
 | 4 × 1.0 | 0 | 0 | 11–12 / 12 | 12 / 12 |
 | 4 × 1.25 | 0 | 0 | 0 | 4–12 / 12 |
-| **4 × 1.5** (register reset strength) | 0 | 0 | 0 | **0** |
+| **3 × 1.5** (register reset strength, same three pulses) | 0 | 0 | 0 (+30 % / −1.2 mV, 33 steps: 0) | 10–12 / 12 |
+| 4 × 1.5 | 0 | 0 | 0 | 0 — but stops the control machine |
 
 With kill weights themselves 8 % low (the same noise) the old train fails from +4 % / −0.8 mV.
-A killed rail reloads ~150 ms after the kill with either train (a reload 100 ms after a kill
-fails for both; the handshake's earliest relight, START after a request, is ~190 ms). The
-default is now **4 × 1.5** (`lib/control.py KILL_PULSES / KILL_STRENGTH`, one relay neuron
-more per kill train: the tick kernel grows 28,439 → 28,637 neurons). Campaign records carry
-`kill_train`, and `stall_diag` rebuilds older dumps with the train they were run with.
-Regression: `tests/test_kill_margin.py` (the old train lets the +20 % latch through at every
-phase; the default kills down to 29 steps at every phase; a kill pair still reloads).
+A killed rail reloads ~150 ms after the kill with any of these trains (a reload 100 ms after a
+kill fails for all; the handshake's earliest relight, START after a request, is ~190 ms).
+4 × 1.5 kills the fastest latches but its after-hyperpolarisation leaves the control
+machine's ring stuck after the first commit (`tests/test_compiler.py`, found by the cluster
+test run 413662); 4 × 0.75 and 3 × 1.5 both run the machine. The default is now **3 × 1.5**
+(`lib/control.py KILL_PULSES / KILL_STRENGTH`; no new neurons, only stronger inhibitory
+weights). Campaign records carry `kill_train`, and `stall_diag` rebuilds older dumps with the
+train they were run with. Regression: `tests/test_kill_margin.py` (the old train lets the
++20 % latch through at every phase; the default kills down to 33 steps at every phase; a kill
+pair still reloads).
 Validation on the cluster: seed 108–110 campaigns on the new build against the old build's
 stall counts (a netlist change is a new noise realization, so the comparison is per-seed
 totals, not per copy).
