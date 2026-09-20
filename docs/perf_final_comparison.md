@@ -30,7 +30,7 @@ the simulator gain alone.
 | doom2, 1 | 9,126 s (first frame 2,934 s) | 2,997 s (first frame 969 s) | 3.0× |
 | doom2, 8 | 3,775 s (1,053 s) | 3,196 s (898 s) | 1.2× |
 | doom4, 1 — same 3,600 s of neural work, both cut by the cap (22 pixels unfinished in each) | 27,520 s (10,193 s) | 13,105 s (4,899 s) | 2.1× |
-| doom4, 8 | 16,522 s (4,224 s) | running (Juno 413097) | — |
+| doom4, 8 (11.5 M neurons) | 16,522 s (4,224 s) | 16,764 s (4,309 s) | 1.0× |
 
 Pixels identical wherever both delivered them; frame completion stamped at the last valid
 pixel by the `on_output` observer, not by a progress poll. Q3 at render level is not run: the
@@ -38,5 +38,6 @@ primitive columns show specialization does not move wall time, and a 16-hour `To
 render would only repeat that. Q4 at render level (`FastSim` + specialized) is queued.
 
 Above ~1 M neurons the step is bound by the arithmetic, which both simulators pay, so the
-gain falls from 5.5× (kernels) to 3.0× (664k), 2.1× (1.44 M) and 1.2× (5.3 M); the next
-simulator lever is that arithmetic, not the host.
+gain falls from 5.5× (kernels) to 3.0× (664k), 2.1× (1.44 M), 1.2× (5.3 M) and 1.0× (11.5 M,
+doom4 × 8 copies: the two simulators are equal); the next simulator lever is that arithmetic —
+the sparse product's memory traffic, float32 — not the host.

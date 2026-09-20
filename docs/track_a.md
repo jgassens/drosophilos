@@ -243,7 +243,9 @@ the graph is worth ~⅓ of the step and the scatter path collapses at 8 copies (
 
 At frame scale (small-render level, `docs/perf/juno-h200-small*.md`): doom2 8 × 5 × 3 frames,
 664k neurons, 1 copy — 9,126 s wall on `TorchSim`, 2,997 s on `FastSim` (3.0×), pixels
-identical; at 8 copies (5.3 M neurons) 3,775 s vs 3,196 s (1.18×). Above ~1 M neurons the
+identical; at 8 copies (5.3 M neurons) 3,775 s vs 3,196 s (1.18×); doom4 1.44 M neurons, 1 copy,
+over the same 3,600 s of neural work: 27,520 s vs 13,105 s (2.1×); doom4 × 8 (11.5 M): 16,522 s vs
+16,764 s (1.0×, equal). Above ~1 M neurons the
 step is bound by the arithmetic, which both simulators pay; the launch overhead `FastSim`
 removes is then a small share. The next simulator lever is that arithmetic (the product's
 memory traffic, float32), not the host.
