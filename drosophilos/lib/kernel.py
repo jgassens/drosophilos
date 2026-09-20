@@ -250,7 +250,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = True) -> Pipeline:
+                   retry_clear: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -418,7 +418,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 net.synapse(trig, received, drive.ignite)
                 add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]])
                 if retry_clear:
-                    # Conditional second clear (2026-09-20). A false rail whose loop came out
+                    # Conditional second clear (2026-09-20) — OFF by default: in the 100-copy
+                    # mix-B tick campaign it produced silent wrong values (seed 108: 3 wrong in 2
+                    # copies, a SEL starting on a stale condition, plus 5 stalls; Juno 413959),
+                    # like every change so far that alters when a request rail can be relit.
+                    # Kept as a recorded experiment (tests/test_request_retry_clear.py builds
+                    # it explicitly). A false rail whose loop came out
                     # fast under noise (33-41 steps against 47) can slip between the three
                     # pulses of that train (tests/test_kill_margin.py); both request rails
                     # then stay live, the false one vetoes go, and the cell never starts

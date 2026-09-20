@@ -342,7 +342,16 @@ starting on a stale condition. The fourth pulse changes when the cleared request
 relit, and the request/clear ordering the cells rely on slipped. Reverted: a stall is a
 fail-stop, a wrong value is not. What is left to try is a *conditional* second clear —
 re-kill only if the false rail is still lit ~50 ms after the true rail's rise — which adds no
-charge to the nominal case.
+charge to the nominal case. **Tried (`retry_clear`, Juno 413959): the same trade.** A gate
+that needs the delayed receipt pulse and both rails' trains fires a 1.5 × train ~64 ms after a
+DONE only in the stuck state; it cures the constructed stall
+(`tests/test_request_retry_clear.py`) and never fires on a healthy cell, but seed 108 gave 3
+silent wrong values in 2 copies (again a SEL on a stale condition: `px = 147` kept, `mx − 2`
+for `mx + 2`) and 5 stalls. Off by default, kept as an experiment. Three attempts have now
+turned stalls into wrong values by changing when a request's false rail can be relit; the
+SEL's condition request evidently tolerates less reordering than the go chain's guards
+assume, and that ordering — not the kill train — is the thing to read next (a capture of one
+of those wrong copies on the trial build).
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and

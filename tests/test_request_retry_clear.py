@@ -6,7 +6,13 @@ true = pending]. A source's DONE lights true and fires a three-pulse kill train 
 START kills true and re-lights false. A false rail whose loop runs fast under noise survives
 the train at some phases, both rails stay live, false vetoes the go chain, and the cell never
 starts again — a stall with no fault. The retry: ~64 ms after the receipt, a gate that needs
-the delayed pulse AND both rails' trains fires a second train at another phase of the loop."""
+the delayed pulse AND both rails' trains fires a second train at another phase of the loop.
+
+Status: an experiment, off by default. It cures this constructed stall, but in the 100-copy
+mix-B tick campaign (seed 108, Juno 413959) it produced 3 silent wrong values in 2 copies —
+a SEL starting on a stale condition — plus 5 stalls, the same trade the stronger and longer
+kill trains made. Every change so far that moves when a request rail can be relit has done
+this; that ordering is the thing to understand before the next attempt."""
 
 import numpy as np
 
@@ -54,7 +60,7 @@ def test_the_retry_clears_it_and_the_cell_runs():
 
 def test_the_retry_gate_stays_silent_on_a_nominal_cell():
     spec = [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}]
-    pl = build_pipeline(P, 4, spec, consts={"zero": 0})
+    pl = build_pipeline(P, 4, spec, consts={"zero": 0}, retry_clear=True)
     gate = pl.net.roles.index("out.req.input.retry_gate")
     outs, _, st = run_pipeline_batched(pl, P, [TOKENS], max_ms=12000, device="cpu", progress=0,
                                        capture_spikes=(0, [gate]))
