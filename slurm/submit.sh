@@ -29,4 +29,6 @@ opts=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do opts+=("$1"); shift; done
 sha=$(git rev-parse "$ref")
 git push -q origin HEAD
 git merge-base --is-ancestor "$sha" HEAD || { echo "$ref is not an ancestor of HEAD; push it first" >&2; exit 1; }
-ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && mkdir -p runs && sbatch --export=ALL,DROSO_SHA=$sha ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
+head=$(git rev-parse HEAD)
+# the main checkout follows HEAD only to supply slurm/*.sbatch; the job itself runs $sha in its own worktree
+ssh "$cluster" "cd ~/drosophilos && git fetch -q origin && git checkout -q --detach $head && mkdir -p runs && sbatch --export=ALL,DROSO_SHA=$sha ${opts[*]} slurm/$script.sbatch $(printf '%q ' "$@")" 2>&1 | grep -v "post-quantum\|store now\|openssh.com"
