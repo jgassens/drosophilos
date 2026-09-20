@@ -217,7 +217,7 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
 # and 4 x 1.5 stops the control machine outright. The train is unchanged; a kill that beats a
 # fast latch without slowing the relight is a separate experiment (tests/test_kill_margin.py
 # keeps the measurement). Campaign records carry the train as `kill_train`.
-KILL_PULSES = 4  # 2026-09-20: four pulses, now that START's re-light of a request rail waits for the clear train to end (lib/kernel.py)
+KILL_PULSES = 3  # the kernel's request-rail clear alone uses four (lib/kernel.py REQUEST_CLEAR_PULSES): a fourth pulse everywhere lost the control machine's 45 ms interrupt reload (tests/test_machine.py)
 KILL_STRENGTH = 0.75
 
 

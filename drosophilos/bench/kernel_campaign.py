@@ -137,7 +137,7 @@ def main(argv=None):
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
-           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH], "powerup_veto": True, "commit_reignite": True, "retry_clear": False, "start_relight_hops": 5,
+           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH], "powerup_veto": True, "commit_reignite": True, "retry_clear": False, "start_relight_hops": 5, "request_clear_pulses": 4,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
            "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),

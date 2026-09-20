@@ -226,7 +226,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     try:
         pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=True, start_relight_hops=0)
+                            consts={"k": 3}, relight_requests=True, start_relight_hops=0, request_clear_pulses=3)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert pl.net.n < 30000
@@ -309,9 +309,9 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     from drosophilos.lib import control
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
     try:
-        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0)
+        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0, request_clear_pulses=3)
     finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = 4, 0.75
+        control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     cell = pl.cells[0]
     req = cell.reqs["input"]
     roles = pl.net.roles
@@ -421,7 +421,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
         pl = build_pipeline(PARAMS, 1,
                             [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                               "trigger": ["input", "input:other"]}],
-                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0)
+                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0, request_clear_pulses=3)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert 2 * pl.net.n < 30000

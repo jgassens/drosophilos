@@ -17,6 +17,8 @@ from drosophilos.compiler.kernel import KernelSpec, kernel_outputs
 from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
 from drosophilos.sim.model import Params
 
+pytestmark = pytest.mark.slow  # ~5 min of RefSim on a CI runner
+
 P = Params()
 TOKENS = [1, 2, 3, 5, 7, 4]
 

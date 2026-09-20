@@ -151,6 +151,9 @@ def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, targe
     add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
 
 
+REQUEST_CLEAR_PULSES = 4  # the DONE-side clear of a request's false rail; see build_pipeline
+
+
 def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
     """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse).
 
@@ -250,7 +253,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = False, start_relight_hops: int = 5) -> Pipeline:
+                   retry_clear: bool = False, start_relight_hops: int = 5,
+                   request_clear_pulses: int | None = None) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -416,7 +420,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 # are a source cycle apart (>86 ms), so this clear is ready for each one.
                 received = net.neuron(f"{req_name}.received")
                 net.synapse(trig, received, drive.ignite)
-                add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]])
+                # Four pulses (REQUEST_CLEAR_PULSES) on this train alone: a request rail whose
+                # loop came out fast under noise slips through three at some phases (seed-108
+                # copy 8, seed-110 copy 73); the fourth is safe here because START's re-light
+                # of the same rail now waits for the train to end (below). Elsewhere the trains
+                # keep three pulses: a fourth everywhere lost the control machine's 45 ms
+                # interrupt reload (tests/test_machine.py).
+                add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]],
+                               pulses=REQUEST_CLEAR_PULSES if request_clear_pulses is None else request_clear_pulses)
                 if retry_clear:
                     # Conditional second clear (2026-09-20) — OFF by default: in the 100-copy
                     # mix-B tick campaign it produced silent wrong values (seed 108: 3 wrong in 2

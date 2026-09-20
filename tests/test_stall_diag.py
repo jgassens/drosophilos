@@ -68,7 +68,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
           "trigger": ["input", "input:other"]}],
         consts={"zero": 0},
         streams=["input", "other"],
-        start_relight_hops=0,  # the precedent's timing: START re-lit the request rails at once
+        start_relight_hops=0, request_clear_pulses=3,  # the precedent's timing: START re-lit the request rails at once, three-pulse clear
     )
     cell = pl.cells[0]
     req = cell.reqs["input"]

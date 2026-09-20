@@ -153,6 +153,7 @@ def test_report_is_written_incrementally_and_marked_incomplete_until_done(tmp_pa
     assert seen_incomplete[-1]["complete"] is True
 
 
+@pytest.mark.slow  # 343 s on the CI runner
 def test_no_spike_count_skips_the_all_neuron_capture(tmp_path, monkeypatch):
     """--no-spike-count times the step with the runner's own watched set only (docs/track_a.md:
     the all-neuron capture was most of a FastSim step for the larger blocks)."""

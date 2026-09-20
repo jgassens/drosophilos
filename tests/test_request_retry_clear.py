@@ -37,7 +37,7 @@ def _run(fast, retry):
     saved = control.KILL_PULSES, control.KILL_STRENGTH
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     try:
-        pl = build_pipeline(P, 4, spec, consts={"zero": 0}, retry_clear=retry, start_relight_hops=0)
+        pl = build_pipeline(P, 4, spec, consts={"zero": 0}, retry_clear=retry, start_relight_hops=0, request_clear_pulses=3)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     roles = pl.net.roles
