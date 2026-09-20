@@ -18,12 +18,12 @@ def _args(**overrides):
     base = dict(levels="primitive", backend="torch", device="cpu", dtype="float64",
                mul="array", copies="1,8", pacing="host", repeats=1, tokens=16,
                primitive_blocks="cells,fanout,tick", primitive_max_s=150, profile_steps=0,
-               historical=False, allow_cpu_renders=False, dry_run=False, out="data/perf/campaign")
+               historical=False, allow_cpu_renders=False, dry_run=False, no_spike_count=False, out="data/perf/campaign")
     base.update(overrides)
     return argparse.Namespace(**base)
 
 
-def _stub_primitive_run(name, cfg, *, tokens, profile_steps=0, max_neural_s=150):
+def _stub_primitive_run(name, cfg, *, tokens, profile_steps=0, max_neural_s=150, count_spikes=True):
     """Return the complete record shape produced by the real primitive runner."""
     return {
         "level": "primitive", "workload": name, "config": dict(cfg), "tokens": tokens,
@@ -151,3 +151,32 @@ def test_report_is_written_incrementally_and_marked_incomplete_until_done(tmp_pa
     assert done_counts == sorted(done_counts)
     assert done_counts[-1] == seen_incomplete[-1]["configurations_planned"]
     assert seen_incomplete[-1]["complete"] is True
+
+
+def test_no_spike_count_skips_the_all_neuron_capture(tmp_path, monkeypatch):
+    """--no-spike-count times the step with the runner's own watched set only (docs/track_a.md:
+    the all-neuron capture was most of a FastSim step for the larger blocks)."""
+    from drosophilos.bench import perf_campaign as pc
+    seen = {}
+    real = pc.run_pipeline_batched
+
+    def spy(*a, **kw):
+        seen["capture"] = kw.get("capture_spikes")
+        return real(*a, **kw)
+    monkeypatch.setattr(pc, "run_pipeline_batched", spy)
+    args = _args(primitive_blocks="cells", tokens=2, copies="1", no_spike_count=True, out=str(tmp_path / "nsc"))
+    report = pc.run_campaign(args)
+    assert seen["capture"] is None
+    rec = [r for r in report["records"] if r["workload"] == "cells-add"][0]
+    assert rec["spikes"] is None and "not captured" in rec["spike_count_method"]
+
+
+def test_render_cap_covers_the_sizing_estimate_several_times_over():
+    """Juno 412442: the doom4 8 x 5 x 3-frame render needed ~4,200 s of neural time and was cut
+    at render_doom's 3,600 s default; the cap must scale with the estimate."""
+    from drosophilos.bench import perf_campaign as pc
+    spec = pc.SMALL_WORKLOADS["doom4-small"]
+    est = pc._render_estimate_s(spec, 1)
+    assert est > 3600
+    assert pc._render_max_ms(spec, 1) >= 4 * est * 1000
+    assert pc._render_max_ms(pc.SMALL_WORKLOADS["doom2-small"], 8) == 3_600_000.0  # small jobs keep the default hour

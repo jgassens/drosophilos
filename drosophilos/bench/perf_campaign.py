@@ -155,7 +155,7 @@ def primitive_block(name: str, params: Params, *, mul: str, tokens: int,
 
 
 def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps: int = 0,
-                   max_neural_s: float = 150) -> dict[str, Any]:
+                   max_neural_s: float = 150, count_spikes: bool = True) -> dict[str, Any]:
     import torch
 
     params = Params()
@@ -175,11 +175,15 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
     # adds trace-copy/memory cost, which is recorded rather than pretending spikes are free.
     fast = {"graph_steps": int(cfg.get("graph_steps") or 0), "observe_every": cfg.get("observe_every"),
             "delivery": cfg.get("delivery", "auto")} if cfg["backend"] == "torch-fast" else {}
+    # With --no-spike-count the runner watches only its own neurons (as a render does) and the
+    # step is timed alone: measured on the H200 (Juno 413021), the all-neuron capture's host
+    # unpack was 45-84 % of a FastSim step for the 47k-110k-neuron blocks (docs/track_a.md).
+    capture = {"capture_spikes": (0, range(pl.net.n))} if count_spikes else {}
     outs, _sim, stats = run_pipeline_batched(
         pl, params, [list(values) for _ in range(copies)], max_ms=max_neural_s * 1000,
         device=cfg["device"], dtype=dtype, expect_outputs=[len(values) * len(spec.outputs)] * copies,
         progress=0, on_output=observed, profile_steps=profile_steps,
-        capture_spikes=(0, range(pl.net.n)), backend=cfg["backend"], **fast,
+        backend=cfg["backend"], **capture, **fast,
     )
     wrong = missing = duplicates = 0
     for node in range(copies):
@@ -197,7 +201,7 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
     first_neural = None if not first or load_step is None else (first[0][0] - load_step) * params.dt / 1000
     intervals = [] if len(first) < 2 else [
         (first[i][0] - first[i - 1][0]) * params.dt / 1000 for i in range(1, len(first))]
-    captured_steps, _captured_neurons = stats["captured_spikes"]
+    captured_steps = stats["captured_spikes"][0] if count_spikes else None
     neural = stats["neural_ms"] / 1000
     wall = stats["wall_s"]
     return {
@@ -206,8 +210,10 @@ def _primitive_run(name: str, cfg: dict[str, Any], *, tokens: int, profile_steps
         "first_neural_s": first_neural, "first_wall_s": first_wall,
         "interval_neural_s": intervals, "interval_wall_s": [], "neural_s": neural, "wall_s": wall,
         "wall_neural": None if not neural else wall / neural, "neurons": pl.net.n, "edges": pl.net.nnz,
-        "spikes": int(len(captured_steps)), "spike_count_method": "capture_spikes(all neurons, node 0)",
-        "spike_count_cost": "primitive-only trace capture; extra host memory/copy work",
+        "spikes": None if captured_steps is None else int(len(captured_steps)),
+        "spike_count_method": "capture_spikes(all neurons, node 0)" if count_spikes else "not captured (--no-spike-count)",
+        "spike_count_cost": ("primitive-only trace capture; extra host memory/copy work" if count_spikes
+                             else "none: the runner watches only its own neurons, as a render does"),
         "simulator": stats["simulator"],
         "simulator_mode": {key: stats[key] for key in ("observe_every", "graph_steps", "graph_active",
                                                         "graph_fallback_reason", "delivery", "delays") if key in stats},
@@ -227,6 +233,7 @@ def _render_run(workload: str, cfg: dict[str, Any], *, out: Path, profile_steps:
     rec = render(RenderConfig(source=spec["source"], width=spec["width"], height=spec["height"], frames=spec["frames"],
                               inputs=spec["inputs"], nodes=cfg["copies"], backend=cfg["backend"], device=cfg["device"],
                               dtype=cfg["dtype"], pacing=cfg["pacing"], mul=cfg["mul"], progress=0,
+                              max_ms=_render_max_ms(spec, int(cfg["copies"])),
                               profile_steps=profile_steps, out=str(out), datapath=cfg.get("datapath", "generic"), **fast))
     timing = rec["timing"]
     steps = timing["frame_complete_step"]
@@ -357,7 +364,20 @@ CPU_RENDER_COST_NOTE = ("small/historical renders are cluster workloads (slurm/s
 # and per-pixel-per-frame neural seconds for small/historical renders at one copy.
 _PRIMITIVE_NEURAL_S_PER_TOKEN = {"perspective": 6.6}
 _PRIMITIVE_NEURAL_S_PER_TOKEN_DEFAULT = 1.2
-_RENDER_NEURAL_S_PER_PIXEL_FRAME = {"doom4": 30.0, "doom2": 15.0}
+_RENDER_NEURAL_S_PER_PIXEL_FRAME = {"doom4": 35.0, "doom2": 15.0}  # measured at 1 copy on the H200 (Juno 412442)
+
+
+def _render_estimate_s(spec: dict[str, Any], copies: int) -> float:
+    per_pixel_frame = next(s for name, s in _RENDER_NEURAL_S_PER_PIXEL_FRAME.items() if name in spec["source"])
+    return spec["width"] * spec["height"] * spec["frames"] * per_pixel_frame / max(1, copies)
+
+
+def _render_max_ms(spec: dict[str, Any], copies: int) -> float:
+    """The render's neural-time cap: at least render_doom's default hour, and at least four
+    times the sizing estimate. The doom4 8 x 5 x 3-frame baseline needs ~4,200 s of neural
+    time and was cut at the 3,600 s default (Juno 412442: 22 pixels 'missing', host_stalls
+    true), which is a cap artifact, not a fault."""
+    return max(3_600_000.0, 4.0 * _render_estimate_s(spec, copies) * 1000.0)
 
 
 def _estimate_neural_s(level: str, workload: str, cfg: dict[str, Any], args: argparse.Namespace) -> float:
@@ -366,10 +386,7 @@ def _estimate_neural_s(level: str, workload: str, cfg: dict[str, Any], args: arg
         per_token = _PRIMITIVE_NEURAL_S_PER_TOKEN.get(workload, _PRIMITIVE_NEURAL_S_PER_TOKEN_DEFAULT)
         return min(args.tokens * per_token, args.primitive_max_s)
     workloads = SMALL_WORKLOADS if level == "small" else HISTORICAL_WORKLOADS
-    spec = workloads[workload]
-    per_pixel_frame = next(s for name, s in _RENDER_NEURAL_S_PER_PIXEL_FRAME.items() if name in spec["source"])
-    copies = int(cfg["copies"])
-    return spec["width"] * spec["height"] * spec["frames"] * per_pixel_frame / copies
+    return _render_estimate_s(workloads[workload], int(cfg["copies"]))
 
 
 def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
@@ -459,7 +476,8 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
             batch: list[dict[str, Any]] = []
             for repeat in range(repeats):
                 if level == "primitive":
-                    record = _primitive_run(workload, cfg, tokens=args.tokens, max_neural_s=args.primitive_max_s)
+                    record = _primitive_run(workload, cfg, tokens=args.tokens, max_neural_s=args.primitive_max_s,
+                                            count_spikes=not getattr(args, "no_spike_count", False))
                 elif level == "small":
                     record = _render_run(workload, cfg, out=out.parent / f"{out.name}_{workload}_{config_name}_{repeat}")
                 else:
@@ -478,7 +496,8 @@ def run_campaign(args: argparse.Namespace) -> dict[str, Any]:
                 if level == "primitive":
                     profile_record = _primitive_run(workload, cfg, tokens=args.tokens,
                                                      profile_steps=args.profile_steps,
-                                                     max_neural_s=args.primitive_max_s)
+                                                     max_neural_s=args.primitive_max_s,
+                                                    count_spikes=not getattr(args, "no_spike_count", False))
                 elif level == "small":
                     profile_record = _render_run(workload, cfg, out=out.parent / f"{out.name}_{workload}_{config_name}_profile",
                                                  profile_steps=args.profile_steps)
@@ -528,6 +547,9 @@ def _parser() -> argparse.ArgumentParser:
                     help="neural-time cap per primitive block, sized to its token count (default 150s; "
                     "the 16-bit perspective multiplier needs ~6.6 neural s/token)")
     ap.add_argument("--profile-steps", type=int, default=0)
+    ap.add_argument("--no-spike-count", action="store_true",
+                    help="primitive level: do not capture every neuron of node 0 for the spike count; the "
+                         "step is then timed with the runner's own watched set only (the render condition)")
     ap.add_argument("--historical", action="store_true", help="enable H200-only historical workloads")
     ap.add_argument("--allow-cpu-renders", action="store_true",
                     help="permit small/historical levels on --device cpu; these are cluster workloads "
