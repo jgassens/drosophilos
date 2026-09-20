@@ -60,7 +60,7 @@ def block(name: str, params: Params, *, datapath: str = "generic"):
     return ks, pl, tokens, ref
 
 
-def main():
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("block")
     ap.add_argument("--copies", type=int, default=100)
@@ -68,13 +68,20 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-ms", type=float, default=30000, help="ceiling on the neural time (the run stops when every copy has delivered)")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--backend", default="torch", choices=("torch", "torch-fast"),
+                    help="batched simulator (torch is the comparison/default backend)")
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
     ap.add_argument("--dump-roles", default=None, help="regular expression matched against neuron roles")
     ap.add_argument("--dump-out", default=None, help="write the selected step/neuron/role arrays to this .npz")
-    a = ap.parse_args()
+    return ap
+
+
+def main(argv=None):
+    ap = parser()
+    a = ap.parse_args(argv)
     P = Params()
     ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath)
     B = a.copies
@@ -96,10 +103,11 @@ def main():
     t0 = time.time()
     import torch
     dtype = torch.float32 if a.fp32 else torch.float64
-    sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype)
+    sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype,
+                             backend=a.backend)
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
                                          expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
-                                         capture_spikes=capture)
+                                         capture_spikes=capture, backend=a.backend)
     captured = st.pop("captured_spikes", None)
     if captured is not None:
         steps, neurons = captured
@@ -124,7 +132,8 @@ def main():
         ok += node_ok; wrong += node_wrong; missing += node_missing
         per_node.append((node_ok, node_wrong, node_missing))
     n = ok + wrong + missing
-    rec = {"block": a.block, "datapath": pl.datapath, "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
+    rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
+           "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
            "nodes_with_errors": sum(1 for x in per_node if x[1] or x[2]), "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0),

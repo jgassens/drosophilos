@@ -24,6 +24,7 @@ import numpy as np
 import torch
 
 from ..sim.lif_torch import TorchSim
+from ..sim.lif_fast import FastSim
 from ..sim.model import Params
 from ..sim.trace import SpikeTrace
 from ..protocol.handshake import Channel
@@ -54,19 +55,29 @@ def clopper_pearson_upper(k: int, n: int, conf: float = 0.95) -> float:
     return float(beta.ppf(conf, k + 1, n - k))
 
 
-def make_perturbed_sim(topo, params: Params, B: int, pert: Perturbation, rng, n_steps: int, device="cpu", dtype=torch.float64):
-    """A TorchSim of B independent copies with per-node weight noise, threshold and bias
-    drift, and stray Poisson input over `n_steps` (the campaign's mix, shared by the block
-    and machine runners)."""
+def make_perturbed_sim(topo, params: Params, B: int, pert: Perturbation, rng, n_steps: int,
+                       device="cpu", dtype=torch.float64, backend: str = "torch"):
+    """Build a perturbed ``TorchSim`` or ``FastSim`` containing ``B`` independent copies.
+
+    Weight, threshold, bias, and stray-seed draws deliberately happen before backend
+    selection, in one fixed order. Thus a campaign seed describes the same perturbed copies
+    on both backends. The simulators also draw seeded stray input at the same point of each
+    step (docs/track_a.md §A3).
+    """
+    if backend not in ("torch", "torch-fast"):
+        raise ValueError(f"backend must be 'torch' or 'torch-fast', not {backend!r}")
     base_q = topo.quanta.astype(np.float64)
     q = np.rint(base_q[None, :] * np.exp(rng.normal(0, pert.weight_sigma, size=(B, topo.nnz)))).astype(np.int32)
     vth = params.V_th + rng.normal(0, pert.th_sigma_mv, size=(B, topo.n))
     bias = rng.normal(0, pert.bias_sigma_mv, size=(B, topo.n)) + (0.0 if topo.bias is None else np.asarray(topo.bias, dtype=np.float64))  # drift ON TOP of the topology's biases (a flip-flop's 58 mV), which the caller's bias would otherwise replace
-    # the stray Poisson input is drawn on the device as the simulation runs (TorchSim's
+    # The stray Poisson input is drawn on the device as the simulation runs (both simulators'
     # stray_rate_hz: a Bernoulli(rate * dt) draw per neuron per step, the same law as the
     # pre-drawn events it replaces); `n_steps` is kept for the signature and no longer bounds it
-    return TorchSim(topo, params, n_nodes=B, V_th=vth, bias=bias, quanta=q, device=device, dtype=dtype,
-                    stray_rate_hz=pert.stray_rate_hz, stray_quanta=pert.stray_quanta, stray_seed=int(rng.integers(2**31 - 1)))
+    stray_seed = int(rng.integers(2**31 - 1))
+    simulator = TorchSim if backend == "torch" else FastSim
+    return simulator(topo, params, n_nodes=B, V_th=vth, bias=bias, quanta=q, device=device, dtype=dtype,
+                     stray_rate_hz=pert.stray_rate_hz, stray_quanta=pert.stray_quanta,
+                     stray_seed=stray_seed)
 
 
 def _decode_node(steps, neurons, taps, comp, cleared, ready, faults, consumer_set, loads, expected, window, debug=None,
