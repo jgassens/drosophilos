@@ -218,8 +218,17 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     from drosophilos.lib.kernel import run_pipeline_batched
     from drosophilos.sim.ref64 import RefSim
 
-    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3}, relight_requests=True)
+    # Pinned to the timing the corner was measured in: START re-lighting the rail at once and
+    # the 3 x 0.75 train. On the 2026-09-20 build (START's re-light 5 hops later, 4 x 0.75) the
+    # rail catches on copy 1 as well and nothing replays: both copies give [9, 15, 6].
+    from drosophilos.lib import control
+    saved = control.KILL_PULSES, control.KILL_STRENGTH
+    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
+    try:
+        pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                            consts={"k": 3}, relight_requests=True, start_relight_hops=0)
+    finally:
+        control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert pl.net.n < 30000
     cell = next(c for c in pl.cells if c.name == "m.r2")
     req = cell.reqs["m.r1"]
