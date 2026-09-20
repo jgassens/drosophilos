@@ -302,6 +302,14 @@ totals, not per copy). Old build (3 × 0.75, commit `128d982`), 100 copies each:
 | 109 (413666) | 1,567 | **8** (copy 61) | 25 | 8, 61, 78, 98 |
 | 110 (413667) | 1,574 | 0 | 26 | 0, 45 |
 
+Fixed build (`6bac959`: resend of refused and lost words, next word after the previous commit,
+stage reset clears TIMEOUT; kill train unchanged; the two added synapses make it a new noise
+realization, so the comparison is per-seed totals):
+
+| seed | ok | wrong | missing | refusals / retries | failing copies |
+|---|---:|---:|---:|---|---|
+| 108 (413703) | 1,596 | 0 | 4 | 0 / 0 | 24 (stalls after token 6) |
+
 Seed 109's copy 61 is a **new silent wrong-value mechanism**, not a refusal: `c9_sel` commits
 its initial value (90, `mx` before any tick) at 2.8 s, long before the first tick's output at
 6.7 s, and from then on `mx` steps every other tick (88, 88, 86, 86, 84, 84, 86) while `px`
