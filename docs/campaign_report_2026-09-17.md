@@ -17,10 +17,12 @@ kernels produce **no silent wrong value in 4,000 outputs** on that build and rea
 Three more realizations on 2026-09-20 (`docs/tick_stalls.md`) found three ways a wrong value
 can still arise — a refused input word the host did not resend, a state cell's completion
 root lit by a stray coincidence, and a commit request's idle rail whose re-ignition failed —
-each localized from a spike capture and fixed with a regression test — and then the stalls
-themselves, traced to a DONE's clear train reaching START's re-light of the same request
-rail, fixed by ordering the two. The build with those fixes gives **0 wrong values and 0
-stalls in 4,800 outputs over three seeds** (300 of 300 copies complete).
+each localized from a spike capture and fixed with a regression test; the build with those
+fixes gives **0 wrong values in 4,800 outputs over three seeds**, with 4 % of copies stalled
+(fail-stops the machine itself can see). A further build removed every stall on the same
+three seeds (300 of 300 copies) but is not the default: it makes multiplier rows start
+twice, and the guard behaviour behind that — a dark request pair read as true — is the next
+thing to change (`docs/tick_stalls.md`).
 
 Three limits are also measured, and they do not move with more of the same work:
 

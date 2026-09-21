@@ -151,7 +151,7 @@ def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, targe
     add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
 
 
-REQUEST_CLEAR_PULSES = 4  # the DONE-side clear of a request's false rail; see build_pipeline
+REQUEST_CLEAR_PULSES = 3  # the DONE-side clear of a request's false rail; 4 was tried (see build_pipeline)
 
 
 def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
@@ -253,7 +253,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = False, start_relight_hops: int = 5,
+                   retry_clear: bool = False, start_relight_hops: int = 0,
                    request_clear_pulses: int | None = None) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
@@ -464,7 +464,16 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
         for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
-        # START re-lights each request's false rail ("consumed") — but not at once. The DONE's
+        # START re-lights each request's false rail ("consumed"). `start_relight_hops` (default
+        # 0: at once) is a recorded experiment, OFF: with the re-light 5 hops later and a
+        # 4 x 0.75 train everywhere, seeds 108-110 ran 300/300 copies clean (Juno 414205-7),
+        # but a delay of 3 hops or more makes a cell START a second time ~32 ms after the
+        # first — the go guard's delayed idle path lands inside the window where both request
+        # rails are dark and reads it as true (pipelined multiplier rows, tests/test_mul_diag.py)
+        # — and with the fourth pulse on the request clear alone the stalls return (seed 108: 3
+        # copies, Juno 414423). What the clean run shows is the target; the guard reading
+        # "not false" as true is what has to change first. The rest of this comment is the
+        # ordering that delaying the re-light was meant to fix. The DONE's
         # clear train on that same rail (3 pulses, ~15 ms; 4 pulses, ~20 ms) is still running
         # when a cell that was otherwise ready starts within a few ms of the request, and its
         # tail then kills the rail START just re-lit: both rails dark, which the guards read

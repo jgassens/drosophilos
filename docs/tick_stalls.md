@@ -383,11 +383,24 @@ on this build (`3cc733b`, Juno 414205–7):
 | 109 (414206) | **1,600** | **0** | **0** | none | 568 s |
 | 110 (414207) | **1,600** | **0** | **0** | none | 568 s |
 
-**300 copies, 4,800 outputs: 0 wrong, 0 missing, 0 faults, 0 refusals.** The stall rate went
-from 4 % of copies to none on three realizations once the clear-train tail could no longer
-reach START's re-light, and the fourth pulse then took care of the fast latches. Every
-100-copy campaign now finishes in ~570 s instead of the 90 s cap's ~990 s, because no copy
-waits it out.
+**300 copies, 4,800 outputs: 0 wrong, 0 missing, 0 faults, 0 refusals — and not shipped.**
+Two findings after the fact: (1) the clean result needs the fourth pulse *everywhere*; with
+it on the request clear alone (the control machine cannot take a fourth pulse on its kill
+pairs: its 45 ms interrupt reload is lost, `tests/test_machine.py`, caught by CI) seed 108
+stalls 3 copies again (`fix5`, Juno 414423); (2) the re-light delay itself, at 3 hops or
+more, makes a cell START a second time ~32 ms after the first — the go guard's delayed idle
+path (`guarded_pulse`, B-rise delayed 20 hops, vetoed only by the request's false rail) lands
+inside the window where both request rails are dark and reads it as true; the pipelined
+multiplier's rows show 4–5 STARTs for 3 tokens (`tests/test_mul_diag.py`, CI). The tick
+campaign happened not to be hurt by it, but a build with a known extra START is not a build
+to stand on. So the shipped default is the `fix2` protocol (0 wrong, ~4 % stalls) with every
+later step recorded behind a flag (`start_relight_hops`, `request_clear_pulses`,
+`retry_clear`, the kill-train constants), and the clean run is the target. The one change
+that would make all of them safe is the same in every trace of the day: **the guards read
+"not false" as true** — a dark pair passes. A guard that requires the true rail's train (a
+rate-mode input beside the delayed pulse, the way the retry gate was built) removes the
+dark-pair hazard from the go chains and the commit gates at once, and is the first thing to
+build in the next session, followed by the 300-copy loop above.
 
 Over 300 copies of the first fixed build: 10 failing on the old build, 13 on the fixed one — the stall rate is set by
 kernel mechanisms the host fixes do not touch, and it swings with the realization (1, 4 and

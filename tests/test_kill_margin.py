@@ -60,7 +60,7 @@ def test_the_default_train_lets_a_fast_latch_through():
     # (3 x 1.5: 85 of 100 mix-B copies stalled, Juno 413672) or the control machine (4 x 1.5),
     # so the default stays and this test records the open margin; a fix must turn it around.
     from drosophilos.lib.kernel import REQUEST_CLEAR_PULSES
-    assert (KILL_PULSES, KILL_STRENGTH) == (3, 0.75) and REQUEST_CLEAR_PULSES == 4
+    assert (KILL_PULSES, KILL_STRENGTH) == (3, 0.75) and REQUEST_CLEAR_PULSES == 3
     period, survived = _survivors(3, 0.75, 1.2, -0.8)  # the general train, and the request clear until 2026-09-20
     assert 36 <= period <= 40, period
     assert survived == len(PHASES), survived  # every phase: the clear never works on this latch

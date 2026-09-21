@@ -305,7 +305,7 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
-    assert (legacy.net.n, legacy.net.nnz) == (995, 1685)  # 2026-09-20: commit idle rail's second ignition, START re-light delay; kill trains back to three pulses
+    assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # 2026-09-20: commit idle rail's second ignition (+16/+17)
     from drosophilos.lib import control
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
     try:
@@ -412,7 +412,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False)  # §10.3 count control
-    assert (legacy.net.n, legacy.net.nnz) == (7208, 12507)  # 2026-09-20: TIMEOUT cleared by the stage reset, commit idle rail second ignition, START re-light delay, three-pulse trains
+    assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
     from drosophilos.lib import control
     saved = control.KILL_PULSES, control.KILL_STRENGTH
