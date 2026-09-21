@@ -1,0 +1,2269 @@
+{
+  "campaign": "docs/perf_campaign.md \u00a73",
+  "generated_at": 1789908590.8507833,
+  "arguments": {
+    "levels": "small",
+    "backend": "torch-fast",
+    "graph_steps": 94,
+    "observe_every": null,
+    "delivery": "auto",
+    "variant_backend": null,
+    "datapath": "specialized",
+    "variant_datapath": null,
+    "device": "cuda",
+    "dtype": "float64",
+    "mul": "array",
+    "copies": "1,8",
+    "pacing": "host",
+    "repeats": 1,
+    "tokens": 16,
+    "primitive_blocks": "cells,fanout,tick",
+    "primitive_max_s": 150,
+    "profile_steps": 0,
+    "no_spike_count": false,
+    "historical": false,
+    "allow_cpu_renders": false,
+    "dry_run": false,
+    "out": "data/perf/juno-h200-q4-small-fast-specialized"
+  },
+  "historical_note": "H200-only and off by default",
+  "coverage": [
+    {
+      "source": "examples/doom2.c",
+      "inputs": "2,258,0",
+      "frame_different": [
+        true,
+        true
+      ],
+      "sprite_pixels": null
+    },
+    {
+      "source": "examples/doom4.c",
+      "inputs": "6,256,0",
+      "frame_different": [
+        true,
+        true
+      ],
+      "sprite_pixels": [
+        32,
+        48,
+        80
+      ]
+    }
+  ],
+  "records": [
+    {
+      "level": "small",
+      "workload": "doom2-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 1,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 469.2439,
+      "first_wall_s": 906.0931723732501,
+      "interval_neural_s": [
+        480.126,
+        477.12210000000005
+      ],
+      "interval_wall_s": [
+        925.2196817686781,
+        919.2203732784837
+      ],
+      "neural_s": 1441.4516,
+      "wall_s": 2800.6413550237194,
+      "wall_neural": 1.9429312472397402,
+      "neurons": 581864,
+      "edges": 1180986,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 20.998263647779822,
+        "t_load": 1.6198146091774106,
+        "first_frame_s": 906.0931723732501,
+        "frame_complete": [
+          906.0931723732501,
+          1831.3128541419283,
+          2750.533227420412
+        ],
+        "frame_complete_step": [
+          4692439,
+          9493699,
+          14264920
+        ],
+        "frame_interval_s": [
+          null,
+          925.2196817686781,
+          919.2203732784837
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 2,
+            "injected_step": 4692566,
+            "injected_wall_s": 906.1055652061477,
+            "committed_step": 4840501,
+            "committed_wall_s": 934.6414532689378,
+            "first_frame_using_state": 1,
+            "first_frame_using_state_completion_s": 1831.3128541419283
+          },
+          {
+            "index": 1,
+            "value": 258,
+            "injected_step": 9493804,
+            "injected_wall_s": 1831.3230437394232,
+            "committed_step": 9641687,
+            "committed_wall_s": 1859.8277792558074,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 2750.533227420412
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 14265056,
+            "injected_wall_s": 2750.5496815489605,
+            "committed_step": 14414341,
+            "committed_wall_s": 2779.419174890965,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 2800.6413550237194,
+        "tail_s": 28.886110784485936,
+        "tail_steps": 149596
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "128d982a257d5262a8e96aefd1cd15aea1d66a4c",
+        "git_dirty": false,
+        "source_path": "examples/doom2.c",
+        "source_sha256": "9aaa1448daf2c0999a0727835dd40cff41cc1d3b15e27870961affd4371f895a",
+        "circuit_sha256": "33dc893f4e0533ed0d572a76c567e5426924033b18e4393119fcb18eb979e152",
+        "inputs": [
+          2,
+          258,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 1,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 581864,
+        "edges_per_node": 1180986,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 122,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 1441451.6,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 20.998263647779822,
+          "t_load": 1.6198146091774106,
+          "first_frame_s": 906.0931723732501,
+          "frame_complete": [
+            906.0931723732501,
+            1831.3128541419283,
+            2750.533227420412
+          ],
+          "frame_complete_step": [
+            4692439,
+            9493699,
+            14264920
+          ],
+          "frame_interval_s": [
+            null,
+            925.2196817686781,
+            919.2203732784837
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 2,
+              "injected_step": 4692566,
+              "injected_wall_s": 906.1055652061477,
+              "committed_step": 4840501,
+              "committed_wall_s": 934.6414532689378,
+              "first_frame_using_state": 1,
+              "first_frame_using_state_completion_s": 1831.3128541419283
+            },
+            {
+              "index": 1,
+              "value": 258,
+              "injected_step": 9493804,
+              "injected_wall_s": 1831.3230437394232,
+              "committed_step": 9641687,
+              "committed_wall_s": 1859.8277792558074,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 2750.533227420412
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 14265056,
+              "injected_wall_s": 2750.5496815489605,
+              "committed_step": 14414341,
+              "committed_wall_s": 2779.419174890965,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 2800.6413550237194,
+          "tail_s": 28.886110784485936,
+          "tail_steps": 149596
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom2-small_baseline_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "baseline",
+      "repeat": 0,
+      "comparison": "simulator-only"
+    },
+    {
+      "level": "small",
+      "workload": "doom2-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 8,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 75.6405,
+      "first_wall_s": 793.600673597306,
+      "interval_neural_s": [
+        89.48320000000001,
+        89.3751
+      ],
+      "interval_wall_s": [
+        934.9115249868482,
+        935.3588924137875
+      ],
+      "neural_s": 269.4596,
+      "wall_s": 2836.5155074372888,
+      "wall_neural": 10.52668194949183,
+      "neurons": 581864,
+      "edges": 1180986,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 16.20243014395237,
+        "t_load": 7.040455103851855,
+        "first_frame_s": 793.600673597306,
+        "frame_complete": [
+          793.600673597306,
+          1728.5121985841542,
+          2663.871090997942
+        ],
+        "frame_complete_step": [
+          756405,
+          1651237,
+          2544988
+        ],
+        "frame_interval_s": [
+          null,
+          934.9115249868482,
+          935.3588924137875
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 2,
+            "injected_step": 756504,
+            "injected_wall_s": 793.6183048393577,
+            "committed_step": 904439,
+            "committed_wall_s": 948.2656987113878,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 2663.871090997942
+          },
+          {
+            "index": 1,
+            "value": 258,
+            "injected_step": 1651384,
+            "injected_wall_s": 1728.5264668930322,
+            "committed_step": 1799278,
+            "committed_wall_s": 1883.2139934580773,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 2545136,
+            "injected_wall_s": 2663.8879439095035,
+            "committed_step": 2694431,
+            "committed_wall_s": 2820.2829900691286,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 2836.5155074372888,
+        "tail_s": 156.41211073100567,
+        "tail_steps": 149608
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "128d982a257d5262a8e96aefd1cd15aea1d66a4c",
+        "git_dirty": false,
+        "source_path": "examples/doom2.c",
+        "source_sha256": "9aaa1448daf2c0999a0727835dd40cff41cc1d3b15e27870961affd4371f895a",
+        "circuit_sha256": "33dc893f4e0533ed0d572a76c567e5426924033b18e4393119fcb18eb979e152",
+        "inputs": [
+          2,
+          258,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 8,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 581864,
+        "edges_per_node": 1180986,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 122,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 269459.60000000003,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 16.20243014395237,
+          "t_load": 7.040455103851855,
+          "first_frame_s": 793.600673597306,
+          "frame_complete": [
+            793.600673597306,
+            1728.5121985841542,
+            2663.871090997942
+          ],
+          "frame_complete_step": [
+            756405,
+            1651237,
+            2544988
+          ],
+          "frame_interval_s": [
+            null,
+            934.9115249868482,
+            935.3588924137875
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 2,
+              "injected_step": 756504,
+              "injected_wall_s": 793.6183048393577,
+              "committed_step": 904439,
+              "committed_wall_s": 948.2656987113878,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 2663.871090997942
+            },
+            {
+              "index": 1,
+              "value": 258,
+              "injected_step": 1651384,
+              "injected_wall_s": 1728.5264668930322,
+              "committed_step": 1799278,
+              "committed_wall_s": 1883.2139934580773,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 2545136,
+              "injected_wall_s": 2663.8879439095035,
+              "committed_step": 2694431,
+              "committed_wall_s": 2820.2829900691286,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 2836.5155074372888,
+          "tail_s": 156.41211073100567,
+          "tail_steps": 149608
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom2-small_copies-8_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "copies-8",
+      "repeat": 0,
+      "comparison": "simulator-only"
+    },
+    {
+      "level": "small",
+      "workload": "doom4-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 1,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 1350.6328,
+      "first_wall_s": 4546.540448036976,
+      "interval_neural_s": [
+        1400.1442000000002,
+        1409.0523
+      ],
+      "interval_wall_s": [
+        4718.077559016645,
+        4748.653007298708
+      ],
+      "neural_s": 4214.818200000001,
+      "wall_s": 14255.301524792798,
+      "wall_neural": 3.382186573264962,
+      "neurons": 1299675,
+      "edges": 2598258,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 56.41655520256609,
+        "t_load": 3.676412954926491,
+        "first_frame_s": 4546.540448036976,
+        "frame_complete": [
+          4546.540448036976,
+          9264.618007053621,
+          14013.271014352329
+        ],
+        "frame_complete_step": [
+          13506328,
+          27507770,
+          41598293
+        ],
+        "frame_interval_s": [
+          null,
+          4718.077559016645,
+          4748.653007298708
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 6,
+            "injected_step": 13506476,
+            "injected_wall_s": 4546.5569856874645,
+            "committed_step": 14053723,
+            "committed_wall_s": 4730.811132433824,
+            "first_frame_using_state": 1,
+            "first_frame_using_state_completion_s": 9264.618007053621
+          },
+          {
+            "index": 1,
+            "value": 256,
+            "injected_step": 27507870,
+            "injected_wall_s": 9264.631186115555,
+            "committed_step": 28056779,
+            "committed_wall_s": 9449.761005100794,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 14013.271014352329
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 41598470,
+            "injected_wall_s": 14013.284783906303,
+            "committed_step": 42148079,
+            "committed_wall_s": 14198.840065769851,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 14255.301524792798,
+        "tail_s": 185.56918913684785,
+        "tail_steps": 549889
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "23291f6f4d5097189f33c94b27e338050696f7d8",
+        "git_dirty": false,
+        "source_path": "examples/doom4.c",
+        "source_sha256": "e3354c5d7c2d28555d53499031502a70239f10f140fe3a4cd5aa4ea43823856f",
+        "circuit_sha256": "2bdfd25d7034f2ab8ffc2cb79fdb30a3d7f7cd14d14cdb1879876ca0a954a58e",
+        "inputs": [
+          6,
+          256,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 1,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 1299675,
+        "edges_per_node": 2598258,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 236,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 4214818.2,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 56.41655520256609,
+          "t_load": 3.676412954926491,
+          "first_frame_s": 4546.540448036976,
+          "frame_complete": [
+            4546.540448036976,
+            9264.618007053621,
+            14013.271014352329
+          ],
+          "frame_complete_step": [
+            13506328,
+            27507770,
+            41598293
+          ],
+          "frame_interval_s": [
+            null,
+            4718.077559016645,
+            4748.653007298708
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 6,
+              "injected_step": 13506476,
+              "injected_wall_s": 4546.5569856874645,
+              "committed_step": 14053723,
+              "committed_wall_s": 4730.811132433824,
+              "first_frame_using_state": 1,
+              "first_frame_using_state_completion_s": 9264.618007053621
+            },
+            {
+              "index": 1,
+              "value": 256,
+              "injected_step": 27507870,
+              "injected_wall_s": 9264.631186115555,
+              "committed_step": 28056779,
+              "committed_wall_s": 9449.761005100794,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 14013.271014352329
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 41598470,
+              "injected_wall_s": 14013.284783906303,
+              "committed_step": 42148079,
+              "committed_wall_s": 14198.840065769851,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 14255.301524792798,
+          "tail_s": 185.56918913684785,
+          "tail_steps": 549889
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom4-small_baseline_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "baseline",
+      "repeat": 0,
+      "comparison": "simulator-only"
+    },
+    {
+      "level": "small",
+      "workload": "doom4-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 8,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 178.2221,
+      "first_wall_s": 3902.713162404485,
+      "interval_neural_s": [
+        229.6206,
+        232.087
+      ],
+      "interval_wall_s": [
+        5010.323139459826,
+        5059.810024122708
+      ],
+      "neural_s": 694.913,
+      "wall_s": 15229.584780248813,
+      "wall_neural": 21.91581504483124,
+      "neurons": 1299675,
+      "edges": 2598258,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 56.29224255960435,
+        "t_load": 25.392670644447207,
+        "first_frame_s": 3902.713162404485,
+        "frame_complete": [
+          3902.713162404485,
+          8913.036301864311,
+          13972.846325987019
+        ],
+        "frame_complete_step": [
+          1782221,
+          4078427,
+          6399297
+        ],
+        "frame_interval_s": [
+          null,
+          5010.323139459826,
+          5059.810024122708
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 6,
+            "injected_step": 1782326,
+            "injected_wall_s": 3902.724093371071,
+            "committed_step": 2329567,
+            "committed_wall_s": 5096.348055899143,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 13972.846325987019
+          },
+          {
+            "index": 1,
+            "value": 256,
+            "injected_step": 4078558,
+            "injected_wall_s": 8913.052783782594,
+            "committed_step": 4627477,
+            "committed_wall_s": 10110.225296463817,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 6399418,
+            "injected_wall_s": 13972.864218749106,
+            "committed_step": 6949026,
+            "committed_wall_s": 15173.247411028482,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 15229.584780248813,
+        "tail_s": 1200.4012809805572,
+        "tail_steps": 549833
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "01e64861032bb05744ffbf17e9ad8a305b13258c",
+        "git_dirty": false,
+        "source_path": "examples/doom4.c",
+        "source_sha256": "e3354c5d7c2d28555d53499031502a70239f10f140fe3a4cd5aa4ea43823856f",
+        "circuit_sha256": "2bdfd25d7034f2ab8ffc2cb79fdb30a3d7f7cd14d14cdb1879876ca0a954a58e",
+        "inputs": [
+          6,
+          256,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 8,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 1299675,
+        "edges_per_node": 2598258,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 236,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 694913.0,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 56.29224255960435,
+          "t_load": 25.392670644447207,
+          "first_frame_s": 3902.713162404485,
+          "frame_complete": [
+            3902.713162404485,
+            8913.036301864311,
+            13972.846325987019
+          ],
+          "frame_complete_step": [
+            1782221,
+            4078427,
+            6399297
+          ],
+          "frame_interval_s": [
+            null,
+            5010.323139459826,
+            5059.810024122708
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 6,
+              "injected_step": 1782326,
+              "injected_wall_s": 3902.724093371071,
+              "committed_step": 2329567,
+              "committed_wall_s": 5096.348055899143,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 13972.846325987019
+            },
+            {
+              "index": 1,
+              "value": 256,
+              "injected_step": 4078558,
+              "injected_wall_s": 8913.052783782594,
+              "committed_step": 4627477,
+              "committed_wall_s": 10110.225296463817,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 6399418,
+              "injected_wall_s": 13972.864218749106,
+              "committed_step": 6949026,
+              "committed_wall_s": 15173.247411028482,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 15229.584780248813,
+          "tail_s": 1200.4012809805572,
+          "tail_steps": 549833
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom4-small_copies-8_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "copies-8",
+      "repeat": 0,
+      "comparison": "simulator-only"
+    }
+  ],
+  "summaries": [
+    {
+      "level": "small",
+      "workload": "doom2-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 1,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 469.2439,
+      "first_wall_s": 906.0931723732501,
+      "interval_neural_s": [
+        480.126,
+        477.12210000000005
+      ],
+      "interval_wall_s": [
+        925.2196817686781,
+        919.2203732784837
+      ],
+      "neural_s": 1441.4516,
+      "wall_s": 2800.6413550237194,
+      "wall_neural": 1.9429312472397402,
+      "neurons": 581864,
+      "edges": 1180986,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 20.998263647779822,
+        "t_load": 1.6198146091774106,
+        "first_frame_s": 906.0931723732501,
+        "frame_complete": [
+          906.0931723732501,
+          1831.3128541419283,
+          2750.533227420412
+        ],
+        "frame_complete_step": [
+          4692439,
+          9493699,
+          14264920
+        ],
+        "frame_interval_s": [
+          null,
+          925.2196817686781,
+          919.2203732784837
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 2,
+            "injected_step": 4692566,
+            "injected_wall_s": 906.1055652061477,
+            "committed_step": 4840501,
+            "committed_wall_s": 934.6414532689378,
+            "first_frame_using_state": 1,
+            "first_frame_using_state_completion_s": 1831.3128541419283
+          },
+          {
+            "index": 1,
+            "value": 258,
+            "injected_step": 9493804,
+            "injected_wall_s": 1831.3230437394232,
+            "committed_step": 9641687,
+            "committed_wall_s": 1859.8277792558074,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 2750.533227420412
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 14265056,
+            "injected_wall_s": 2750.5496815489605,
+            "committed_step": 14414341,
+            "committed_wall_s": 2779.419174890965,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 2800.6413550237194,
+        "tail_s": 28.886110784485936,
+        "tail_steps": 149596
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "128d982a257d5262a8e96aefd1cd15aea1d66a4c",
+        "git_dirty": false,
+        "source_path": "examples/doom2.c",
+        "source_sha256": "9aaa1448daf2c0999a0727835dd40cff41cc1d3b15e27870961affd4371f895a",
+        "circuit_sha256": "33dc893f4e0533ed0d572a76c567e5426924033b18e4393119fcb18eb979e152",
+        "inputs": [
+          2,
+          258,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 1,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 581864,
+        "edges_per_node": 1180986,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 122,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 1441451.6,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 20.998263647779822,
+          "t_load": 1.6198146091774106,
+          "first_frame_s": 906.0931723732501,
+          "frame_complete": [
+            906.0931723732501,
+            1831.3128541419283,
+            2750.533227420412
+          ],
+          "frame_complete_step": [
+            4692439,
+            9493699,
+            14264920
+          ],
+          "frame_interval_s": [
+            null,
+            925.2196817686781,
+            919.2203732784837
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 2,
+              "injected_step": 4692566,
+              "injected_wall_s": 906.1055652061477,
+              "committed_step": 4840501,
+              "committed_wall_s": 934.6414532689378,
+              "first_frame_using_state": 1,
+              "first_frame_using_state_completion_s": 1831.3128541419283
+            },
+            {
+              "index": 1,
+              "value": 258,
+              "injected_step": 9493804,
+              "injected_wall_s": 1831.3230437394232,
+              "committed_step": 9641687,
+              "committed_wall_s": 1859.8277792558074,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 2750.533227420412
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 14265056,
+              "injected_wall_s": 2750.5496815489605,
+              "committed_step": 14414341,
+              "committed_wall_s": 2779.419174890965,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 2800.6413550237194,
+          "tail_s": 28.886110784485936,
+          "tail_steps": 149596
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom2-small_baseline_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "baseline",
+      "repeat": 0,
+      "comparison": "simulator-only",
+      "repeat_summary": {
+        "wall_s": {
+          "median": 2800.6413550237194,
+          "min": 2800.6413550237194,
+          "max": 2800.6413550237194
+        },
+        "first_wall_s": {
+          "median": 906.0931723732501,
+          "min": 906.0931723732501,
+          "max": 906.0931723732501
+        },
+        "first_neural_s": {
+          "median": 469.2439,
+          "min": 469.2439,
+          "max": 469.2439
+        }
+      },
+      "headline": {
+        "wall_s": 2800.6413550237194,
+        "first_wall_s": 906.0931723732501,
+        "first_neural_s": 469.2439
+      }
+    },
+    {
+      "level": "small",
+      "workload": "doom2-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 8,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 75.6405,
+      "first_wall_s": 793.600673597306,
+      "interval_neural_s": [
+        89.48320000000001,
+        89.3751
+      ],
+      "interval_wall_s": [
+        934.9115249868482,
+        935.3588924137875
+      ],
+      "neural_s": 269.4596,
+      "wall_s": 2836.5155074372888,
+      "wall_neural": 10.52668194949183,
+      "neurons": 581864,
+      "edges": 1180986,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 16.20243014395237,
+        "t_load": 7.040455103851855,
+        "first_frame_s": 793.600673597306,
+        "frame_complete": [
+          793.600673597306,
+          1728.5121985841542,
+          2663.871090997942
+        ],
+        "frame_complete_step": [
+          756405,
+          1651237,
+          2544988
+        ],
+        "frame_interval_s": [
+          null,
+          934.9115249868482,
+          935.3588924137875
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 2,
+            "injected_step": 756504,
+            "injected_wall_s": 793.6183048393577,
+            "committed_step": 904439,
+            "committed_wall_s": 948.2656987113878,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 2663.871090997942
+          },
+          {
+            "index": 1,
+            "value": 258,
+            "injected_step": 1651384,
+            "injected_wall_s": 1728.5264668930322,
+            "committed_step": 1799278,
+            "committed_wall_s": 1883.2139934580773,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 2545136,
+            "injected_wall_s": 2663.8879439095035,
+            "committed_step": 2694431,
+            "committed_wall_s": 2820.2829900691286,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 2836.5155074372888,
+        "tail_s": 156.41211073100567,
+        "tail_steps": 149608
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "128d982a257d5262a8e96aefd1cd15aea1d66a4c",
+        "git_dirty": false,
+        "source_path": "examples/doom2.c",
+        "source_sha256": "9aaa1448daf2c0999a0727835dd40cff41cc1d3b15e27870961affd4371f895a",
+        "circuit_sha256": "33dc893f4e0533ed0d572a76c567e5426924033b18e4393119fcb18eb979e152",
+        "inputs": [
+          2,
+          258,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 8,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 581864,
+        "edges_per_node": 1180986,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 122,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 269459.60000000003,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 16.20243014395237,
+          "t_load": 7.040455103851855,
+          "first_frame_s": 793.600673597306,
+          "frame_complete": [
+            793.600673597306,
+            1728.5121985841542,
+            2663.871090997942
+          ],
+          "frame_complete_step": [
+            756405,
+            1651237,
+            2544988
+          ],
+          "frame_interval_s": [
+            null,
+            934.9115249868482,
+            935.3588924137875
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 2,
+              "injected_step": 756504,
+              "injected_wall_s": 793.6183048393577,
+              "committed_step": 904439,
+              "committed_wall_s": 948.2656987113878,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 2663.871090997942
+            },
+            {
+              "index": 1,
+              "value": 258,
+              "injected_step": 1651384,
+              "injected_wall_s": 1728.5264668930322,
+              "committed_step": 1799278,
+              "committed_wall_s": 1883.2139934580773,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 2545136,
+              "injected_wall_s": 2663.8879439095035,
+              "committed_step": 2694431,
+              "committed_wall_s": 2820.2829900691286,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 2836.5155074372888,
+          "tail_s": 156.41211073100567,
+          "tail_steps": 149608
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom2-small_copies-8_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "copies-8",
+      "repeat": 0,
+      "comparison": "simulator-only",
+      "repeat_summary": {
+        "wall_s": {
+          "median": 2836.5155074372888,
+          "min": 2836.5155074372888,
+          "max": 2836.5155074372888
+        },
+        "first_wall_s": {
+          "median": 793.600673597306,
+          "min": 793.600673597306,
+          "max": 793.600673597306
+        },
+        "first_neural_s": {
+          "median": 75.6405,
+          "min": 75.6405,
+          "max": 75.6405
+        }
+      },
+      "headline": {
+        "wall_s": 2836.5155074372888,
+        "first_wall_s": 793.600673597306,
+        "first_neural_s": 75.6405
+      }
+    },
+    {
+      "level": "small",
+      "workload": "doom4-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 1,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 1350.6328,
+      "first_wall_s": 4546.540448036976,
+      "interval_neural_s": [
+        1400.1442000000002,
+        1409.0523
+      ],
+      "interval_wall_s": [
+        4718.077559016645,
+        4748.653007298708
+      ],
+      "neural_s": 4214.818200000001,
+      "wall_s": 14255.301524792798,
+      "wall_neural": 3.382186573264962,
+      "neurons": 1299675,
+      "edges": 2598258,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 56.41655520256609,
+        "t_load": 3.676412954926491,
+        "first_frame_s": 4546.540448036976,
+        "frame_complete": [
+          4546.540448036976,
+          9264.618007053621,
+          14013.271014352329
+        ],
+        "frame_complete_step": [
+          13506328,
+          27507770,
+          41598293
+        ],
+        "frame_interval_s": [
+          null,
+          4718.077559016645,
+          4748.653007298708
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 6,
+            "injected_step": 13506476,
+            "injected_wall_s": 4546.5569856874645,
+            "committed_step": 14053723,
+            "committed_wall_s": 4730.811132433824,
+            "first_frame_using_state": 1,
+            "first_frame_using_state_completion_s": 9264.618007053621
+          },
+          {
+            "index": 1,
+            "value": 256,
+            "injected_step": 27507870,
+            "injected_wall_s": 9264.631186115555,
+            "committed_step": 28056779,
+            "committed_wall_s": 9449.761005100794,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 14013.271014352329
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 41598470,
+            "injected_wall_s": 14013.284783906303,
+            "committed_step": 42148079,
+            "committed_wall_s": 14198.840065769851,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 14255.301524792798,
+        "tail_s": 185.56918913684785,
+        "tail_steps": 549889
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "23291f6f4d5097189f33c94b27e338050696f7d8",
+        "git_dirty": false,
+        "source_path": "examples/doom4.c",
+        "source_sha256": "e3354c5d7c2d28555d53499031502a70239f10f140fe3a4cd5aa4ea43823856f",
+        "circuit_sha256": "2bdfd25d7034f2ab8ffc2cb79fdb30a3d7f7cd14d14cdb1879876ca0a954a58e",
+        "inputs": [
+          6,
+          256,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 1,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 1299675,
+        "edges_per_node": 2598258,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 236,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 4214818.2,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 56.41655520256609,
+          "t_load": 3.676412954926491,
+          "first_frame_s": 4546.540448036976,
+          "frame_complete": [
+            4546.540448036976,
+            9264.618007053621,
+            14013.271014352329
+          ],
+          "frame_complete_step": [
+            13506328,
+            27507770,
+            41598293
+          ],
+          "frame_interval_s": [
+            null,
+            4718.077559016645,
+            4748.653007298708
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 6,
+              "injected_step": 13506476,
+              "injected_wall_s": 4546.5569856874645,
+              "committed_step": 14053723,
+              "committed_wall_s": 4730.811132433824,
+              "first_frame_using_state": 1,
+              "first_frame_using_state_completion_s": 9264.618007053621
+            },
+            {
+              "index": 1,
+              "value": 256,
+              "injected_step": 27507870,
+              "injected_wall_s": 9264.631186115555,
+              "committed_step": 28056779,
+              "committed_wall_s": 9449.761005100794,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 14013.271014352329
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 41598470,
+              "injected_wall_s": 14013.284783906303,
+              "committed_step": 42148079,
+              "committed_wall_s": 14198.840065769851,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 14255.301524792798,
+          "tail_s": 185.56918913684785,
+          "tail_steps": 549889
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom4-small_baseline_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "baseline",
+      "repeat": 0,
+      "comparison": "simulator-only",
+      "repeat_summary": {
+        "wall_s": {
+          "median": 14255.301524792798,
+          "min": 14255.301524792798,
+          "max": 14255.301524792798
+        },
+        "first_wall_s": {
+          "median": 4546.540448036976,
+          "min": 4546.540448036976,
+          "max": 4546.540448036976
+        },
+        "first_neural_s": {
+          "median": 1350.6328,
+          "min": 1350.6328,
+          "max": 1350.6328
+        }
+      },
+      "headline": {
+        "wall_s": 14255.301524792798,
+        "first_wall_s": 4546.540448036976,
+        "first_neural_s": 1350.6328
+      }
+    },
+    {
+      "level": "small",
+      "workload": "doom4-small",
+      "config": {
+        "backend": "torch-fast",
+        "device": "cuda",
+        "dtype": "float64",
+        "mul": "array",
+        "copies": 8,
+        "pacing": "host",
+        "datapath": "specialized",
+        "graph_steps": 94,
+        "observe_every": null,
+        "delivery": "auto"
+      },
+      "first_neural_s": 178.2221,
+      "first_wall_s": 3902.713162404485,
+      "interval_neural_s": [
+        229.6206,
+        232.087
+      ],
+      "interval_wall_s": [
+        5010.323139459826,
+        5059.810024122708
+      ],
+      "neural_s": 694.913,
+      "wall_s": 15229.584780248813,
+      "wall_neural": 21.91581504483124,
+      "neurons": 1299675,
+      "edges": 2598258,
+      "spikes": null,
+      "spike_count_method": "not captured for render",
+      "wrong": 0,
+      "missing": 0,
+      "duplicates": 0,
+      "invalid": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "host_stalls": false,
+      "truncated": false,
+      "timing": {
+        "t_compile": 56.29224255960435,
+        "t_load": 25.392670644447207,
+        "first_frame_s": 3902.713162404485,
+        "frame_complete": [
+          3902.713162404485,
+          8913.036301864311,
+          13972.846325987019
+        ],
+        "frame_complete_step": [
+          1782221,
+          4078427,
+          6399297
+        ],
+        "frame_interval_s": [
+          null,
+          5010.323139459826,
+          5059.810024122708
+        ],
+        "runtime_inputs": [
+          {
+            "index": 0,
+            "value": 6,
+            "injected_step": 1782326,
+            "injected_wall_s": 3902.724093371071,
+            "committed_step": 2329567,
+            "committed_wall_s": 5096.348055899143,
+            "first_frame_using_state": 2,
+            "first_frame_using_state_completion_s": 13972.846325987019
+          },
+          {
+            "index": 1,
+            "value": 256,
+            "injected_step": 4078558,
+            "injected_wall_s": 8913.052783782594,
+            "committed_step": 4627477,
+            "committed_wall_s": 10110.225296463817,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          },
+          {
+            "index": 2,
+            "value": 0,
+            "injected_step": 6399418,
+            "injected_wall_s": 13972.864218749106,
+            "committed_step": 6949026,
+            "committed_wall_s": 15173.247411028482,
+            "first_frame_using_state": null,
+            "first_frame_using_state_completion_s": null
+          }
+        ],
+        "t_total": 15229.584780248813,
+        "tail_s": 1200.4012809805572,
+        "tail_steps": 549833
+      },
+      "profile": {
+        "profiled_steps": 0,
+        "regions": {}
+      },
+      "profiled": false,
+      "reproducibility": {
+        "git_commit": "01e64861032bb05744ffbf17e9ad8a305b13258c",
+        "git_dirty": false,
+        "source_path": "examples/doom4.c",
+        "source_sha256": "e3354c5d7c2d28555d53499031502a70239f10f140fe3a4cd5aa4ea43823856f",
+        "circuit_sha256": "2bdfd25d7034f2ab8ffc2cb79fdb30a3d7f7cd14d14cdb1879876ca0a954a58e",
+        "inputs": [
+          6,
+          256,
+          0
+        ],
+        "initial_state": null,
+        "pacing": "host",
+        "mul": "array",
+        "copies": 8,
+        "width": 8,
+        "height": 5,
+        "frames_requested": 3,
+        "neurons_per_node": 1299675,
+        "edges_per_node": 2598258,
+        "model_params": {
+          "dt": 0.1,
+          "E_L": -52.0,
+          "V_th": -45.0,
+          "V_reset": -52.0,
+          "tau_m": 20.0,
+          "tau_s": 5.0,
+          "t_ref": 2.2,
+          "w_syn": 0.275,
+          "default_delay_ms": 1.8
+        },
+        "perturbation": null,
+        "seed": null,
+        "backend": "torch-fast",
+        "simulator": "FastSim",
+        "device": "cuda",
+        "dtype": "float64",
+        "hardware": {
+          "platform": "Linux-5.14.0-503.40.1.el9_5.x86_64-x86_64-with-glibc2.34",
+          "machine": "x86_64",
+          "cpu_brand": "x86_64",
+          "gpu_name": "NVIDIA H200 NVL",
+          "memory_bytes": 405008400384
+        },
+        "software": {
+          "python": "3.12.14",
+          "torch": "2.6.0+cu124",
+          "numpy": "2.5.3"
+        },
+        "cmdline": [
+          "/home/jjg130230/drosophilos/drosophilos/bench/perf_campaign.py",
+          "--levels",
+          "small",
+          "--device",
+          "cuda",
+          "--backend",
+          "torch-fast",
+          "--graph-steps",
+          "94",
+          "--datapath",
+          "specialized",
+          "--out",
+          "data/perf/juno-h200-q4-small-fast-specialized"
+        ],
+        "datapath": "specialized",
+        "backend_selected_by_default": false,
+        "simulator_effective": "FastSim",
+        "simulator_mode": {
+          "observe_every": 94,
+          "graph_steps": 94,
+          "graph_active": true,
+          "graph_fallback_reason": null,
+          "delivery": "sparse CSR (torch.float64)",
+          "delays": [
+            18
+          ]
+        },
+        "kernel_cells": 236,
+        "frames_completed": 3,
+        "wrong": 0,
+        "missing": 0,
+        "duplicates": 0,
+        "invalid_outputs": 0,
+        "faults": 0,
+        "timeouts": 0,
+        "host_stalls": false,
+        "truncated": false,
+        "neural_ms": 694913.0,
+        "profiled_steps": 0,
+        "profile": {
+          "profiled_steps": 0,
+          "regions": {}
+        },
+        "timing": {
+          "t_compile": 56.29224255960435,
+          "t_load": 25.392670644447207,
+          "first_frame_s": 3902.713162404485,
+          "frame_complete": [
+            3902.713162404485,
+            8913.036301864311,
+            13972.846325987019
+          ],
+          "frame_complete_step": [
+            1782221,
+            4078427,
+            6399297
+          ],
+          "frame_interval_s": [
+            null,
+            5010.323139459826,
+            5059.810024122708
+          ],
+          "runtime_inputs": [
+            {
+              "index": 0,
+              "value": 6,
+              "injected_step": 1782326,
+              "injected_wall_s": 3902.724093371071,
+              "committed_step": 2329567,
+              "committed_wall_s": 5096.348055899143,
+              "first_frame_using_state": 2,
+              "first_frame_using_state_completion_s": 13972.846325987019
+            },
+            {
+              "index": 1,
+              "value": 256,
+              "injected_step": 4078558,
+              "injected_wall_s": 8913.052783782594,
+              "committed_step": 4627477,
+              "committed_wall_s": 10110.225296463817,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            },
+            {
+              "index": 2,
+              "value": 0,
+              "injected_step": 6399418,
+              "injected_wall_s": 13972.864218749106,
+              "committed_step": 6949026,
+              "committed_wall_s": 15173.247411028482,
+              "first_frame_using_state": null,
+              "first_frame_using_state_completion_s": null
+            }
+          ],
+          "t_total": 15229.584780248813,
+          "tail_s": 1200.4012809805572,
+          "tail_steps": 549833
+        },
+        "out": "data/perf/juno-h200-q4-small-fast-specialized_doom4-small_copies-8_0"
+      },
+      "simulator": "FastSim",
+      "simulator_mode": {
+        "observe_every": 94,
+        "graph_steps": 94,
+        "graph_active": true,
+        "graph_fallback_reason": null,
+        "delivery": "sparse CSR (torch.float64)",
+        "delays": [
+          18
+        ]
+      },
+      "config_name": "copies-8",
+      "repeat": 0,
+      "comparison": "simulator-only",
+      "repeat_summary": {
+        "wall_s": {
+          "median": 15229.584780248813,
+          "min": 15229.584780248813,
+          "max": 15229.584780248813
+        },
+        "first_wall_s": {
+          "median": 3902.713162404485,
+          "min": 3902.713162404485,
+          "max": 3902.713162404485
+        },
+        "first_neural_s": {
+          "median": 178.2221,
+          "min": 178.2221,
+          "max": 178.2221
+        }
+      },
+      "headline": {
+        "wall_s": 15229.584780248813,
+        "first_wall_s": 3902.713162404485,
+        "first_neural_s": 178.2221
+      }
+    }
+  ],
+  "complete": true,
+  "configurations_done": 4,
+  "configurations_planned": 4
+}
