@@ -88,6 +88,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             relight_requests=campaign.get("relight_requests", True),
             powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
             commit_reignite=campaign.get("commit_reignite", False),
+            true_guards=campaign.get("true_guards", False),  # recorded since 2026-09-23; older guards accepted dark pairs
             retry_clear=campaign.get("retry_clear", False),
             start_relight_hops=campaign.get("start_relight_hops", 0),  # recorded since 2026-09-20; older builds relit at START
             request_clear_pulses=campaign.get("request_clear_pulses", int(pulses)),  # older builds: the kill train's own count

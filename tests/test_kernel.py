@@ -226,7 +226,8 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     try:
         pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=True, start_relight_hops=0, request_clear_pulses=3)
+                            consts={"k": 3}, relight_requests=True, start_relight_hops=0,
+                            request_clear_pulses=3, true_guards=False)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert pl.net.n < 30000
@@ -302,14 +303,16 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     from drosophilos.sim.ref64 import RefSim
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
-    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
+    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False,
+                            true_guards=False)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
     assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # 2026-09-20: commit idle rail's second ignition (+16/+17)
     from drosophilos.lib import control
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
     try:
-        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0, request_clear_pulses=3)
+        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0,
+                            request_clear_pulses=3, true_guards=False)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     cell = pl.cells[0]
@@ -411,7 +414,8 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     from drosophilos.sim.ref64 import RefSim
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=False)  # §10.3 count control
+                            consts={"k": 3}, relight_requests=False,
+                            true_guards=False)  # §10.3 count control; veto-only guard preserves the measured netlist
     assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
     from drosophilos.lib import control
@@ -421,7 +425,8 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
         pl = build_pipeline(PARAMS, 1,
                             [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                               "trigger": ["input", "input:other"]}],
-                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0, request_clear_pulses=3)
+                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0,
+                            request_clear_pulses=3, true_guards=False)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert 2 * pl.net.n < 30000

@@ -118,7 +118,8 @@ def add_veto_neuron(net: Netlist, drive: Drive, name: str, taps: list[int]) -> i
 
 
 def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: list[int], target: Latch,
-                   veto_strength: float = 0.5, veto_neurons: list[int] = ()) -> int:
+                   veto_strength: float = 0.5, veto_neurons: list[int] = (),
+                   require: list[int] = ()) -> int:
     """driver AND NOT(any veto), evaluated once at the driver's rise, as a one-shot ignition of
     `target`. The driver is a latch train (so the relay's own feed-forward inhibition and the
     target's train keep it to one pulse); each veto is a latch train that, while live, holds
@@ -132,8 +133,35 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
     again 55 ms later. 2.2x would block on one spike but paralyse the relay for ~90 ms).
     Dual-rail supplies NOT for free: to compute a AND b with b the earlier operand, veto with
     b's other rail. No hold from the target is needed: the driver is a latch train, which the
-    relay's own source inhibition already turns into one shot."""
-    relay = add_edge_relay(net, drive, name, driver)
+    relay's own source inhibition already turns into one shot.
+
+    `require` adds sustained rate-mode inputs that must be live when the driver's first spike
+    arrives. With a requirement the relay gets 0.65 of the single-pulse need from `driver`
+    and 0.65 of the sustained-train need from each required tap. The guarded-pulse caller
+    supplies exactly one tap, so its nominal threshold fractions are 0.65 (pulse alone),
+    0.65 (rail alone), and 1.30 (pulse + rail): each singleton is 35 % below threshold and
+    the coincidence is 30 % above. The initially suggested 0.60 pulse missed at the
+    weak/high-threshold corner; raising it to 0.65 passed without pulse-only or rail-only
+    leakage. At the campaign mix's +/-4 % edge weights and +/-1 mV drift of the roughly
+    15 mV threshold gap, the strongest singleton is
+    0.65*1.04/(14/15) = 0.724 and the weakest coincidence is
+    1.30*0.96/(16/15) = 1.170, so neither crosses threshold. The firing-side noise margin is
+    17 percentage points; retaining a full 25 % on both sides after stacking both worst
+    cases is mathematically impossible with two inputs that must each remain 25 % below
+    threshold. The RefSim guard regression measures both corners rather than relying on
+    these steady-state sums."""
+    if require:
+        # This is add_edge_relay's standard one-shot circuit, with only the driver -> relay
+        # edge reduced so the required live train supplies the rest of the threshold drive.
+        relay = net.neuron(f"{name}.edge")
+        inh = net.neuron(f"{name}.edge_inh")
+        net.synapse(driver, relay, int(round(0.65 * drive.single_need)))
+        net.synapse(driver, inh, drive.pulse)
+        net.synapse(inh, relay, -int(round(2.2 * drive.loop)))
+        for tap in require:
+            net.synapse(tap, relay, drive.and_in)
+    else:
+        relay = add_edge_relay(net, drive, name, driver)
     if vetoes:
         v = net.neuron(f"{name}.veto")
         for t in vetoes:

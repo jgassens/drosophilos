@@ -470,3 +470,44 @@ campaigns: compare runs on one backend, or run `FastSim` with `--observe-every 1
 of backend is a change of realization, not a re-run. Copy 77's wrong values did not occur on
 the `FastSim` realization, so the mechanism is timing-sensitive — the capture on `TorchSim`
 (413584) is the one to read.
+
+### True-rail guards (2026-09-23)
+
+`guarded_pulse` now qualifies each delayed rise with the other pair's live true rail as
+well as vetoing on its false rail. The required-input form of `add_veto_relay` gives the
+delayed pulse 0.65 of the single-spike threshold need and the sustained rail 0.65 of the
+rate threshold need. The three nominal sums are therefore **0.65 pulse alone, 0.65 rail
+alone, 1.30 together**: 35 % below threshold for either singleton and 30 % above for the
+coincidence. The first 0.60-pulse trial missed the weak corner. With the chosen weights,
+the stacked mix-B bounds are 0.724 for the strongest singleton (+4 % weight, threshold gap
+reduced from about 15 to 14 mV) and 1.170 for the weakest coincidence (-4 %, gap raised to
+16 mV). Thus neither corner crosses threshold; the RefSim test exercises both rather than
+assuming the steady-state arithmetic. A full 25 % remains nominally on both sides (35 % /
+30 %); after stacking both worst cases the firing-side reserve is 17 %. Keeping a full 25 %
+on both sides after stacking both extremes is not possible with two inputs that must each
+remain at least 25 % below threshold.
+
+The two delayed paths can both qualify within one transaction: with START's false-rail
+re-light delayed five hops, the second landed about 15 ms after the first while START's kill
+train was still extinguishing the true rail. A shared feed-forward inhibitor now takes both
+qualified relays in parallel with the target. It adds no hop to the first event and suppresses
+the second. On the two-cell RefSim timing check, reader START followed the held-back request
+in 190.4 ms with true guards and 190.6 ms with the old veto-only guards.
+
+The feature is `build_pipeline(true_guards=True)`. Campaign JSON records `true_guards: true`;
+`stall_diag` uses `campaign.get("true_guards", False)`, so old captures rebuild with their
+veto-only netlists. Each guarded conjunction adds one inhibitor neuron and five synapses
+(two required-rail inputs and three shared-inhibitor edges). Measured netlists:
+
+| kernel | veto-only | true guards | delta |
+|---|---:|---:|---:|
+| 1-bit one-cell MOV, §10.3 requests | 990 / 1,680 | 993 / 1,695 | +3 / +15 |
+| 4-bit MULP, §10.3 requests | 7,188 / 12,487 | 7,197 / 12,532 | +9 / +45 |
+| `tick2.c` | 28,669 / 51,324 | 28,719 / 51,574 | +50 / +250 |
+
+The historical timing regressions explicitly pass `true_guards=False`; their pinned 990 /
+1,680 and 7,188 / 12,487 sizes consequently remain unchanged. The new regressions show a
+dark commit-request pair committing twice under that legacy flag and once with true guards,
+and all four MULP rows START exactly three times for three tokens with
+`start_relight_hops=5`. No campaign-scale or cluster run was made here; the next integration
+step remains the seed 108--110 campaign with the five-hop re-light and four-pulse clear.

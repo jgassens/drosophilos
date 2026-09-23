@@ -136,25 +136,40 @@ class _N:
 
 
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
-                  extra_vetoes: tuple[int, ...] = ()) -> None:
+                  extra_vetoes: tuple[int, ...] = (), true_guards: bool = True) -> None:
     """One pulse on `target` when A and B are both true, issued at the later of their rises: A
     and B are dual-rail pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
     d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
     rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
     ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
     its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
-    are within the overlap; the target's consumers take a doublet as one event. `extra_vetoes`
-    recheck source-false rails hidden behind a chained guard's cached passed pair."""
+    are within the overlap. With `true_guards`, each relay also requires the other pair's
+    true rail as a rate-mode input, so a pair dark on both rails no longer passes merely
+    because its false veto is absent. A shared feed-forward inhibitor collapses the two
+    ordering paths: with a delayed START re-light, both paths can otherwise fire about 15 ms
+    apart while the first START's kill train is still extinguishing the true rails, producing
+    two observable STARTs for one conjunction. It is driven in parallel with `target`, so it
+    suppresses the second path without adding a hop to the first path's latency.
+    `extra_vetoes` recheck source-false rails hidden behind a chained guard's cached passed
+    pair. `true_guards=False` rebuilds measurements from before 2026-09-23."""
     a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
     b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
-    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target))
-    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
+    pa = add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target),
+                        require=[B[1].u] if true_guards else [])
+    pb = add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target),
+                        require=[A[1].u] if true_guards else [])
+    if true_guards:
+        once_inh = net.neuron(f"{name}.once_inh")
+        net.synapse(pa, once_inh, drive.relay_in)
+        net.synapse(pb, once_inh, drive.relay_in)
+        net.synapse(once_inh, target, -int(round(2.2 * drive.loop)))
 
 
 REQUEST_CLEAR_PULSES = 3  # the DONE-side clear of a request's false rail; 4 was tried (see build_pipeline)
 
 
-def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
+def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list,
+                reset_pulse: int, true_guards: bool = True) -> None:
     """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse).
 
     Intermediate passed pairs are only a cache: the final guard also vetoes on every original
@@ -170,11 +185,12 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
             # original inputs it summarises, whose false rails have been stable for the whole
             # completed run when a stale passed pair meets a later rise of `pr`.
             recheck = tuple(p[0].u for p in pairs[: k + 1]) if k else ()
-            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck)
+            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck,
+                          true_guards=true_guards)
             return
         passed = add_kill_pair(net, drive, f"{name}.p{k}")
         pk = net.neuron(f"{name}.p{k}.pulse")
-        guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, pk)
+        guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, pk, true_guards=true_guards)
         net.synapse(pk, passed[1].u, drive.ignite)
         add_kill_train(net, drive, f"{name}.p{k}.kill0", pk, [passed[0]])
         net.synapse(reset_pulse, passed[0].u, drive.ignite)
@@ -183,10 +199,11 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
         cur = passed
     always = add_kill_pair(net, drive, f"{name}.always")  # one pair: guard it against a constant true
     image.append(always[1])
-    guarded_pulse(net, drive, f"{name}.g", cur, always, target)
+    guarded_pulse(net, drive, f"{name}.g", cur, always, target, true_guards=true_guards)
 
 
-def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulses: list[int], image: list) -> tuple[list, int]:
+def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulses: list[int], image: list,
+                    true_guards: bool = True) -> tuple[list, int]:
     """A one-hot ring counter of K lines per advance source, and one wrap pulse.
 
     Neural pacing counts a phase's tokens; the count was a state cell fed back through an
@@ -238,7 +255,7 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
         image.append(pr[0])
         wrapped.append(pr)
     pulse = net.neuron(f"{name}.join.pulse")
-    _chain_true(net, drive, f"{name}.join", wrapped, pulse, image, pulse)
+    _chain_true(net, drive, f"{name}.join", wrapped, pulse, image, pulse, true_guards=true_guards)
     for pr in wrapped:
         net.synapse(pulse, pr[0].u, drive.ignite)
     add_kill_train(net, drive, f"{name}.join.kill", pulse, [pr[1] for pr in wrapped])
@@ -254,7 +271,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
                    retry_clear: bool = False, start_relight_hops: int = 0,
-                   request_clear_pulses: int | None = None) -> Pipeline:
+                   request_clear_pulses: int | None = None, true_guards: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -270,7 +287,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     is the standard build: request-priority pairs and delayed, live-rail-vetoed repair of
     dark no-request rails (§10.5). False selects the §10.3 request kill pairs and netlist.
     `datapath="specialized"` replaces fixed AND/OR/XOR/MOV and LOAD cells' general ALU,
-    unit-select rails and mux with their single resident unit. Other cells remain generic."""
+    unit-select rails and mux with their single resident unit. Other cells remain generic.
+    `true_guards=True` requires both the true rail and the absence of the false rail at every
+    go/commit guard; false rebuilds the older veto-only timing for recorded campaigns."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     drive = drive or Drive.from_params(params)
@@ -461,7 +480,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 assert cells[src].init is not None, f"{c.name} reads {src} before it is written: it needs an init"
             else:
                 image.append(pair[0])
-        _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
+        _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start,
+                    true_guards=true_guards)
         for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
         # START re-lights each request's false rail ("consumed"). `start_relight_hops` (default
@@ -745,7 +765,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             net.synapse(again, creq[0].u, drive.ignite)
         add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])
         frees = [[r.reqs[pname][1], r.reqs[pname][0]] for r in readers]  # true when the reader has no pending request
-        _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse)
+        _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse,
+                    true_guards=true_guards)
         return pulse
 
     for c in order:
@@ -766,7 +787,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             if mode == "wrap":
                 rs = ring_specs[name_]
                 advs = [cells[t].reg.done_relay for t in rs["trigger"]]
-                rings[st], end = add_pacing_ring(net, drive, f"PHASE.{st}.ring", rs["k"], advs, image)
+                rings[st], end = add_pacing_ring(net, drive, f"PHASE.{st}.ring", rs["k"], advs, image,
+                                                 true_guards=true_guards)
             else:
                 src_done = cells[name_].reg.done_relay if name_ is not None else inputs[st][0].done_relay
                 end = add_delay_chain(net, drive, f"PHASE.{st}.endd", src_done, 6)
@@ -786,7 +808,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             net.synapse(pulse, creq[0].u, drive.ignite)
             add_kill_train(net, drive, f"{key}.commit.kill", pulse, [creq[1]])
             frees = [[r.reqs[key][1], r.reqs[key][0]] for r in readers]
-            _chain_true(net, drive, f"{key}.cg", [creq] + frees + [ok_pairs[st]], pulse, image, pulse)
+            _chain_true(net, drive, f"{key}.cg", [creq] + frees + [ok_pairs[st]], pulse, image, pulse,
+                        true_guards=true_guards)
         else:
             gate_commit(key, creq, reg.commit_in, readers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]

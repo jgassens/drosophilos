@@ -40,7 +40,8 @@ def test_probes_and_capture_on_a_real_multiplier_cell(op):
     spec = [{"name": "m", "op": op, "a": "input", "b": ("const", "k")}]
     ks = KernelSpec(spec, {"k": 3}, {}, "input", 4)
     ks.outputs = ["m"]
-    pl = build_pipeline(P, 4, spec, consts={"k": 3}, outputs=["m"])
+    pl = build_pipeline(P, 4, spec, consts={"k": 3}, outputs=["m"],
+                        start_relight_hops=5 if op == "MULP" else 0)
     ids, per_cell = mul_diag.capture_ids(pl)
     cells = mul_diag.multiplier_cells(pl)
     assert cells and all(c.op in mul_diag.MUL_OPS for c in cells)
@@ -66,5 +67,10 @@ def test_probes_and_capture_on_a_real_multiplier_cell(op):
         assert row["done"] is not None and row["commit"] is not None and row["completion"] < row["commit"] <= row["done"]
     assert info["summary"]["first_result_ms"] is not None
     if op == "MULP":
+        # The five-hop ordering fix opens a both-dark request window. Veto-only guards used
+        # to pass it and START each row 4--5 times for these three tokens.
+        assert {c.name: report["cells"][c.name]["summary"]["tokens"] for c in cells} == {
+            c.name: len(tokens) for c in cells
+        }
         (base_stats,) = report["row_overlap"].values()
         assert base_stats["rows"] == 4 and base_stats["tokens"] == len(tokens)
