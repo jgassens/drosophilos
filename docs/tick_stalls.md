@@ -470,3 +470,24 @@ campaigns: compare runs on one backend, or run `FastSim` with `--observe-every 1
 of backend is a change of realization, not a re-run. Copy 77's wrong values did not occur on
 the `FastSim` realization, so the mechanism is timing-sensitive — the capture on `TorchSim`
 (413584) is the one to read.
+
+### True-rail guards, first attempt (2026-09-23, openai-sol, commit `330fc52`, not merged)
+
+Guards made to require the other pair's true rail (driver pulse at 0.65 × single need plus the
+rail's train at 0.65 × threshold; a shared `once_inh` against doublets). Every test passed,
+including the slow suites. The independent review (claude-opus) predicted a new stall: with
+that weak driver the relay needs ~75–85 ms to shed the veto's hyperpolarisation, and when
+pair B turns true 7–36 ms before pair A neither ordering path gets it — ~2 % of mix-B
+copies lose the conjunction in an isolated-guard Monte Carlo — and a dark pair still passes
+~1 in 1,000 through the driver train's second spike; the docstring's margins used a 15 mV
+gap where the real one is ~7 mV. The campaigns agreed and then some (Juno 421408–421411):
+
+| seed | ok | wrong | missing | stalled copies |
+|---|---:|---:|---:|---:|
+| 108 | 1,451 | 0 | 149 | 15 |
+| 109 | 1,433 | 1 | 166 | 17 |
+| 110 | 1,439 | 0 | 161 | 17 |
+
+16 % of copies against the shipped build's 4 %. Sent back for a fix round (openai-astra) with
+the reviewer's findings and measured targets: 0 lost conjunctions in 3,000 over −60..+60 ms
+offsets, 0 dark-pair passes in 10,000, latency within 10 ms of the old guard.
