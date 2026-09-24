@@ -119,6 +119,7 @@ class Pipeline:
     outputs: list = field(default_factory=list)  # output cells
     inputs: dict = field(default_factory=dict)  # stream name -> (StagedRegister, producer P)
     datapath: str = "generic"  # requested fixed-operation datapath implementation
+    build_options: dict = field(default_factory=dict)  # effective build flags recorded by campaigns
 
     @property
     def output(self) -> Cell:
@@ -463,11 +464,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 # are a source cycle apart (>86 ms), so this clear is ready for each one.
                 received = net.neuron(f"{req_name}.received")
                 net.synapse(trig, received, drive.ignite)
-                # Four pulses (REQUEST_CLEAR_PULSES) on this train alone: a request rail whose
-                # loop came out fast under noise slips through three at some phases (seed-108
-                # copy 8, seed-110 copy 73); the fourth is safe here because START's re-light
-                # of the same rail now waits for the train to end (below). Elsewhere the trains
-                # keep three pulses: a fourth everywhere lost the control machine's 45 ms
+                # Kernel-built kill trains use four pulses by default, including this request
+                # clear; the machine's own trains keep three pulses. A request rail whose loop
+                # came out fast under noise slips through three at some phases (seed-108 copy 8,
+                # seed-110 copy 73); the fourth is safe here because START's re-light of the same
+                # rail now waits for the train to end (below). A fourth everywhere lost the control machine's 45 ms
                 # interrupt reload (tests/test_machine.py).
                 add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]],
                                pulses=REQUEST_CLEAR_PULSES if request_clear_pulses is None else request_clear_pulses)
@@ -498,7 +499,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     # and a false rail that then fails to re-light at START is repaired by the
                     # ACT^d relight below
                     add_kill_train(net, drive, f"{req_name}.k1b", gate, [pair[0]], strength=1.5,
-                                   pulses=kernel_kill_pulses)
+                                   pulses=3)  # as measured
             if stream_of(src) is None and src not in built:  # feedback: the state is there at power-up
                 c.feedback.add(src)
                 image.append(pair[1])
@@ -510,7 +511,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
         # START re-lights each request's false rail ("consumed"). `start_relight_hops` (default
-        # 5) is a recorded experiment, OFF: with the re-light 5 hops later and a
+        # 5) is enabled by the true-rail guards: with the re-light 5 hops later and a
         # 4 x 0.75 train everywhere, seeds 108-110 ran 300/300 copies clean (Juno 414205-7),
         # but a delay of 3 hops or more makes a cell START a second time ~32 ms after the
         # first — the go guard's delayed idle path lands inside the window where both request
@@ -846,6 +847,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
+    pl.build_options = {"powerup_veto": powerup_veto, "commit_reignite": commit_reignite,
+                        "retry_clear": retry_clear, "start_relight_hops": start_relight_hops,
+                        "request_clear_pulses": REQUEST_CLEAR_PULSES if request_clear_pulses is None else request_clear_pulses,
+                        "kernel_kill_pulses": kernel_kill_pulses, "true_guards": true_guards}
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 

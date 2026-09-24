@@ -137,7 +137,7 @@ def main(argv=None):
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
-           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH], "powerup_veto": True, "commit_reignite": True, "true_guards": True, "retry_clear": False, "start_relight_hops": 5, "request_clear_pulses": 4, "kernel_kill_pulses": 4,
+           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH],
            "true_guard_version": TRUE_GUARD_VERSION,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
            "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
@@ -146,6 +146,7 @@ def main(argv=None):
            "per_node": per_node, "reference": ref, "tokens_list": list(tokens), "output_cells": list(ks.outputs),
            "outputs": [{o: [[int(s_), (None if v is None else int(v))] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
+    rec.update(pl.build_options)
     print(json.dumps(rec, indent=1), flush=True)
     if a.out:
         json.dump(rec, open(a.out, "w"), indent=1)
