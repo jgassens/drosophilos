@@ -227,7 +227,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     try:
         pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=True, start_relight_hops=0,
-                            request_clear_pulses=3, true_guards=False)
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=False)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert pl.net.n < 30000
@@ -308,12 +308,12 @@ def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
                             true_guards=False)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
-    assert (legacy.net.n, legacy.net.nnz) == (995, 1685)  # 2026-09-24: default five-hop START re-light adds 5 neurons/synapses; 2026-09-20: commit idle rail's second ignition (+16/+17)
+    assert (legacy.net.n, legacy.net.nnz) == (1008, 1711)  # 2026-09-24: kernel-wide fourth kill pulse adds 13 neurons / 26 synapses; default five-hop START re-light adds 5 neurons/synapses; 2026-09-20: commit idle rail's second ignition (+16/+17)
     from drosophilos.lib import control
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
     try:
         pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0,
-                            request_clear_pulses=3, true_guards=true_guards)
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     cell = pl.cells[0]
@@ -419,7 +419,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False,
                             true_guards=False)  # §10.3 count control; veto-only guard preserves the measured netlist
-    assert (legacy.net.n, legacy.net.nnz) == (7208, 12507)  # 2026-09-24: default five-hop START re-light adds 20 neurons/synapses; 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
+    assert (legacy.net.n, legacy.net.nnz) == (7245, 12581)  # 2026-09-24: kernel-wide fourth kill pulse adds 37 neurons / 74 synapses; default five-hop START re-light adds 20 neurons/synapses; 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
     from drosophilos.lib import control
     saved = control.KILL_PULSES, control.KILL_STRENGTH
@@ -429,7 +429,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
                             [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                               "trigger": ["input", "input:other"]}],
                             consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0,
-                            request_clear_pulses=3, true_guards=true_guards)
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert 2 * pl.net.n < 30000
