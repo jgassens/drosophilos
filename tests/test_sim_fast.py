@@ -239,10 +239,18 @@ def test_batched_runner_backends_agree_on_a_kernel():
 
 def test_single_node_runner_reads_a_fastsim_through_the_observer():
     pl = _mov_kernel()
-    outs_r, _, st_r = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000)
-    outs_f, sim_f, st_f = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000, sim=FastSim(pl.net.topology(), PARAMS))
+    # A buffered observer deliberately changes host pacing: READY can reach the runner up to
+    # one observation block late.  Compare simulator arithmetic under the same per-step host
+    # schedule; the default buffered-observer transaction contract is covered above.
+    outs_r, sim_r, st_r = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000, full_trace=True)
+    outs_f, sim_f, st_f = run_pipeline(
+        pl, PARAMS, [1, 5], max_ms=5000, sim=FastSim(pl.net.topology(), PARAMS),
+        full_trace=True, observe_every=1,
+    )
     assert st_r["simulator"] == "RefSim" and st_f["simulator"] == "FastSim"
     assert outs_r == outs_f
+    assert st_r["load_steps"] == st_f["load_steps"]
+    assert sim_r.trace == sim_f.trace
 
 
 def test_capture_spikes_agree_between_backends():

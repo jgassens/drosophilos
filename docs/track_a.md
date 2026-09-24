@@ -80,9 +80,15 @@ MOV kernel, 2 copies × 3 tokens (`tests/test_sim_fast.py::test_batched_runner_b
 
 The protocol is host-paced (a token goes in after READY, whenever the host gets to it), so a
 late load only shifts the host schedule; the decoded transactions are the same. The output
-steps did not move here because the next transaction is gated by the cell's own period, not by
-the load. `observe_every=1` reproduces TorchSim's schedule exactly and is what the trace-identity
-tests use; the default K is the decode window.
+steps did not move in that measurement because the next transaction was gated by the cell's own
+period, not by the load. That is not a timing guarantee: after the true-rail guard merge, the
+single-node two-token MOV test measured RefSim and per-step FastSim loads at `[3005, 9473]` and
+outputs at `[16945, 26754]`, while the default 94-step FastSim observer delayed the second load
+to 9491 and the second output to 26755 (the values remained `1, 5`). The first spike difference
+was consequently the externally driven input rails at step 9497, not a numerical difference in
+the simulators. `observe_every=1` reproduces RefSim/TorchSim's host schedule and full spike trace
+exactly and is what timing/trace-identity tests use; the default K is the transaction-level
+decode window.
 
 ## A3 — the fused step, and why it is bit-identical
 
@@ -102,8 +108,9 @@ Same expressions in the same floating-point order as `TorchSim`:
 - Refractory hold, silencing, per-node `V_th`/`bias`/`gain`/`silenced`, per-node quanta,
   delayed events and external events follow schedule.md §5 order.
 
-Verified (`tests/test_sim_fast.py`, CPU): spike traces and recorded V/g trajectories identical
-to `RefSim` and `TorchSim` in float64 and to `TorchSim` in float32; on the `small_circuit`
+Verified (`tests/test_sim_fast.py`, CPU, under identical external-event schedules): spike traces
+and recorded V/g trajectories identical to `RefSim` and `TorchSim` in float64 and to `TorchSim`
+in float32; on the `small_circuit`
 kernels, on a two-delay topology (grouped path), with per-node quanta (scatter path), with
 stray input, through snapshot/restore, and for a compiled MOV kernel through
 `run_pipeline_batched` on both backends (same `(step, value)` outputs, same load steps, same
