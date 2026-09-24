@@ -511,3 +511,12 @@ delay and the four-pulse request clear safe. Next measurement: this commit with
 `start_relight_hops=5` and `REQUEST_CLEAR_PULSES=4` (the combination that gave 300/300 with
 the old guards and the global fourth pulse), which must also keep the multiplier rows at one
 START per token and the control machine's interrupt reload.
+
+### True-rail guards + re-light delay 5 + four-pulse request clear (2026-09-24, `9661b2e`, under test)
+
+Juno 422219–422221: seed 108 1 stalled copy, 109 5, 110 8 — 14 of 300 (4.7 %), 0 wrong
+values, every suite passing (multiplier rows START once per token, the machine's interrupt
+reload intact). Not the 300/300: that run had the fourth pulse on *every* kill train, not on
+the request clear alone, and the machine's 45 ms interrupt reload is the only known thing a
+fourth pulse breaks. Next: four pulses on the kernel's kill trains only (`build_pipeline`
+owns them), the machine's unchanged.
