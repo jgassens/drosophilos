@@ -226,7 +226,8 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     try:
         pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=True, start_relight_hops=0, request_clear_pulses=3)
+                            consts={"k": 3}, relight_requests=True, start_relight_hops=0,
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=False)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert pl.net.n < 30000
@@ -249,7 +250,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     quanta = np.rint(quanta).astype(np.int32)
     vth = np.full((2, topo.n), PARAMS.V_th)
     vth[:, [u, v]] += 0.4
-    bias = np.zeros((2, topo.n))
+    bias = np.broadcast_to(pl.net.bias, (2, topo.n)).copy()
     bias[:, [u, v]] -= 0.4
 
     class Record(RefSim):
@@ -288,7 +289,8 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     assert len(rail[1]) == 1 and len(rail[0]) >= 2 and rail[0][1] > first_start + 500, rail
 
 
-def test_request_rising_inside_relight_veto_window_is_not_lost():
+@pytest.mark.parametrize("true_guards", [False, True])
+def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
     """A real trigger rises too late to veto the repair: the old pair kills its request.
 
     Both copies have the same dark false rail and receive the same second token through
@@ -302,14 +304,16 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     from drosophilos.sim.ref64 import RefSim
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
-    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False)
+    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False,
+                            true_guards=False)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
-    assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # 2026-09-20: commit idle rail's second ignition (+16/+17)
+    assert (legacy.net.n, legacy.net.nnz) == (1008, 1711)  # 2026-09-24: kernel-wide fourth kill pulse adds 13 neurons / 26 synapses; default five-hop START re-light adds 5 neurons/synapses; 2026-09-20: commit idle rail's second ignition (+16/+17)
     from drosophilos.lib import control
     control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
     try:
-        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0, request_clear_pulses=3)
+        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0,
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
     cell = pl.cells[0]
@@ -343,7 +347,7 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
     quanta[:, (topo.src == tap) & (topo.dst == repair)] *= 1.12
     vth = np.full((2, topo.n), PARAMS.V_th)
     vth[:, veto] += 0.4
-    bias = np.zeros((2, topo.n))
+    bias = np.broadcast_to(pl.net.bias, (2, topo.n)).copy()
     bias[:, veto] -= 0.4
 
     class Record(RefSim):
@@ -395,10 +399,12 @@ def test_request_rising_inside_relight_veto_window_is_not_lost():
         assert pending == (node == 0), (node, idle, events["true"][-10:])
 
 
-def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear():
+@pytest.mark.parametrize("true_guards", [False, True])
+def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear(true_guards):
     """Tick copy 18: a repair of live false left a fast train that survived the next DONE.
 
-    Replay the two sources' measured DONE spacing on a small two-request MOV. Both
+    Replay the measured within-token DONE spacing on a small two-request MOV, with the
+    next token aligned to the measured FALSE-rail orbit phases. Both
     copies have the same bounded false-latch corner; copy 1 omits only false's repair veto.
     The repair tap is injected at the measured START + 716 steps, independently of
     this smaller datapath's timing. This corner's periods are 41 -> 40 steps (the
@@ -411,8 +417,9 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     from drosophilos.sim.ref64 import RefSim
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=False)  # §10.3 count control
-    assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
+                            consts={"k": 3}, relight_requests=False,
+                            true_guards=False)  # §10.3 count control; veto-only guard preserves the measured netlist
+    assert (legacy.net.n, legacy.net.nnz) == (7245, 12581)  # 2026-09-24: kernel-wide fourth kill pulse adds 37 neurons / 74 synapses; default five-hop START re-light adds 20 neurons/synapses; 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
     from drosophilos.lib import control
     saved = control.KILL_PULSES, control.KILL_STRENGTH
@@ -421,7 +428,8 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
         pl = build_pipeline(PARAMS, 1,
                             [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
                               "trigger": ["input", "input:other"]}],
-                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0, request_clear_pulses=3)
+                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0,
+                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
     finally:
         control.KILL_PULSES, control.KILL_STRENGTH = saved
     assert 2 * pl.net.n < 30000
@@ -448,7 +456,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
                             (cell.start, u, 4507), (repair, u, 4408)]:
         weight(src, dst, value)
     vth = np.full((2, topo.n), PARAMS.V_th)
-    bias = np.zeros((2, topo.n))
+    bias = np.broadcast_to(pl.net.bias, (2, topo.n)).copy()
     vth[:, [u, v]] -= 0.4
     bias[:, [u, v]] += 0.4
     false_veto = (topo.src == u) & (topo.dst == veto)
@@ -464,6 +472,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
                           tap: "tap", kill: "kill", cell.reg.done_relay: "done", received: "received",
                           cell.stage.fault_latch.u: "fault"}
             self.events = [{what: [] for what in self.watch.values()} for _ in range(2)]
+            self.false_phase = {}
 
         def step(self):
             before = len(self._spk_step)
@@ -473,8 +482,21 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
                 for node, neuron in zip(self._spk_node[k].tolist(), self._spk_neuron[k].tolist()):
                     if neuron in self.watch:
                         self.events[node][self.watch[neuron]].append(step)
-                    if neuron == cell.start:
-                        self.add_events(node, [step + 692], [tap], [pl.drive.ignite])
+                        if neuron == cell.start:
+                            self.add_events(node, [step + 692], [tap], [pl.drive.ignite])
+                        if neuron == u and step >= 20000 and node not in self.false_phase:
+                            self.false_phase[node] = step
+                            if len(self.false_phase) == 2:
+                                # The kill corner depends on the 41/40-step orbit phases.
+                                # Align BOTH copies to the legacy phases (20001/20002),
+                                # using one shared schedule, independently of guard latency.
+                                shift = next(d for d in range(-820, 821)
+                                             if (d - self.false_phase[0] + 20001) % 41 == 0
+                                             and (d - self.false_phase[1] + 20002) % 40 == 0)
+                                for copy in range(2):
+                                    self.add_events(copy, [58253 + shift, 69451 + shift],
+                                                    [pl.inputs[st][0].done_relay for st in ("input", "other")],
+                                                    [pl.drive.ignite] * 2)
             if self.step_index % 1000 == 0:
                 self._spk_step.clear()
                 self._spk_node.clear()
@@ -485,9 +507,9 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
         load_pipeline_image(sim, pl, node=node)
         # Original DONE steps 23,881 / 34,924, then 79,134 / 90,332; shift by
         # 20,881 to keep the replay under 8 s. These are external ignition times.
-        sim.add_events(node, [3000, 14043, 58253, 69451],
-                       [pl.inputs[st][0].done_relay for st in ("input", "other", "input", "other")],
-                       [pl.drive.ignite] * 4)
+        sim.add_events(node, [3000, 14043],
+                       [pl.inputs[st][0].done_relay for st in ("input", "other")],
+                       [pl.drive.ignite] * 2)
         # The dump's healthy clear has a fourth inhibitory spike; the failed clear
         # has only three. A small timed input reproduces that extra first-cycle spike.
         sim.add_events(node, [3367], [kill], [pl.drive.pulse // 2])

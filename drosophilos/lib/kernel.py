@@ -55,7 +55,7 @@ from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .adder import extend_reset
-from .control import add_kill_pair, add_kill_train
+from .control import add_kill_pair as _control_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
@@ -119,6 +119,7 @@ class Pipeline:
     outputs: list = field(default_factory=list)  # output cells
     inputs: dict = field(default_factory=dict)  # stream name -> (StagedRegister, producer P)
     datapath: str = "generic"  # requested fixed-operation datapath implementation
+    build_options: dict = field(default_factory=dict)  # effective build flags recorded by campaigns
 
     @property
     def output(self) -> Cell:
@@ -135,58 +136,97 @@ class _N:
         self.u = u
 
 
+TRUE_GUARD_VERSION = 2  # one-shot driver, biased qualification, original TRUE-rail rechecks
+
+
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
-                  extra_vetoes: tuple[int, ...] = ()) -> None:
-    """One pulse on `target` when A and B are both true, issued at the later of their rises: A
-    and B are dual-rail pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
-    d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
-    rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
-    ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
-    its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
-    are within the overlap; the target's consumers take a doublet as one event. `extra_vetoes`
-    recheck source-false rails hidden behind a chained guard's cached passed pair."""
-    a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
-    b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
-    add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target))
-    add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target))
+                  extra_vetoes: tuple[int, ...] = (), true_guards: bool = True,
+                  extra_requires: tuple[int, ...] = ()) -> None:
+    """Pulse when the dual-rail pairs A and B are both true, once per consumed conjunction.
+
+    Two delayed paths cover either arrival order. With true guards, an ordinary edge relay
+    first converts each delayed train to a single pulse; a biased coincidence neuron then
+    requires the other pair's live TRUE train and is vetoed by its FALSE train. The lighter
+    required-form veto recovers within the overlap of the two ordering paths (see
+    `add_veto_relay`). Reduce each delay by one hop per qualification to offset the extra
+    relay latency: the ordinary two-input guard uses 11/19 rather than 12/20 hops.
+
+    `extra_requires` serially rechecks every original TRUE rail behind a cached passed pair;
+    `extra_vetoes` rechecks their FALSE rails. A shared feed-forward inhibitor suppresses the
+    second qualified path while the target's consumers kill the original TRUE rails. It
+    adds no hop to the first pulse. As with the existing edge circuits, a fresh conjunction
+    needs the source trains to drain and the inhibition to recover between transactions.
+    `true_guards=False` preserves the original 12/20-hop veto-only netlist."""
+    # A one-shot plus qualification replaces the old edge; each extra check adds a hop.
+    shorten = 1 + len(extra_requires) if true_guards else 0
+    a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, max(0, d1 - shorten))
+    b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, max(0, d2 - shorten))
+    pa = add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target),
+                        require=[B[1].u, *extra_requires] if true_guards else [])
+    pb = add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target),
+                        require=[A[1].u, *extra_requires] if true_guards else [])
+    if true_guards:
+        once_inh = net.neuron(f"{name}.once_inh")
+        net.synapse(pa, once_inh, drive.relay_in)
+        net.synapse(pb, once_inh, drive.relay_in)
+        net.synapse(once_inh, target, -int(round(2.2 * drive.loop)))
 
 
-REQUEST_CLEAR_PULSES = 3  # the DONE-side clear of a request's false rail; 4 was tried (see build_pipeline)
+REQUEST_CLEAR_PULSES = 4  # the DONE-side clear of a request's false rail; 4 is now the default enabled by the true-rail guards (3 was tried; see build_pipeline)
 
 
-def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list, reset_pulse: int) -> None:
+def add_kill_pair(net: Netlist, drive: Drive, name: str, pulses: int | None = None) -> list[Latch]:
+    """Kernel-local pulse-configurable form of control's standard dual-rail pair.
+
+    The control machine deliberately keeps its three-pulse public helper.  Kernel builds
+    need to vary the paired trains independently, so spell out the same pair here when a
+    count is supplied.
+    """
+    if pulses is None:
+        return _control_kill_pair(net, drive, name)
+    r0, r1 = add_latch(net, drive, f"{name}r0"), add_latch(net, drive, f"{name}r1")
+    add_kill_train(net, drive, f"{name}.k0", r0.u, [r1], pulses=pulses)
+    add_kill_train(net, drive, f"{name}.k1", r1.u, [r0], pulses=pulses)
+    return [r0, r1]
+
+
+def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list,
+                reset_pulse: int, true_guards: bool = True, kernel_kill_pulses: int = 4) -> None:
     """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse).
 
-    Intermediate passed pairs are only a cache: the final guard also vetoes on every original
-    pair that cache represents. A guard doublet can otherwise perturb a passed pair around its
-    reset and leave it true; when the last pair (a cell's IDLE, or a reader-free condition)
-    rises later, the stale cache would issue a second start or commit with no new requests.
+    Intermediate passed pairs are only a cache: the final guard also rechecks every original
+    pair's TRUE and FALSE rails (FALSE only in the legacy circuit). A doublet can perturb
+    a passed pair around its reset and leave it true; when the last pair (a cell's IDLE, or
+    a reader-free condition) rises later, the stale cache would issue a second start or
+    commit with no new requests.
     """
     cur = pairs[0]
     for k, pr in enumerate(pairs[1:]):
         last = k == len(pairs) - 2
         if last:
             # `cur` is a passed pair once three or more inputs are chained. Recheck the
-            # original inputs it summarises, whose false rails have been stable for the whole
-            # completed run when a stale passed pair meets a later rise of `pr`.
+            # original inputs it summarises: absence of FALSE alone cannot reject dark pairs.
             recheck = tuple(p[0].u for p in pairs[: k + 1]) if k else ()
-            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck)
+            guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck,
+                          true_guards=true_guards,
+                          extra_requires=tuple(p[1].u for p in pairs[: k + 1]) if k else ())
             return
-        passed = add_kill_pair(net, drive, f"{name}.p{k}")
+        passed = add_kill_pair(net, drive, f"{name}.p{k}", pulses=kernel_kill_pulses)
         pk = net.neuron(f"{name}.p{k}.pulse")
-        guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, pk)
+        guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, pk, true_guards=true_guards)
         net.synapse(pk, passed[1].u, drive.ignite)
-        add_kill_train(net, drive, f"{name}.p{k}.kill0", pk, [passed[0]])
+        add_kill_train(net, drive, f"{name}.p{k}.kill0", pk, [passed[0]], pulses=kernel_kill_pulses)
         net.synapse(reset_pulse, passed[0].u, drive.ignite)
-        add_kill_train(net, drive, f"{name}.p{k}.kill1", reset_pulse, [passed[1]])
+        add_kill_train(net, drive, f"{name}.p{k}.kill1", reset_pulse, [passed[1]], pulses=kernel_kill_pulses)
         image.append(passed[0])
         cur = passed
-    always = add_kill_pair(net, drive, f"{name}.always")  # one pair: guard it against a constant true
+    always = add_kill_pair(net, drive, f"{name}.always", pulses=kernel_kill_pulses)  # one pair: guard it against a constant true
     image.append(always[1])
-    guarded_pulse(net, drive, f"{name}.g", cur, always, target)
+    guarded_pulse(net, drive, f"{name}.g", cur, always, target, true_guards=true_guards)
 
 
-def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulses: list[int], image: list) -> tuple[list, int]:
+def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulses: list[int], image: list,
+                    true_guards: bool = True, kernel_kill_pulses: int = 4) -> tuple[list, int]:
     """A one-hot ring counter of K lines per advance source, and one wrap pulse.
 
     Neural pacing counts a phase's tokens; the count was a state cell fed back through an
@@ -214,7 +254,7 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
     rings, wraps = [], []
     for j, src in enumerate(advance_pulses):
         pre = f"{name}.s{j}"
-        lines = [add_kill_pair(net, drive, f"{pre}.l{k}") for k in range(K)]
+        lines = [add_kill_pair(net, drive, f"{pre}.l{k}", pulses=kernel_kill_pulses) for k in range(K)]
         image.append(lines[0][1])
         image.extend(l[0] for l in lines[1:])
         adv = net.neuron(f"{pre}.adv")
@@ -233,15 +273,16 @@ def add_pacing_ring(net: Netlist, drive: Drive, name: str, K: int, advance_pulse
         return rings, wraps[0]
     wrapped = []
     for j, w in enumerate(wraps):
-        pr = add_kill_pair(net, drive, f"{name}.s{j}.wrapped")  # [not wrapped this frame, wrapped]
+        pr = add_kill_pair(net, drive, f"{name}.s{j}.wrapped", pulses=kernel_kill_pulses)  # [not wrapped this frame, wrapped]
         net.synapse(w, pr[1].u, drive.ignite)
         image.append(pr[0])
         wrapped.append(pr)
     pulse = net.neuron(f"{name}.join.pulse")
-    _chain_true(net, drive, f"{name}.join", wrapped, pulse, image, pulse)
+    _chain_true(net, drive, f"{name}.join", wrapped, pulse, image, pulse, true_guards=true_guards,
+                kernel_kill_pulses=kernel_kill_pulses)
     for pr in wrapped:
         net.synapse(pulse, pr[0].u, drive.ignite)
-    add_kill_train(net, drive, f"{name}.join.kill", pulse, [pr[1] for pr in wrapped])
+    add_kill_train(net, drive, f"{name}.join.kill", pulse, [pr[1] for pr in wrapped], pulses=kernel_kill_pulses)
     # the chained guard's two paths (and a passed pair's) can each fire: measured, three sources
     # 100 ms apart gave three pulses over 18 ms; the relay makes the wrap one pulse (the pair
     # resets above take the repeats as one event, as a commit pulse's consumers do)
@@ -253,8 +294,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = False, start_relight_hops: int = 0,
-                   request_clear_pulses: int | None = None) -> Pipeline:
+                   retry_clear: bool = False, start_relight_hops: int = 5,
+                   request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
+                   true_guards: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -270,7 +312,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     is the standard build: request-priority pairs and delayed, live-rail-vetoed repair of
     dark no-request rails (§10.5). False selects the §10.3 request kill pairs and netlist.
     `datapath="specialized"` replaces fixed AND/OR/XOR/MOV and LOAD cells' general ALU,
-    unit-select rails and mux with their single resident unit. Other cells remain generic."""
+    unit-select rails and mux with their single resident unit. Other cells remain generic.
+    `true_guards=True` requires both the true rail and the absence of the false rail at every
+    go/commit guard; false rebuilds the older veto-only timing for recorded campaigns."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     drive = drive or Drive.from_params(params)
@@ -296,7 +340,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # commit then copied an empty stage as double rails (measured).
         add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
         reg = add_staged_commit(net, drive, pre, S, P, ordered_grant=True)
-        creq = add_kill_pair(net, drive, f"{pre}.creq")  # [nothing to commit, commit pending]
+        creq = add_kill_pair(net, drive, f"{pre}.creq", pulses=kernel_kill_pulses)  # [nothing to commit, commit pending]
         rl = add_edge_relay(net, drive, f"{pre}.autocommit", S.completion.u, fast_inhibitor=True)
         net.synapse(rl, creq[1].u, drive.ignite)
         image.append(creq[0])
@@ -342,12 +386,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         width = 3 * n + 3 if c.op == "MULP_ROW" else n + 3  # a row's word: acc | C Z V | A | B
         c.stage = add_register(net, drive, f"{c.name}.Q", width, with_completion=True)
         c.act = add_latch(net, drive, f"{c.name}.act")
-        c.idle = add_kill_pair(net, drive, f"{c.name}.idle")
+        c.idle = add_kill_pair(net, drive, f"{c.name}.idle", pulses=kernel_kill_pulses)
         image.append(c.idle[1])
         _fault_latch(net, drive, c.name, c.stage)
         c.reg = add_staged_commit(net, drive, c.name, c.stage, _NoProducer(), ordered_grant=True)
         c.master = c.reg.master
-        c.creq = add_kill_pair(net, drive, f"{c.name}.creq")
+        c.creq = add_kill_pair(net, drive, f"{c.name}.creq", pulses=kernel_kill_pulses)
         rl = add_edge_relay(net, drive, f"{c.name}.autocommit", c.stage.completion.u, fast_inhibitor=True)
         net.synapse(rl, c.creq[1].u, drive.ignite)
         image.append(c.creq[0])
@@ -408,7 +452,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 # repair of false must NEVER launch the opposite rail's kill train.
                 pair = [add_latch(net, drive, f"{req_name}r{r}") for r in (0, 1)]
             else:
-                pair = add_kill_pair(net, drive, req_name)
+                pair = add_kill_pair(net, drive, req_name, pulses=kernel_kill_pulses)
             c.reqs[src] = pair
             trig = net.neuron(f"{c.name}.trigger.{src}")
             net.synapse(done_of(src), trig, drive.relay_in)
@@ -420,11 +464,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 # are a source cycle apart (>86 ms), so this clear is ready for each one.
                 received = net.neuron(f"{req_name}.received")
                 net.synapse(trig, received, drive.ignite)
-                # Four pulses (REQUEST_CLEAR_PULSES) on this train alone: a request rail whose
-                # loop came out fast under noise slips through three at some phases (seed-108
-                # copy 8, seed-110 copy 73); the fourth is safe here because START's re-light
-                # of the same rail now waits for the train to end (below). Elsewhere the trains
-                # keep three pulses: a fourth everywhere lost the control machine's 45 ms
+                # Kernel-built kill trains use four pulses by default, including this request
+                # clear; the machine's own trains keep three pulses. A request rail whose loop
+                # came out fast under noise slips through three at some phases (seed-108 copy 8,
+                # seed-110 copy 73); the fourth is safe here because START's re-light of the same
+                # rail now waits for the train to end (below). A fourth everywhere lost the control machine's 45 ms
                 # interrupt reload (tests/test_machine.py).
                 add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]],
                                pulses=REQUEST_CLEAR_PULSES if request_clear_pulses is None else request_clear_pulses)
@@ -454,18 +498,20 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     # every phase; the after-hyperpolarisation cost is paid only in the stuck case,
                     # and a false rail that then fails to re-light at START is repaired by the
                     # ACT^d relight below
-                    add_kill_train(net, drive, f"{req_name}.k1b", gate, [pair[0]], strength=1.5)
+                    add_kill_train(net, drive, f"{req_name}.k1b", gate, [pair[0]], strength=1.5,
+                                   pulses=3)  # as measured
             if stream_of(src) is None and src not in built:  # feedback: the state is there at power-up
                 c.feedback.add(src)
                 image.append(pair[1])
                 assert cells[src].init is not None, f"{c.name} reads {src} before it is written: it needs an init"
             else:
                 image.append(pair[0])
-        _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start)
+        _chain_true(net, drive, f"{c.name}.go", list(c.reqs.values()) + [c.idle], c.start, image, c.start,
+                    true_guards=true_guards, kernel_kill_pulses=kernel_kill_pulses)
         for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
         # START re-lights each request's false rail ("consumed"). `start_relight_hops` (default
-        # 0: at once) is a recorded experiment, OFF: with the re-light 5 hops later and a
+        # 5) is enabled by the true-rail guards: with the re-light 5 hops later and a
         # 4 x 0.75 train everywhere, seeds 108-110 ran 300/300 copies clean (Juno 414205-7),
         # but a delay of 3 hops or more makes a cell START a second time ~32 ms after the
         # first — the go guard's delayed idle path lands inside the window where both request
@@ -484,6 +530,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # With the re-light `start_relight_hops` (~27 ms) after START the train has ended; in
         # between the pair is dark on both rails, which the go chain cannot act on (IDLE was
         # killed at START) and which only delays a producer's commit gate by the same ~27 ms.
+        # The true-rail guards now enable this five-hop delay as the default.
         if start_relight_hops and c.reqs:
             start_d = add_delay_chain(net, drive, f"{c.name}.start.fd", c.start, start_relight_hops)
             for pr in c.reqs.values():
@@ -494,7 +541,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # A §10.3 kill pair's r0-driven kill may not recover during r0's ~60 ms silence
         # (<86 ms), so START must clear true explicitly. In request-priority pairs it is
         # the ONLY clear of true: neither the false rail nor its repair can consume a token.
-        add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()])
+        add_kill_train(net, drive, f"{c.name}.start.kill", c.start, [c.idle[1]] + [pr[1] for pr in c.reqs.values()],
+                       pulses=kernel_kill_pulses)
         # ACT^d: a chain of pulses from the start pulse (a chain fed by the ACT latch's train
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
@@ -722,7 +770,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             by_ram.setdefault(id(c.mem[1]), []).append(c)
     for key, group in by_ram.items():
         if len(group) > 1:
-            _share_write_ports(net, drive, f"MEM.{ram_names[key]}", group[0].mem[1], group)
+            _share_write_ports(net, drive, f"MEM.{ram_names[key]}", group[0].mem[1], group,
+                               kernel_kill_pulses=kernel_kill_pulses)
 
     # ---- commit gating: a producer rewrites its master only once every reader of it has started
     # on the previous value (its request for this source cleared), so a reader's operand gates
@@ -743,9 +792,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         if commit_reignite:  # builds before 2026-09-20 had none (stall_diag rebuilds old dumps)
             again = add_delay_chain(net, drive, f"{pname}.commit.idle_again", pulse, 16)
             net.synapse(again, creq[0].u, drive.ignite)
-        add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]])
+        add_kill_train(net, drive, f"{pname}.commit.kill", pulse, [creq[1]], pulses=kernel_kill_pulses)
         frees = [[r.reqs[pname][1], r.reqs[pname][0]] for r in readers]  # true when the reader has no pending request
-        _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse)
+        _chain_true(net, drive, f"{pname}.cg", [creq] + frees, pulse, image, pulse,
+                    true_guards=true_guards, kernel_kill_pulses=kernel_kill_pulses)
         return pulse
 
     for c in order:
@@ -753,7 +803,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     ok_pairs, rings, phase_ends = {}, {}, {}
     if phases:
         for ph in phases:
-            ok_pairs[ph[0]] = add_kill_pair(net, drive, f"PHASE.{ph[0]}.ok")  # [not this phase, this phase]
+            ok_pairs[ph[0]] = add_kill_pair(net, drive, f"PHASE.{ph[0]}.ok", pulses=kernel_kill_pulses)  # [not this phase, this phase]
         image.append(ok_pairs[phases[0][0]][1])  # the first phase is open at power-up
         for k, ph in enumerate(phases):
             st, name_, mode = (ph + ("wrap",))[:3]
@@ -766,14 +816,16 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             if mode == "wrap":
                 rs = ring_specs[name_]
                 advs = [cells[t].reg.done_relay for t in rs["trigger"]]
-                rings[st], end = add_pacing_ring(net, drive, f"PHASE.{st}.ring", rs["k"], advs, image)
+                rings[st], end = add_pacing_ring(net, drive, f"PHASE.{st}.ring", rs["k"], advs, image,
+                                                 true_guards=true_guards, kernel_kill_pulses=kernel_kill_pulses)
             else:
                 src_done = cells[name_].reg.done_relay if name_ is not None else inputs[st][0].done_relay
                 end = add_delay_chain(net, drive, f"PHASE.{st}.endd", src_done, 6)
             phase_ends[st] = end
             for pr, r in ((ok_pairs[st], 0), (ok_pairs[nxt], 1)):  # this phase closes, the next opens
                 net.synapse(end, pr[r].u, drive.ignite)
-            add_kill_train(net, drive, f"PHASE.{st}.kill", end, [ok_pairs[st][1], ok_pairs[nxt][0]])
+            add_kill_train(net, drive, f"PHASE.{st}.kill", end, [ok_pairs[st][1], ok_pairs[nxt][0]],
+                           pulses=kernel_kill_pulses)
         for st in ok_pairs:
             if st != phases[0][0]:
                 image.append(ok_pairs[st][0])
@@ -784,9 +836,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             pulse = net.neuron(f"{key}.commit_pulse")
             net.synapse(pulse, reg.commit_in, drive.ignite)
             net.synapse(pulse, creq[0].u, drive.ignite)
-            add_kill_train(net, drive, f"{key}.commit.kill", pulse, [creq[1]])
+            add_kill_train(net, drive, f"{key}.commit.kill", pulse, [creq[1]], pulses=kernel_kill_pulses)
             frees = [[r.reqs[key][1], r.reqs[key][0]] for r in readers]
-            _chain_true(net, drive, f"{key}.cg", [creq] + frees + [ok_pairs[st]], pulse, image, pulse)
+            _chain_true(net, drive, f"{key}.cg", [creq] + frees + [ok_pairs[st]], pulse, image, pulse,
+                        true_guards=true_guards, kernel_kill_pulses=kernel_kill_pulses)
         else:
             gate_commit(key, creq, reg.commit_in, readers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
@@ -794,11 +847,16 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
     pl.const_values = dict(consts or {})
     pl.mem_contents = {k: dict(v[1]) for k, v in (mems or {}).items()}
+    pl.build_options = {"powerup_veto": powerup_veto, "commit_reignite": commit_reignite,
+                        "retry_clear": retry_clear, "start_relight_hops": start_relight_hops,
+                        "request_clear_pulses": REQUEST_CLEAR_PULSES if request_clear_pulses is None else request_clear_pulses,
+                        "kernel_kill_pulses": kernel_kill_pulses, "true_guards": true_guards}
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 
 
-def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, stores: list) -> None:
+def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, stores: list,
+                       kernel_kill_pulses: int = 4) -> None:
     """Several STORE cells write one RAM through their own write ports (`ram.add_write_port`),
     and every port's COPY latch for a word lights at that word's READY: with two ports and no
     guard, a write by either resets the word, READY lights both COPY latches, and both ports
@@ -834,7 +892,8 @@ def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, store
                 for pair in other.wport.copy_relays[w]:
                     for relay in pair:
                         net.synapse(m.u, relay, q)
-        add_kill_train(net, drive, f"{name}.w{w}.sel.kill", stores[0].wport.done[w], marks + [c.wport.copies[w] for c in stores])
+        add_kill_train(net, drive, f"{name}.w{w}.sel.kill", stores[0].wport.done[w],
+                       marks + [c.wport.copies[w] for c in stores], pulses=kernel_kill_pulses)
 
 
 class _NoProducer:

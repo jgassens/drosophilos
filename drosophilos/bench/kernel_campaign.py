@@ -21,7 +21,7 @@ from ..lib import control
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
-from ..lib.kernel import build_pipeline, run_pipeline_batched
+from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
 from ..sim.model import Params
 from .a2_campaigns import MIXES
 
@@ -137,7 +137,8 @@ def main(argv=None):
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
-           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH], "powerup_veto": True, "commit_reignite": True, "retry_clear": False, "start_relight_hops": 0, "request_clear_pulses": 3,
+           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH],
+           "true_guard_version": TRUE_GUARD_VERSION,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
            "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
@@ -145,6 +146,7 @@ def main(argv=None):
            "per_node": per_node, "reference": ref, "tokens_list": list(tokens), "output_cells": list(ks.outputs),
            "outputs": [{o: [[int(s_), (None if v is None else int(v))] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
+    rec.update(pl.build_options)
     print(json.dumps(rec, indent=1), flush=True)
     if a.out:
         json.dump(rec, open(a.out, "w"), indent=1)

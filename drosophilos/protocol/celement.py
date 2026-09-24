@@ -118,11 +118,12 @@ def add_veto_neuron(net: Netlist, drive: Drive, name: str, taps: list[int]) -> i
 
 
 def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: list[int], target: Latch,
-                   veto_strength: float = 0.5, veto_neurons: list[int] = ()) -> int:
+                   veto_strength: float | None = None, veto_neurons: list[int] = (),
+                   require: list[int] = ()) -> int:
     """driver AND NOT(any veto), evaluated once at the driver's rise, as a one-shot ignition of
     `target`. The driver is a latch train (so the relay's own feed-forward inhibition and the
     target's train keep it to one pulse); each veto is a latch train that, while live, holds
-    the relay ~146 mV below rest through one inhibitory interneuron, against which the 12.6 mV
+    the relay ~33 mV below rest through one inhibitory interneuron, against which the 12.6 mV
     driver pulse cannot fire it. There is no exposure window: unlike a rate-mode AND, the
     relay never integrates one input towards threshold.
 
@@ -132,8 +133,39 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
     again 55 ms later. 2.2x would block on one spike but paralyse the relay for ~90 ms).
     Dual-rail supplies NOT for free: to compute a AND b with b the earlier operand, veto with
     b's other rail. No hold from the target is needed: the driver is a latch train, which the
-    relay's own source inhibition already turns into one shot."""
-    relay = add_edge_relay(net, drive, name, driver)
+    relay's own source inhibition already turns into one shot.
+
+    With `require`, first turn the driver train into one full-strength, fast-inhibited edge.
+    Each required tap then qualifies that single pulse in a separate coincidence neuron;
+    the checks are serial ANDs, not an additive vote in which another rail can stand in
+    for a missing input. The coincidence neurons have -2 mV bias and take 0.92 single_need
+    from the pulse and 0.76 rate_need from their one required train. The bias increases
+    their distance from stray input without changing any other neuron or the kill train.
+
+    At the default Params, V_th - E_L is 7 mV, and the biased coincidence gap is 9 mV.
+    Thus the nominal pulse/rail/sum fractions are 0.92*7/9 = 0.716, 0.76*7/9 = 0.591,
+    and 1.68*7/9 = 1.307. At +12% weights/-1 mV threshold the isolated pulse is
+    0.92*1.12*7/8 = 0.902; at -12%/+1 mV the coincidence is
+    1.68*0.88*7/10 = 1.035. A 47/39-times faster permanent rail at +12%/-1 mV is
+    0.76*(47/39)*1.12*7/8 = 0.898. These are mean/peak estimates, not a timing proof;
+    tests measure the full trains, veto recovery, inhibitor race, and stray input.
+    Mix B uses Gaussian/log-normal sigmas (4%, 0.2 mV threshold and bias), not bounds.
+
+    The required form defaults to a lighter 0.15-loop veto (~10 mV sustained), since its
+    ~2.8 mV coincidence surplus cannot recover from the old 0.5-loop veto in the available
+    delay. The non-required form retains the original 0.5-loop veto and edge circuit.
+    An explicit `veto_strength` overrides either default."""
+    if veto_strength is None:
+        veto_strength = 0.15 if require else 0.5
+    if require:
+        pulse = add_edge_relay(net, drive, f"{name}.driver", driver, fast_inhibitor=True)
+        for k, tap in enumerate(require):
+            relay = net.neuron(f"{name}.edge" if k == len(require) - 1 else f"{name}.require{k}", bias=-2.0)
+            net.synapse(pulse, relay, int(round(0.92 * drive.single_need)))
+            net.synapse(tap, relay, int(round(0.76 * drive.rate_need)))
+            pulse = relay
+    else:
+        relay = add_edge_relay(net, drive, name, driver)
     if vetoes:
         v = net.neuron(f"{name}.veto")
         for t in vetoes:

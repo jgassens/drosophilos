@@ -6,13 +6,19 @@ import numpy as np
 import pytest
 import torch
 
-from drosophilos.bench.stall_diag import analyze_dump, render_markdown
+from drosophilos.bench.stall_diag import analyze_dump, build_tick_pipeline, render_markdown
 from drosophilos.lib.campaign import Perturbation, make_perturbed_sim
 from drosophilos.lib.kernel import build_pipeline, load_pipeline_image, run_pipeline_batched
 from drosophilos.sim.model import Params
 
 
 PARAMS = Params()
+
+
+def test_obsolete_true_guard_capture_is_not_silently_rebuilt_with_new_roles():
+    # The simple guard has the same neuron count as v1, but different roles and biases.
+    with pytest.raises(ValueError, match="unsupported true-guard circuit"):
+        build_tick_pipeline({"true_guards": True})
 
 
 def _artifact(name: str) -> Path:
@@ -46,11 +52,13 @@ def test_precedent_dump_localizes_live_false_repair_and_failed_clear():
     assert "**37,674**" in text and "11828" in text
 
 
-def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
+@pytest.mark.parametrize("true_guards", [False, True])
+def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch, true_guards):
     """Encode the seed-107 mechanism directly; no impossible single-copy replay.
 
-    Two RefSim copies share the measured source-DONE spacing and a bounded weak-clear
-    corner. Copy 1 removes only the fixed false-rail -> repair-veto edge, recreating the old
+    Two RefSim copies share the measured within-token source-DONE spacing and a bounded
+    weak-clear corner, with the next token aligned to the measured FALSE-rail phases.
+    Copy 1 removes only the fixed false-rail -> repair-veto edge, recreating the old
     mechanism: repair of a live false rail, faster orbit, failed DONE clear, both request
     rails live, and no second START. The current copy 0 must survive and complete twice.
     """
@@ -68,7 +76,8 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
           "trigger": ["input", "input:other"]}],
         consts={"zero": 0},
         streams=["input", "other"],
-        start_relight_hops=0, request_clear_pulses=3,  # the precedent's timing: START re-lit the request rails at once, three-pulse clear
+        start_relight_hops=0, request_clear_pulses=3, kernel_kill_pulses=3,  # the precedent's timing: START re-lit the request rails at once, three-pulse clear
+        true_guards=true_guards,
     )
     cell = pl.cells[0]
     req = cell.reqs["input"]
@@ -96,7 +105,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
     ]:
         set_weight(src, dst, value)
     vth = np.full((2, topo.n), PARAMS.V_th)
-    bias = np.zeros((2, topo.n))
+    bias = np.broadcast_to(pl.net.bias, (2, topo.n)).copy()
     vth[:, [false_u, false_v]] -= 0.4
     bias[:, [false_u, false_v]] += 0.4
     false_veto = (topo.src == false_u) & (topo.dst == veto)
@@ -114,6 +123,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
                 cell.stage.fault_latch.u: "fault",
             }
             self.events = [{kind: [] for kind in self.watch.values()} for _ in range(2)]
+            self.false_phase = {}
 
         def step(self):
             before = len(self._spk_step)
@@ -126,6 +136,18 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
                         self.events[node][kind].append(step)
                     if neuron == cell.start:
                         self.add_events(node, [step + 692], [tap], [pl.drive.ignite])
+                    if neuron == false_u and step >= 20000 and node not in self.false_phase:
+                        self.false_phase[node] = step
+                        if len(self.false_phase) == 2:
+                            # Preserve both measured 41/40-step phases (20001/20002 in
+                            # the legacy replay), with one shared second-token schedule.
+                            shift = next(d for d in range(-820, 821)
+                                         if (d - self.false_phase[0] + 20001) % 41 == 0
+                                         and (d - self.false_phase[1] + 20002) % 40 == 0)
+                            for copy in range(2):
+                                self.add_events(copy, [58253 + shift, 69451 + shift],
+                                                [pl.inputs[st][0].done_relay for st in ("input", "other")],
+                                                [pl.drive.ignite] * 2)
             if self.step_index % 1000 == 0:
                 self._spk_step.clear()
                 self._spk_node.clear()
@@ -137,9 +159,9 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch):
         # Seed-107 source DONE steps shifted earlier by 20,881 steps.
         sim.add_events(
             node,
-            [3000, 14043, 58253, 69451],
-            [pl.inputs[stream][0].done_relay for stream in ("input", "other", "input", "other")],
-            [pl.drive.ignite] * 4,
+            [3000, 14043],
+            [pl.inputs[stream][0].done_relay for stream in ("input", "other")],
+            [pl.drive.ignite] * 2,
         )
         # The healthy first clear had a fourth inhibitory spike; the failed clear had three.
         sim.add_events(node, [3367], [clear], [pl.drive.pulse // 2])
