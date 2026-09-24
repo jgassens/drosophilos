@@ -118,12 +118,12 @@ def add_veto_neuron(net: Netlist, drive: Drive, name: str, taps: list[int]) -> i
 
 
 def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: list[int], target: Latch,
-                   veto_strength: float = 0.5, veto_neurons: list[int] = (),
+                   veto_strength: float | None = None, veto_neurons: list[int] = (),
                    require: list[int] = ()) -> int:
     """driver AND NOT(any veto), evaluated once at the driver's rise, as a one-shot ignition of
     `target`. The driver is a latch train (so the relay's own feed-forward inhibition and the
     target's train keep it to one pulse); each veto is a latch train that, while live, holds
-    the relay ~146 mV below rest through one inhibitory interneuron, against which the 12.6 mV
+    the relay ~33 mV below rest through one inhibitory interneuron, against which the 12.6 mV
     driver pulse cannot fire it. There is no exposure window: unlike a rate-mode AND, the
     relay never integrates one input towards threshold.
 
@@ -135,31 +135,35 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
     b's other rail. No hold from the target is needed: the driver is a latch train, which the
     relay's own source inhibition already turns into one shot.
 
-    `require` adds sustained rate-mode inputs that must be live when the driver's first spike
-    arrives. With a requirement the relay gets 0.65 of the single-pulse need from `driver`
-    and 0.65 of the sustained-train need from each required tap. The guarded-pulse caller
-    supplies exactly one tap, so its nominal threshold fractions are 0.65 (pulse alone),
-    0.65 (rail alone), and 1.30 (pulse + rail): each singleton is 35 % below threshold and
-    the coincidence is 30 % above. The initially suggested 0.60 pulse missed at the
-    weak/high-threshold corner; raising it to 0.65 passed without pulse-only or rail-only
-    leakage. At the campaign mix's +/-4 % edge weights and +/-1 mV drift of the roughly
-    15 mV threshold gap, the strongest singleton is
-    0.65*1.04/(14/15) = 0.724 and the weakest coincidence is
-    1.30*0.96/(16/15) = 1.170, so neither crosses threshold. The firing-side noise margin is
-    17 percentage points; retaining a full 25 % on both sides after stacking both worst
-    cases is mathematically impossible with two inputs that must each remain 25 % below
-    threshold. The RefSim guard regression measures both corners rather than relying on
-    these steady-state sums."""
+    With `require`, first turn the driver train into one full-strength, fast-inhibited edge.
+    Each required tap then qualifies that single pulse in a separate coincidence neuron;
+    the checks are serial ANDs, not an additive vote in which another rail can stand in
+    for a missing input. The coincidence neurons have -2 mV bias and take 0.92 single_need
+    from the pulse and 0.76 rate_need from their one required train. The bias increases
+    their distance from stray input without changing any other neuron or the kill train.
+
+    At the default Params, V_th - E_L is 7 mV, and the biased coincidence gap is 9 mV.
+    Thus the nominal pulse/rail/sum fractions are 0.92*7/9 = 0.716, 0.76*7/9 = 0.591,
+    and 1.68*7/9 = 1.307. At +12% weights/-1 mV threshold the isolated pulse is
+    0.92*1.12*7/8 = 0.902; at -12%/+1 mV the coincidence is
+    1.68*0.88*7/10 = 1.035. A 47/39-times faster permanent rail at +12%/-1 mV is
+    0.76*(47/39)*1.12*7/8 = 0.898. These are mean/peak estimates, not a timing proof;
+    tests measure the full trains, veto recovery, inhibitor race, and stray input.
+    Mix B uses Gaussian/log-normal sigmas (4%, 0.2 mV threshold and bias), not bounds.
+
+    The required form defaults to a lighter 0.15-loop veto (~10 mV sustained), since its
+    ~2.8 mV coincidence surplus cannot recover from the old 0.5-loop veto in the available
+    delay. The non-required form retains the original 0.5-loop veto and edge circuit.
+    An explicit `veto_strength` overrides either default."""
+    if veto_strength is None:
+        veto_strength = 0.15 if require else 0.5
     if require:
-        # This is add_edge_relay's standard one-shot circuit, with only the driver -> relay
-        # edge reduced so the required live train supplies the rest of the threshold drive.
-        relay = net.neuron(f"{name}.edge")
-        inh = net.neuron(f"{name}.edge_inh")
-        net.synapse(driver, relay, int(round(0.65 * drive.single_need)))
-        net.synapse(driver, inh, drive.pulse)
-        net.synapse(inh, relay, -int(round(2.2 * drive.loop)))
-        for tap in require:
-            net.synapse(tap, relay, drive.and_in)
+        pulse = add_edge_relay(net, drive, f"{name}.driver", driver, fast_inhibitor=True)
+        for k, tap in enumerate(require):
+            relay = net.neuron(f"{name}.edge" if k == len(require) - 1 else f"{name}.require{k}", bias=-2.0)
+            net.synapse(pulse, relay, int(round(0.92 * drive.single_need)))
+            net.synapse(tap, relay, int(round(0.76 * drive.rate_need)))
+            pulse = relay
     else:
         relay = add_edge_relay(net, drive, name, driver)
     if vetoes:

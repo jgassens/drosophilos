@@ -135,29 +135,35 @@ class _N:
         self.u = u
 
 
+TRUE_GUARD_VERSION = 2  # one-shot driver, biased qualification, original TRUE-rail rechecks
+
+
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
-                  extra_vetoes: tuple[int, ...] = (), true_guards: bool = True) -> None:
-    """One pulse on `target` when A and B are both true, issued at the later of their rises: A
-    and B are dual-rail pairs [r_false, r_true]. Two relays cover the two orders: A's rise (delayed
-    d1 hops) vetoed by "B false", and B's rise (delayed d2 hops) vetoed by "A false". A veto
-    rail that died less than ~55 ms before the driver still blocks it, so the delays differ by
-    ~45 ms (8 hops) and the two windows overlap: whichever rail flipped second, one relay sees
-    its veto long dead (measured rule, `celement.add_veto_relay`). Both may fire when the rises
-    are within the overlap. With `true_guards`, each relay also requires the other pair's
-    true rail as a rate-mode input, so a pair dark on both rails no longer passes merely
-    because its false veto is absent. A shared feed-forward inhibitor collapses the two
-    ordering paths: with a delayed START re-light, both paths can otherwise fire about 15 ms
-    apart while the first START's kill train is still extinguishing the true rails, producing
-    two observable STARTs for one conjunction. It is driven in parallel with `target`, so it
-    suppresses the second path without adding a hop to the first path's latency.
-    `extra_vetoes` recheck source-false rails hidden behind a chained guard's cached passed
-    pair. `true_guards=False` rebuilds measurements from before 2026-09-23."""
-    a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, d1)
-    b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, d2)
+                  extra_vetoes: tuple[int, ...] = (), true_guards: bool = True,
+                  extra_requires: tuple[int, ...] = ()) -> None:
+    """Pulse when the dual-rail pairs A and B are both true, once per consumed conjunction.
+
+    Two delayed paths cover either arrival order. With true guards, an ordinary edge relay
+    first converts each delayed train to a single pulse; a biased coincidence neuron then
+    requires the other pair's live TRUE train and is vetoed by its FALSE train. The lighter
+    required-form veto recovers within the overlap of the two ordering paths (see
+    `add_veto_relay`). Reduce each delay by one hop per qualification to offset the extra
+    relay latency: the ordinary two-input guard uses 11/19 rather than 12/20 hops.
+
+    `extra_requires` serially rechecks every original TRUE rail behind a cached passed pair;
+    `extra_vetoes` rechecks their FALSE rails. A shared feed-forward inhibitor suppresses the
+    second qualified path while the target's consumers kill the original TRUE rails. It
+    adds no hop to the first pulse. As with the existing edge circuits, a fresh conjunction
+    needs the source trains to drain and the inhibition to recover between transactions.
+    `true_guards=False` preserves the original 12/20-hop veto-only netlist."""
+    # A one-shot plus qualification replaces the old edge; each extra check adds a hop.
+    shorten = 1 + len(extra_requires) if true_guards else 0
+    a_d = add_delay_chain(net, drive, f"{name}.ad", A[1].u, max(0, d1 - shorten))
+    b_d = add_delay_chain(net, drive, f"{name}.bd", B[1].u, max(0, d2 - shorten))
     pa = add_veto_relay(net, drive, f"{name}.pa", a_d, [B[0].u, *extra_vetoes], _N(target),
-                        require=[B[1].u] if true_guards else [])
+                        require=[B[1].u, *extra_requires] if true_guards else [])
     pb = add_veto_relay(net, drive, f"{name}.pb", b_d, [A[0].u, *extra_vetoes], _N(target),
-                        require=[A[1].u] if true_guards else [])
+                        require=[A[1].u, *extra_requires] if true_guards else [])
     if true_guards:
         once_inh = net.neuron(f"{name}.once_inh")
         net.synapse(pa, once_inh, drive.relay_in)
@@ -172,21 +178,22 @@ def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int,
                 reset_pulse: int, true_guards: bool = True) -> None:
     """`target` pulses once when every pair in `pairs` is true (see _all_true_pulse).
 
-    Intermediate passed pairs are only a cache: the final guard also vetoes on every original
-    pair that cache represents. A guard doublet can otherwise perturb a passed pair around its
-    reset and leave it true; when the last pair (a cell's IDLE, or a reader-free condition)
-    rises later, the stale cache would issue a second start or commit with no new requests.
+    Intermediate passed pairs are only a cache: the final guard also rechecks every original
+    pair's TRUE and FALSE rails (FALSE only in the legacy circuit). A doublet can perturb
+    a passed pair around its reset and leave it true; when the last pair (a cell's IDLE, or
+    a reader-free condition) rises later, the stale cache would issue a second start or
+    commit with no new requests.
     """
     cur = pairs[0]
     for k, pr in enumerate(pairs[1:]):
         last = k == len(pairs) - 2
         if last:
             # `cur` is a passed pair once three or more inputs are chained. Recheck the
-            # original inputs it summarises, whose false rails have been stable for the whole
-            # completed run when a stale passed pair meets a later rise of `pr`.
+            # original inputs it summarises: absence of FALSE alone cannot reject dark pairs.
             recheck = tuple(p[0].u for p in pairs[: k + 1]) if k else ()
             guarded_pulse(net, drive, f"{name}.g{k}", cur, pr, target, extra_vetoes=recheck,
-                          true_guards=true_guards)
+                          true_guards=true_guards,
+                          extra_requires=tuple(p[1].u for p in pairs[: k + 1]) if k else ())
             return
         passed = add_kill_pair(net, drive, f"{name}.p{k}")
         pk = net.neuron(f"{name}.p{k}.pulse")

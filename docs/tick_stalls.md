@@ -473,41 +473,91 @@ the `FastSim` realization, so the mechanism is timing-sensitive — the capture 
 
 ### True-rail guards (2026-09-23)
 
-`guarded_pulse` now qualifies each delayed rise with the other pair's live true rail as
-well as vetoing on its false rail. The required-input form of `add_veto_relay` gives the
-delayed pulse 0.65 of the single-spike threshold need and the sustained rail 0.65 of the
-rate threshold need. The three nominal sums are therefore **0.65 pulse alone, 0.65 rail
-alone, 1.30 together**: 35 % below threshold for either singleton and 30 % above for the
-coincidence. The first 0.60-pulse trial missed the weak corner. With the chosen weights,
-the stacked mix-B bounds are 0.724 for the strongest singleton (+4 % weight, threshold gap
-reduced from about 15 to 14 mV) and 1.170 for the weakest coincidence (-4 %, gap raised to
-16 mV). Thus neither corner crosses threshold; the RefSim test exercises both rather than
-assuming the steady-state arithmetic. A full 25 % remains nominally on both sides (35 % /
-30 %); after stacking both worst cases the firing-side reserve is 17 %. Keeping a full 25 %
-on both sides after stacking both extremes is not possible with two inputs that must each
-remain at least 25 % below threshold.
+The first implementation (`330fc52`) put a weak delayed **train** and a required TRUE
+train into one edge relay. Review found two failures: the driver's second spike could
+beat its inhibitor on a dark pair, and the coincidence could miss while recovering from
+the FALSE veto. The reproduced RefSim probes in `tests/test_true_guards.py` lost 32/3,000
+conjunctions and passed 5/10,000 dark requirements on that implementation.
 
-The two delayed paths can both qualify within one transaction: with START's false-rail
-re-light delayed five hops, the second landed about 15 ms after the first while START's kill
-train was still extinguishing the true rail. A shared feed-forward inhibitor now takes both
-qualified relays in parallel with the target. It adds no hop to the first event and suppresses
-the second. On the two-cell RefSim timing check, reader START followed the held-back request
-in 190.4 ms with true guards and 190.6 ms with the old veto-only guards.
+The final circuit (`true_guard_version: 2`) first converts each delayed driver train to a
+full-strength one-shot with `fast_inhibitor=True`. A separate coincidence neuron receives
+that single pulse at **0.92 × single_need**, and the required TRUE rail at
+**0.76 × rate_need**. Its **−2 mV bias** gives stray input more room below threshold.
+The FALSE rail still vetoes it, at **0.15 × loop** rather than 0.5: about 10 mV sustained
+inhibition, which blocks a live FALSE rail and recovers within the two ordering windows.
+Neither `control.py` nor the 3 × 0.75 kill train changed. The shared `once_inh` still merges
+the two qualified paths while the first pulse's consumers extinguish the TRUE rails.
 
-The feature is `build_pipeline(true_guards=True)`. Campaign JSON records `true_guards: true`;
-`stall_diag` uses `campaign.get("true_guards", False)`, so old captures rebuild with their
-veto-only netlists. Each guarded conjunction adds one inhibitor neuron and five synapses
-(two required-rail inputs and three shared-inhibitor edges). Measured netlists:
+The model's actual `V_th − E_L` is **7 mV**; the coincidence neuron's explicit bias makes
+its own gap **9 mV**. The nominal pulse, rail and sum fractions are therefore
+`0.92×7/9 = 0.716`, `0.76×7/9 = 0.591`, and `1.68×7/9 = 1.307`. With +12% input weights
+and −1 mV threshold, a pulse alone reaches `0.92×1.12×7/8 = 0.902`; at −12%/+1 mV,
+the coincidence is `1.68×0.88×7/10 = 1.035`. A permanent rail with its loop +20%
+(47/39 times the nominal rate), rail edge +12%, and relay threshold −1 mV gives
+`0.76×(47/39)×1.12×7/8 = 0.898`. These peak/mean estimates do not establish timing
+safety; the tests below simulate the inhibitor race, veto history and strays. Mix B is
+log-normal weight σ=4%, Gaussian threshold and bias σ=0.2 mV each, plus 5 Hz × 150-quanta
+background input on every neuron. These are distributions, not bounded tolerances.
 
-| kernel | veto-only | true guards | delta |
-|---|---:|---:|---:|
-| 1-bit one-cell MOV, §10.3 requests | 990 / 1,680 | 993 / 1,695 | +3 / +15 |
-| 4-bit MULP, §10.3 requests | 7,188 / 12,487 | 7,197 / 12,532 | +9 / +45 |
-| `tick2.c` | 28,669 / 51,324 | 28,719 / 51,574 | +50 / +250 |
+The final chained guard now checks **every original TRUE rail**, serially, in addition to
+the original FALSE vetoes. A missing original input cannot be replaced by another rail's
+current or a stale passed pair. Each qualification replaces a delay hop to retain latency:
+the ordinary guard uses **11/19 hops** instead of 12/20, and each original-rail recheck
+removes one further hop on each path. Measured START after the held-back reader request is
+**186.7 ms versus 190.6 ms** with the veto-only circuit (−3.9 ms). Across the isolated
+nominal arrival-order grid (−100…+100 ms, 10 ms spacing), the first pulse is 0.6–49.4 ms
+earlier, never later; the larger improvements select the formerly vetoed ordering path.
 
-The historical timing regressions explicitly pass `true_guards=False`; their pinned 990 /
-1,680 and 7,188 / 12,487 sizes consequently remain unchanged. The new regressions show a
-dark commit-request pair committing twice under that legacy flag and once with true guards,
-and all four MULP rows START exactly three times for three tokens with
-`start_relight_hops=5`. No campaign-scale or cluster run was made here; the next integration
-step remains the seed 108--110 campaign with the five-hop re-light and four-pulse clear.
+Measured local results, with large sweeps marked `slow` and each isolated probe under two minutes:
+
+| RefSim probe | final result |
+|---|---:|
+| Mix B, both FALSE rails initially live, B−A offsets −60…+60 ms, immediate re-light | 0 lost and 0 duplicates / 3,000 |
+| Same, five-hop re-light | 0 lost and 0 duplicates / 3,000 |
+| Mix B, full delayed driver trains, other pair dark, both orderings | 0 passes / 10,000 |
+| Mix B, prescribed 213 Hz driver, required pair dark (review's inhibitor race) | 0 passes / 10,000 |
+| Permanent rail alone, including +20% loop/+12% rail/−1 mV corner, 2 s exposure | 0 pulses in all 12 corners |
+| Coincidence, −12…+12% inputs and −1…+1 mV threshold, independently fast inhibitor | exactly 1 pulse in all 12 corners |
+
+The forced-dark commit-request regression still commits once (legacy: twice). All four
+MULP rows START once per token with **both `start_relight_hops=0` and `5`**. The three
+repair regressions run with both guard settings. The phase-sensitive weak-clear fixture
+aligns its second-token schedule to the measured 41/40-step FALSE-rail orbits on both
+copies, so a change in guard latency does not rotate the selected clear corner. Its
+weights, repair timing, healthy/ablated comparison and expected results are unchanged.
+Only the intentionally broken dark-free-rail replay remains pinned to veto-only behavior;
+the legacy size controls also retain their explicit flag.
+
+Measured netlists (neurons / synapses; bias is stored in the netlist):
+
+| kernel | veto-only | final true guards | delta | biased neurons |
+|---|---:|---:|---:|---:|
+| 1-bit one-cell MOV, §10.3 requests | 990 / 1,680 | 993 / 1,695 | +3 / +15 | 6 |
+| 4-bit MULP, §10.3 requests | 7,188 / 12,487 | 7,197 / 12,532 | +9 / +45 | 18 |
+| `tick2.c` | 28,669 / 51,324 | 28,719 / 51,652 | +50 / +328 | 178 |
+
+The compensated ordinary guard still costs +1 neuron/+5 synapses versus veto-only;
+each original-rail recheck adds two further synapses across the two paths. Relative to
+`330fc52`, MOV and MULP keep their counts, and tick adds 78 synapses and no neurons.
+Counts alone cannot identify the changed wiring and biases. Campaign JSON therefore
+records `true_guard_version: 2`; `stall_diag` rejects unversioned/obsolete TRUE-guard
+captures and directs the reader to their recorded commit. Older veto-only captures still
+rebuild with `campaign.get("true_guards", False)`.
+
+These are finite isolated-guard and local functional measurements, not a campaign stall
+rate or proof against arbitrary noise. A dark reader-free rail intentionally blocks commit;
+its existing ACT^d re-light repair remains necessary. No campaign-scale or cluster run was
+made. The next integration experiment remains the seed 108–110 campaign with the delayed
+re-light and four-pulse request clear; that change is not enabled here.
+
+Final validation on the laptop CPU with Python 3.12, `uv`, and workspace-local `TMPDIR`.
+The runs reused the installed review environment with `UV_NO_SYNC=1` and `PYTHONPATH`
+pointing at this worktree:
+
+- `uv run pytest -q tests/test_true_guards.py tests/test_mul_diag.py tests/test_machine.py tests/test_stall_diag.py`
+  — **41 passed**, 7 min 17 s. The longest new Monte Carlo case took 27.8 s.
+- `uv run pytest -q tests/test_kernel.py tests/test_compiler.py tests/test_kernel_specialized.py`
+  — **119 passed, 64 skipped, 2 expected failures**, 78 min 55 s; the complete group was
+  run once after implementation. The skips are the repository's opt-in exhaustive
+  `RUN_SLOW=1` cases, which the requested default command does not enable. The longest
+  existing test (perspective rendering with MULP) took 13 min 16 s.

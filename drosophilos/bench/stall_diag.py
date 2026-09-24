@@ -65,6 +65,11 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     """Rebuild exactly the kernel shape used by ``kernel_campaign tick``."""
     if campaign.get("block", "tick") != "tick":
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
+    from ..lib.kernel import TRUE_GUARD_VERSION
+
+    if campaign.get("true_guards", False) and campaign.get("true_guard_version") != TRUE_GUARD_VERSION:
+        raise ValueError("unsupported true-guard circuit: rebuild this capture at its recorded commit; "
+                         f"the current circuit is version {TRUE_GUARD_VERSION}")
     from ..lib import control
 
     source = _repo_root() / "examples" / "tick2.c"

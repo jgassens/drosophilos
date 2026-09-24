@@ -35,13 +35,13 @@ def test_token_timeline_splits_phases_in_order():
     assert s["tokens"] == 2 and s["compute_ms"]["median"] == pytest.approx(60.0)
 
 
-@pytest.mark.parametrize("op", ["MUL", "MULP"])
-def test_probes_and_capture_on_a_real_multiplier_cell(op):
+@pytest.mark.parametrize("op,start_relight_hops", [("MUL", 0), ("MULP", 0), ("MULP", 5)])
+def test_probes_and_capture_on_a_real_multiplier_cell(op, start_relight_hops):
     spec = [{"name": "m", "op": op, "a": "input", "b": ("const", "k")}]
     ks = KernelSpec(spec, {"k": 3}, {}, "input", 4)
     ks.outputs = ["m"]
     pl = build_pipeline(P, 4, spec, consts={"k": 3}, outputs=["m"],
-                        start_relight_hops=5 if op == "MULP" else 0)
+                        start_relight_hops=start_relight_hops)
     ids, per_cell = mul_diag.capture_ids(pl)
     cells = mul_diag.multiplier_cells(pl)
     assert cells and all(c.op in mul_diag.MUL_OPS for c in cells)

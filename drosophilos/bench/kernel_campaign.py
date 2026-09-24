@@ -21,7 +21,7 @@ from ..lib import control
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
-from ..lib.kernel import build_pipeline, run_pipeline_batched
+from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
 from ..sim.model import Params
 from .a2_campaigns import MIXES
 
@@ -138,6 +138,7 @@ def main(argv=None):
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
            "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH], "powerup_veto": True, "commit_reignite": True, "true_guards": True, "retry_clear": False, "start_relight_hops": 0, "request_clear_pulses": 3,
+           "true_guard_version": TRUE_GUARD_VERSION,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
            "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
            "bad_outputs": st["bad_outputs"], "wrong_upper_95": _upper95(wrong, n), "non_ok_upper_95": _upper95(wrong + missing, n),
