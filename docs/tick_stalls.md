@@ -520,3 +520,21 @@ reload intact). Not the 300/300: that run had the fourth pulse on *every* kill t
 the request clear alone, and the machine's 45 ms interrupt reload is the only known thing a
 fourth pulse breaks. Next: four pulses on the kernel's kill trains only (`build_pipeline`
 owns them), the machine's unchanged.
+
+### True-rail guards + re-light delay 5 + four pulses on the kernel's kill trains (2026-09-24, `236a371`)
+
+Juno 422309–422311:
+
+| seed | ok | wrong | missing | stalled copies | wall |
+|---|---:|---:|---:|---:|---:|
+| 108 | 1,600 | 0 | 0 | 0 | 565 s |
+| 109 | 1,600 | 0 | 0 | 0 | 564 s |
+| 110 | 1,586 | 0 | 14 | 1 (copy 14, after token 2) | 980 s |
+
+**299 of 300 copies, 4,799 of 4,800 outputs, 0 wrong**, with the multiplier rows at one START
+per token, the control machine's interrupt reload intact (its kill trains keep three
+pulses), and every suite passing. The line that got here: guards that require the true rail
+(openai-sol, then openai-astra after the review found the lost-conjunction stall), START's
+re-light of a request rail delayed 5 hops, four pulses on the request clear and on every
+other kill train the kernel builds (`kernel_kill_pulses`), three on the machine's. Under
+review for integration.
