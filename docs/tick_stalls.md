@@ -491,3 +491,23 @@ gap where the real one is ~7 mV. The campaigns agreed and then some (Juno 421408
 16 % of copies against the shipped build's 4 %. Sent back for a fix round (openai-astra) with
 the reviewer's findings and measured targets: 0 lost conjunctions in 3,000 over −60..+60 ms
 offsets, 0 dark-pair passes in 10,000, latency within 10 ms of the old guard.
+
+### True-rail guards, second attempt (2026-09-23, openai-astra, commit `7e1240a`, under test)
+
+One-shot true-rail guards with biased coincidence checks, lighter vetoes, serial source
+rechecks and 11/19-hop delays; 0 lost conjunctions in 3,000 and 0 dark passes in 10,000 in
+its harnesses; START 3.9 ms faster; no new neurons (+78 synapses on the tick kernel). All
+suites pass, slow ones included. Campaigns (Juno 421747/421749/421750):
+
+| seed | ok | wrong | missing | stalled copies |
+|---|---:|---:|---:|---:|
+| 108 | 1,526 | 0 | 74 | 7 |
+| 109 | 1,521 | 0 | 79 | 8 |
+| 110 | 1,567 | 0 | 33 | 3 |
+
+18 of 300 (6 %) against the shipped build's 12 (4 %): no wrong values, but the guard change
+alone does not reduce stalls — it was never expected to; its job is to make the re-light
+delay and the four-pulse request clear safe. Next measurement: this commit with
+`start_relight_hops=5` and `REQUEST_CLEAR_PULSES=4` (the combination that gave 300/300 with
+the old guards and the global fourth pulse), which must also keep the multiplier rows at one
+START per token and the control machine's interrupt reload.
