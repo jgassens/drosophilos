@@ -288,7 +288,7 @@ def _run_dark_commit_pair(true_guards):
          "trigger": ["input:other"]},
     ]
     pl = build_pipeline(P, 1, spec, consts={"zero": 0}, outputs=["b"],
-                        streams=["input", "other"], true_guards=true_guards)
+                        streams=["input", "other"], start_relight_hops=0, true_guards=true_guards)
     producer, reader = pl.cells
     topo = pl.net.topology()
     quanta = np.broadcast_to(topo.quanta, (1, topo.nnz)).copy()

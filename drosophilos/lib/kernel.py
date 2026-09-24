@@ -171,7 +171,7 @@ def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, targe
         net.synapse(once_inh, target, -int(round(2.2 * drive.loop)))
 
 
-REQUEST_CLEAR_PULSES = 3  # the DONE-side clear of a request's false rail; 4 was tried (see build_pipeline)
+REQUEST_CLEAR_PULSES = 4  # the DONE-side clear of a request's false rail; 4 is now the default enabled by the true-rail guards (3 was tried; see build_pipeline)
 
 
 def _chain_true(net: Netlist, drive: Drive, name: str, pairs: list, target: int, image: list,
@@ -277,7 +277,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    outputs: list | None = None, in_watchdog_hops: int | None = None, streams: list | None = None,
                    phases: list | None = None, relight_requests: bool = True,
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
-                   retry_clear: bool = False, start_relight_hops: int = 0,
+                   retry_clear: bool = False, start_relight_hops: int = 5,
                    request_clear_pulses: int | None = None, true_guards: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
@@ -492,7 +492,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         for l in [c.act, c.idle[0]]:
             net.synapse(c.start, l.u, drive.ignite)
         # START re-lights each request's false rail ("consumed"). `start_relight_hops` (default
-        # 0: at once) is a recorded experiment, OFF: with the re-light 5 hops later and a
+        # 5) is a recorded experiment, OFF: with the re-light 5 hops later and a
         # 4 x 0.75 train everywhere, seeds 108-110 ran 300/300 copies clean (Juno 414205-7),
         # but a delay of 3 hops or more makes a cell START a second time ~32 ms after the
         # first — the go guard's delayed idle path lands inside the window where both request
@@ -511,6 +511,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # With the re-light `start_relight_hops` (~27 ms) after START the train has ended; in
         # between the pair is dark on both rails, which the go chain cannot act on (IDLE was
         # killed at START) and which only delays a producer's commit gate by the same ~27 ms.
+        # The true-rail guards now enable this five-hop delay as the default.
         if start_relight_hops and c.reqs:
             start_d = add_delay_chain(net, drive, f"{c.name}.start.fd", c.start, start_relight_hops)
             for pr in c.reqs.values():
