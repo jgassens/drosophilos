@@ -19,10 +19,10 @@ can still arise — a refused input word the host did not resend, a state cell's
 root lit by a stray coincidence, and a commit request's idle rail whose re-ignition failed —
 each localized from a spike capture and fixed with a regression test; the build with those
 fixes gives **0 wrong values in 4,800 outputs over three seeds**, with 4 % of copies stalled
-(fail-stops the machine itself can see). A further build removed every stall on the same
-three seeds (300 of 300 copies) but is not the default: it makes multiplier rows start
-twice, and the guard behaviour behind that — a dark request pair read as true — is the next
-thing to change (`docs/tick_stalls.md`).
+(fail-stops the machine itself can see). The guard behaviour behind the remaining stalls — a
+request pair dark on both rails read as true — was then changed so every guard requires the
+true rail, which made a delayed re-light and a fourth kill pulse safe: **299 of 300 copies
+and 4,799 of 4,800 outputs, 0 wrong values**, on the same three seeds (`docs/tick_stalls.md`).
 
 Three limits are also measured, and they do not move with more of the same work:
 

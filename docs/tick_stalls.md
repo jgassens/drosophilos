@@ -582,7 +582,7 @@ gap where the real one is ~7 mV. The campaigns agreed and then some (Juno 421408
 the reviewer's findings and measured targets: 0 lost conjunctions in 3,000 over −60..+60 ms
 offsets, 0 dark-pair passes in 10,000, latency within 10 ms of the old guard.
 
-### True-rail guards, second attempt (2026-09-23, openai-astra, commit `7e1240a`, under test)
+### True-rail guards, second attempt (2026-09-23, openai-astra, commit `7e1240a`)
 
 One-shot true-rail guards with biased coincidence checks, lighter vetoes, serial source
 rechecks and 11/19-hop delays; 0 lost conjunctions in 3,000 and 0 dark passes in 10,000 in
@@ -602,7 +602,7 @@ delay and the four-pulse request clear safe. Next measurement: this commit with
 the old guards and the global fourth pulse), which must also keep the multiplier rows at one
 START per token and the control machine's interrupt reload.
 
-### True-rail guards + re-light delay 5 + four-pulse request clear (2026-09-24, `9661b2e`, under test)
+### True-rail guards + re-light delay 5 + four-pulse request clear (2026-09-24, `9661b2e`)
 
 Juno 422219–422221: seed 108 1 stalled copy, 109 5, 110 8 — 14 of 300 (4.7 %), 0 wrong
 values, every suite passing (multiplier rows START once per token, the machine's interrupt
