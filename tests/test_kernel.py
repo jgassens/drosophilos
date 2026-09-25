@@ -6,7 +6,7 @@ import pytest
 from drosophilos.compiler.frontend_c import compile_c
 from drosophilos.compiler.kernel import NotAKernel, compile_kernel, kernel_reference, loop_body
 from drosophilos.isa.ir import interpret
-from drosophilos.lib.kernel import build_pipeline, run_pipeline
+from drosophilos.lib.kernel import LEGACY_2026_09_20, build_pipeline, run_pipeline
 from drosophilos.sim.model import Params
 
 PARAMS = Params()
@@ -59,7 +59,8 @@ def test_neural_pipeline_with_a_fan_out_value():
     print("fan-out pipeline", st)
 
 
-def test_chained_guard_rechecks_sources_when_passed_pair_is_reignited():
+@pytest.mark.parametrize("true_guards", [False, True])
+def test_chained_guard_rechecks_sources_when_passed_pair_is_reignited(true_guards):
     """A stale intermediate `passed` rail must not replay a multi-source cell.
 
     The two nodes run the same unperturbed three-input guard. After its legitimate start,
@@ -82,7 +83,8 @@ def test_chained_guard_rechecks_sources_when_passed_pair_is_reignited():
     idle = add_kill_pair(net, drive, "idle")
     image += [a[0], b[0], idle[1]]
     start = net.neuron("start")
-    _chain_true(net, drive, "go", [a, b, idle], start, image, start)
+    _chain_true(net, drive, "go", [a, b, idle], start, image, start,
+                true_guards=true_guards)
     for latch in (a[0], b[0], idle[0]):
         net.synapse(start, latch.u, drive.ignite)
     add_kill_train(net, drive, "start.kill", start, [a[1], b[1], idle[1]])
@@ -181,13 +183,13 @@ def _run_request_ambiguity_reproduction(pl, cell_name, source, token, max_ms):
 def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
     """Shape A: one stale row request adds a second product without another input token."""
     pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3}, relight_requests=False)  # §10.3 control
+                        consts={"k": 3}, relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "m.r1", "m.r0", 3, 8000)
     assert got == [[9], [9, 9]], (got, starts, stats)
     assert [len(x) for x in starts] == [1, 2]
-    # The fixed per-source pair has the fourth kill pulse on both transitions.
-    assert "m.r1.req.m.r0.k0.h3" in pl.net.roles and "m.r1.req.m.r0.k1.h3" in pl.net.roles
+    # The measured legacy pair has three pulses on both transitions.
+    assert "m.r1.req.m.r0.k0.h2" in pl.net.roles and "m.r1.req.m.r0.k0.h3" not in pl.net.roles
 
 
 @pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
@@ -198,7 +200,7 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     spec = [{"name": "a", "op": "LOAD", "a": "input", "mem": "m1"},
             {"name": "out", "op": "LOAD", "a": "a", "mem": "m2"}]
     pl = build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)},
-                        relight_requests=False)  # §10.3 control
+                        relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "out", "a", 2, 5000)
     assert got == [[9], [9, 9]], (got, starts, stats)
@@ -221,15 +223,8 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     # Pinned to the timing the corner was measured in: START re-lighting the rail at once and
     # the 3 x 0.75 train. On the 2026-09-20 build (START's re-light 5 hops later, 4 x 0.75) the
     # rail catches on copy 1 as well and nothing replays: both copies give [9, 15, 6].
-    from drosophilos.lib import control
-    saved = control.KILL_PULSES, control.KILL_STRENGTH
-    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
-    try:
-        pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=True, start_relight_hops=0,
-                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=False)
-    finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = saved
+    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                        consts={"k": 3}, relight_requests=True, **LEGACY_2026_09_20)
     assert pl.net.n < 30000
     cell = next(c for c in pl.cells if c.name == "m.r2")
     req = cell.reqs["m.r1"]
@@ -305,17 +300,12 @@ def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
     legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False,
-                            true_guards=False)
+                            **LEGACY_2026_09_20)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
-    assert (legacy.net.n, legacy.net.nnz) == (1008, 1711)  # 2026-09-24: kernel-wide fourth kill pulse adds 13 neurons / 26 synapses; default five-hop START re-light adds 5 neurons/synapses; 2026-09-20: commit idle rail's second ignition (+16/+17)
-    from drosophilos.lib import control
-    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75  # the race as measured: the 2026-09-19 train and re-light timing
-    try:
-        pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, start_relight_hops=0,
-                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
-    finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
+    assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # measured §10.3 veto-only, immediate-re-light, three-pulse netlist
+    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0},
+                        **{**LEGACY_2026_09_20, "true_guards": true_guards})
     cell = pl.cells[0]
     req = cell.reqs["input"]
     roles = pl.net.roles
@@ -418,20 +408,14 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
 
     legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                             consts={"k": 3}, relight_requests=False,
-                            true_guards=False)  # §10.3 count control; veto-only guard preserves the measured netlist
-    assert (legacy.net.n, legacy.net.nnz) == (7245, 12581)  # 2026-09-24: kernel-wide fourth kill pulse adds 37 neurons / 74 synapses; default five-hop START re-light adds 20 neurons/synapses; 2026-09-20: TIMEOUT cleared by the stage reset (+2 synapses), commit idle rail's second ignition (+80 neurons)
+                            **LEGACY_2026_09_20)  # measured §10.3 count control
+    assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # measured veto-only, immediate-re-light, three-pulse netlist
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
-    from drosophilos.lib import control
-    saved = control.KILL_PULSES, control.KILL_STRENGTH
-    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
-    try:
-        pl = build_pipeline(PARAMS, 1,
-                            [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
-                              "trigger": ["input", "input:other"]}],
-                            consts={"zero": 0}, streams=["input", "other"], start_relight_hops=0,
-                            request_clear_pulses=3, kernel_kill_pulses=3, true_guards=true_guards)
-    finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = saved
+    pl = build_pipeline(PARAMS, 1,
+                        [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
+                          "trigger": ["input", "input:other"]}],
+                        consts={"zero": 0}, streams=["input", "other"],
+                        **{**LEGACY_2026_09_20, "true_guards": true_guards})
     assert 2 * pl.net.n < 30000
     cell = pl.cells[0]
     req = cell.reqs["input"]

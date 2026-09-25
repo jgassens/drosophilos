@@ -626,5 +626,105 @@ per token, the control machine's interrupt reload intact (its kill trains keep t
 pulses), and every suite passing. The line that got here: guards that require the true rail
 (openai-sol, then openai-astra after the review found the lost-conjunction stall), START's
 re-light of a request rail delayed 5 hops, four pulses on the request clear and on every
-other kill train the kernel builds (`kernel_kill_pulses`), three on the machine's. Under
-review for integration.
+other kill train the kernel builds (`kernel_kill_pulses`), three on the machine's. Merged on
+2026-09-24 (`f108cb7`) after a Kimi review.
+
+### The ACT^d repair after a failed re-light: its tap moves with the re-light (2026-09-25, `relight_repair_delay`)
+
+A review of the merged line found a margin that the five-hop re-light took away. START now
+ignites a request's false rail ~31 ms after START. If that ignition fails and leaves stray
+spikes on the rail, each one fires the repair relay's veto interneuron (0.5 × loop, the veto
+that keeps a repair off a live false rail) only ~41 ms before the 14-hop ACT^d tap at +74 ms.
+The §10.5 comment promised >55 ms, but it was written for the immediate re-light. Unrepaired,
+the pair stays dark on both rails, and under true guards the producer's commit gate never
+passes again: a stall with no fault and no timeout. This is the likeliest cause of seed 110's
+copy 14, but that copy's capture has not been read to confirm it.
+
+Measured on a 1-bit MOV in RefSim (`tests/test_relight_repair.py`). START's ignition of false
+is removed, and k stray spikes are injected into the veto interneuron at the healthy
+ignition's time, a loop period apart. "Relay" is the repair relay's membrane, relative to
+rest, when the driver's pulse arrives; "ahead" is how long before its own feed-forward
+inhibition landed the relay fired.
+
+| strays | 14-hop tap, START + 74.2 ms | shipped tap, START + 111.3 ms |
+|---:|---|---|
+| 0 | −3.01 mV, repaired, 1.5 ms ahead | −0.47 mV, repaired, 2.7 ms ahead |
+| 1 | −4.45 mV, repaired, 0.7 ms ahead | −0.70 mV, repaired, 2.6 ms ahead |
+| 2 | −6.27 mV, **not repaired: stall** | −0.98 mV, repaired, 2.5 ms ahead |
+| 3 | −11.82 mV, **not repaired: stall** | −1.87 mV, repaired, 2.1 ms ahead |
+
+A k-sigma corner on the relay (driver −4k %, its inhibitor and the veto +4k %, V_th
++0.2k mV) makes it worse. Over 0–3 strays × 0–3 sigma the old tap loses 12 of 16 cases, one
+stray at 1 sigma among them. The options, measured or ruled out:
+
+- **Derive the tap from `start_relight_hops` (chosen, plus two hops).** Moving the tap by
+  the re-light's own five hops (100.7 ms) repairs every case up to 1 sigma. It still loses
+  three strays at 2 and 3 sigma: the third stray makes the veto interneuron fire a fourth
+  time, at +52 ms, only 49 ms before the tap. One more hop loses only 3 sigma with three
+  strays. Two more hops (111.3 ms) repair all 16 cases; the closest, 3 sigma with three
+  strays, repairs by 0.1 ms. A third extra hop adds only 0.3 ms there.
+- **A rate-mode detector on the false-rail veto** (ignore a short burst, block a train).
+  The tap would have to move anyway: the dying old true rail's own veto spikes (the last at
+  +19 ms) already leave the relay 3.0 mV below rest at the 14-hop tap, and with no stray at
+  all it misses at 3 sigma. A detector that ignores three strays must also wait for four or
+  more spikes, 15–20 ms of train, and it would weaken the live-false veto that seed 107
+  required. Not built.
+- **A delayed second START ignition, like `commit_reignite`.** Without a veto it is the
+  seed-107 hazard itself: a second ignition into a live request latch
+  (`test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear`). With
+  a veto it is the existing repair relay, with the same timing question.
+
+With the latch loop cut instead of the injection, every reader of the rail sees the spikes.
+At the shipped tap, one or two spikes repair up to 3 sigma. Cutting after three also fires a
+fourth spike from the residual current (+55.5 ms, last veto spike +65 ms); that case repairs
+up to 1 sigma and fails at 2 and 3 sigma.
+
+Checks at the shipped tap:
+
+- **A live false rail is never repaired.** The relay sits 31.8 mV below rest when the driver
+  arrives. It never fires in two transactions, even at a 2-sigma corner that favours the
+  repair.
+- **A new request's true rail vetoes the repair** when it rises 5–38 ms before the tap
+  (15–20 ms also at the favouring corner). The next START then serves the request.
+- **The common path is step-identical.** Healthy runs give the same output and DONE steps
+  (outputs at 14,206 and 28,200) and the same request→START latency (71.1 ms) with the flag
+  on or off. Only a failed ignition waits longer: its repair lands at START + 115.7 ms instead
+  of 79.8 ms (+35.9 ms), in the cases the old tap repaired at all.
+
+The fix adds 7 neurons and 7 synapses per cell with requests; the repair chain grows from 3
+hops to 10. Netlists (neurons / synapses):
+
+| kernel | before | after |
+|---|---:|---:|
+| 1-bit MOV | 1,012 / 1,725 | 1,019 / 1,732 |
+| 4-bit MULP | 7,258 / 12,622 | 7,286 / 12,650 |
+| `tick2.c` (13 cells) | 28,982 / 52,113 | 29,073 / 52,204 |
+
+`build_options` records the new flag as `relight_repair_delay` (default True).
+`LEGACY_2026_09_20` sets it False. Every campaign record without the key must rebuild with
+False; that includes the 299/300 run above. `stall_diag` rebuilds with the recorded value,
+falling back to the legacy one. The seed 108–110 campaign has not been run on this build.
+
+### Review fixes merged (2026-09-25, branch `review-fixes`)
+
+A max-effort review of the guards line found 15 items; all were fixed (kill policy on
+`Drive`, complete build records and rebuilds, honest legacy pins, `--observe-every`, the
+§10.3 path guarded, circuit hash covers bias, `.tmp/` out of the repo, tests pinned to the
+circuits they document, guard fixtures at 3 and 4 pulses, FastSim default-block coverage,
+`dark_request` diagnostic class, and the repair tap above). Seeds 108–110 on the result
+(Juno 424678–424680, 29,073 neurons):
+
+| seed | ok | wrong | missing | stalled copies | wall |
+|---|---:|---:|---:|---:|---:|
+| 108 | 1,600 | 0 | 0 | 0 | 571 s |
+| 109 | 1,600 | 0 | 0 | 0 | 575 s |
+| 110 | 1,600 | 0 | 0 | 0 | 572 s |
+
+**300 of 300 copies, 4,800 of 4,800 outputs, 0 wrong, 0 stalls.** Seed 110's copy 14, the one
+stall left on the previous build, completes: consistent with the repair-margin diagnosis,
+though its capture was never read. Independent review (kimi-k3, partial: timed out after
+four of five questions): netlists differ from the previous build only in the moved repair
+tap; 36 of 39 recorded campaigns rebuild to their neuron counts and the other 3 are the
+first-version guard records the version gate refuses by design. Found in passing and
+pre-existing: **the doom4 netlist is not deterministic across builds** (same counts,
+~9,000 edges differ between two builds of the same commit, before and after this work).

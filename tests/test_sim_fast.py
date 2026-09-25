@@ -240,8 +240,8 @@ def test_batched_runner_backends_agree_on_a_kernel():
 def test_single_node_runner_reads_a_fastsim_through_the_observer():
     pl = _mov_kernel()
     # A buffered observer deliberately changes host pacing: READY can reach the runner up to
-    # one observation block late.  Compare simulator arithmetic under the same per-step host
-    # schedule; the default buffered-observer transaction contract is covered above.
+    # one observation block late.  This per-step observer case compares simulator arithmetic
+    # under the same host schedule; the default buffered transaction is tested below.
     outs_r, sim_r, st_r = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000, full_trace=True)
     outs_f, sim_f, st_f = run_pipeline(
         pl, PARAMS, [1, 5], max_ms=5000, sim=FastSim(pl.net.topology(), PARAMS),
@@ -251,6 +251,16 @@ def test_single_node_runner_reads_a_fastsim_through_the_observer():
     assert outs_r == outs_f
     assert st_r["load_steps"] == st_f["load_steps"]
     assert sim_r.trace == sim_f.trace
+
+
+def test_single_node_runner_decodes_default_fastsim_observer_blocks_by_value():
+    pl = _mov_kernel()
+    outs_r, _, st_r = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000)
+    outs_f, _, st_f = run_pipeline(pl, PARAMS, [1, 5], max_ms=5000,
+                                   sim=FastSim(pl.net.topology(), PARAMS))
+    assert st_r["simulator"] == "RefSim" and st_f["simulator"] == "FastSim"
+    assert st_f["observe_every"] == 2 * pl.drive.loop_period_steps
+    assert [value for _, value in outs_f] == [value for _, value in outs_r] == [1, 5]
 
 
 def test_capture_spikes_agree_between_backends():

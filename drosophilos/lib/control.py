@@ -57,7 +57,7 @@ from ..protocol.token import decode_at, decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .alu import N_UNITS, OPS as ALU_OPS, alu_reference
-from .netlist import Drive, Netlist
+from .netlist import Drive, KILL_PULSES, KILL_STRENGTH, Netlist
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
 from .staged import StagedChannel, build_accumulator
 
@@ -195,15 +195,15 @@ def add_onehot_ring(net: Netlist, drive: Drive, name: str, n: int) -> Ring:
     return Ring(lines, killers)
 
 
-def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
+def add_kill_pair(net: Netlist, drive: Drive, name: str, pulses: int | None = None) -> list[Latch]:
     """A dual-rail bit whose rail latches kill each other at their rise: loading a value ignites
     the right rail, whose rise fires a kill train on the other rail. No reset train, no
     continuous inhibition; a reload to the other rail works ~20 ms after the previous load
     (a reload to the same rail is a harmless re-ignition). Both rails can be live for ~10 ms
     at a reload; readers sample later."""
     r0, r1 = add_latch(net, drive, f"{name}r0"), add_latch(net, drive, f"{name}r1")
-    add_kill_train(net, drive, f"{name}.k0", r0.u, [r1])
-    add_kill_train(net, drive, f"{name}.k1", r1.u, [r0])
+    add_kill_train(net, drive, f"{name}.k0", r0.u, [r1], pulses=pulses)
+    add_kill_train(net, drive, f"{name}.k1", r1.u, [r0], pulses=pulses)
     return [r0, r1]
 
 
@@ -216,18 +216,17 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str) -> list[Latch]:
 # after-hyperpolarisation makes the rails' relights, ~190 ms after a kill, fail under noise —
 # and 4 x 1.5 stops the control machine outright. The train is unchanged; a kill that beats a
 # fast latch without slowing the relight is a separate experiment (tests/test_kill_margin.py
-# keeps the measurement). Campaign records carry the train as `kill_train`.
-KILL_PULSES = 3  # Kernel-built kill trains use four pulses by default; machine trains use three. A fourth pulse everywhere lost the control machine's 45 ms interrupt reload (tests/test_machine.py)
-KILL_STRENGTH = 0.75
+# keeps the measurement). Campaign records carry the train as `kill_train`. The policy lives
+# on Drive: machine drives retain 3 x 0.75, while build_pipeline derives a four-pulse drive.
 
 
 def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int | None = None,
                    strength: float | None = None) -> int:
     """`source`'s rise (one relay) starts a short train of `pulses` inhibitory pulses on every
     member of `latches` (like a reset train, without an edge detector: the source is a relay
-    pulse or a fresh latch's rise). Defaults: KILL_PULSES x KILL_STRENGTH (see above)."""
-    pulses = KILL_PULSES if pulses is None else pulses
-    strength = KILL_STRENGTH if strength is None else strength
+    pulse or a fresh latch's rise). Defaults come from `drive`."""
+    pulses = drive.kill_pulses if pulses is None else pulses
+    strength = drive.kill_strength if strength is None else strength
     relay = add_edge_relay(net, drive, f"{name}.start", source, fast_inhibitor=True)
     inh = net.neuron(f"{name}.inh")
     prev = relay

@@ -23,6 +23,11 @@ def circuit_hash(pl) -> str:
     payload = {
         "neurons": int(pl.net.n),
         "edges": edges,
+        # Biases are per-neuron initial constants.  Preserve neuron order (rather than
+        # sorting values) because assigning a bias to a different role changes the image.
+        # Canonicalize sub-nanovolt representation noise without preserving -0.0.
+        "bias": [0.0 if (value := round(float(bias), 9)) == 0.0 else value
+                 for bias in getattr(pl.net, "bias", ())],
         # Constant values select the image rails lit at load time.  The edge table is
         # unchanged when a constant changes, but the built circuit image is not.
         "constants": sorted((str(k), int(v)) for k, v in getattr(pl, "const_values", {}).items()),

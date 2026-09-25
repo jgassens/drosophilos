@@ -16,8 +16,6 @@ import time
 
 import numpy as np
 
-from ..lib import control
-
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
@@ -72,6 +70,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--backend", default="torch", choices=("torch", "torch-fast"),
                     help="batched simulator (torch is the comparison/default backend)")
+    ap.add_argument("--observe-every", type=int, default=None,
+                    help="FastSim observation transfer interval in simulation steps")
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
@@ -109,7 +109,7 @@ def main(argv=None):
                              backend=a.backend)
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
                                          expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
-                                         capture_spikes=capture, backend=a.backend)
+                                         capture_spikes=capture, backend=a.backend, observe_every=a.observe_every)
     captured = st.pop("captured_spikes", None)
     if captured is not None:
         steps, neurons = captured
@@ -135,9 +135,10 @@ def main(argv=None):
         per_node.append((node_ok, node_wrong, node_missing))
     n = ok + wrong + missing
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
+           "observe_every": a.observe_every,
            "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
            "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
-           "kill_train": [control.KILL_PULSES, control.KILL_STRENGTH],
+           "kill_train": [pl.build_options["kernel_kill_pulses"], pl.build_options["kill_strength"]],
            "true_guard_version": TRUE_GUARD_VERSION,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),
            "per_node_refusals": [len(r) for r in st.get("refused", [])], "blocked_nodes": st.get("blocked_nodes", []),
