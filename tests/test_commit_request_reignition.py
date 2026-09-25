@@ -5,9 +5,10 @@ lights "pending" (killing "nothing"); the commit pulse fires when pending is tru
 reader is free, kills "pending" and re-lights "nothing". When the readers were already free
 the re-light comes ~50 ms after the kill, inside the rail's after-hyperpolarisation, and under
 noise the single ignition can fail: one spike, no train, both rails dark. On the legacy
-veto-only guard path (`true_guards=False`), a dark pair reads as true, and the reader's next
-START fires a second commit of the already-emptied stage. The reader takes a stale value and
-the producer runs one token behind from then on: silent wrong values, no fault. The fix is a
+veto-only guard path (`true_guards=False`), a dark pair reads as true, and a commit goes
+out on a stage that has nothing new to give: in this two-cell kernel the producer runs a
+token behind and the last output is never delivered (the tick kernel showed the same dark
+pair as a stale value instead — docs/tick_stalls.md, seed-110 copy 55). The fix is a
 second ignition ~85 ms after the commit pulse. Default true guards require a live true rail,
 so they reject a dark pair even if both ignitions are lost. This test models the failed first
 ignition by zeroing that synapse on one of two copies."""
@@ -66,7 +67,7 @@ def test_the_idle_rail_relights_after_every_commit_even_when_the_first_ignition_
         trains[node] = [int(((idle > c) & (idle < c + 1500)).sum()) for c in commits[:4]]
     got = [[v for _, v in o["b"]] for o in outs]
     assert got[0] == EXPECTED and got[1] == EXPECTED, got
-    assert got[2] == [2, 2, 3, 4], got  # before the fix: duplicate commit reads stale state
+    assert got[2] == [2, 3, 4], got  # before the fix: a commit fires on an empty stage and the last output is lost
     assert all(n >= 8 for n in trains[0]), trains  # nominal: the rail relights at once
     assert all(n >= 8 for n in trains[1]), trains  # lost first ignition: the delayed one relights it
     assert all(n <= 2 for n in trains[2]), trains  # before the fix: one spike, no train — a dark pair
