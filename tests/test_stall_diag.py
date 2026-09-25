@@ -1,6 +1,7 @@
 """Regression coverage for docs/perf_campaign.md §6 tick-stall diagnosis."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -50,6 +51,79 @@ def test_precedent_dump_localizes_live_false_repair_and_failed_clear():
     text = render_markdown(report)
     assert "request / repair / clear" in text
     assert "**37,674**" in text and "11828" in text
+
+
+def _two_cell_request_dump(tmp_path, monkeypatch, *, live_true: bool):
+    """Build a true-guard reader edge, then describe its spikes without simulation."""
+    pl = build_pipeline(
+        PARAMS,
+        1,
+        [
+            {"name": "producer", "op": "MOV", "a": ("const", "zero"), "b": "input"},
+            {"name": "reader", "op": "MOV", "a": ("const", "zero"), "b": "producer"},
+        ],
+        consts={"zero": 0},
+        outputs=["reader"],
+        true_guards=True,
+    )
+    producer, reader = pl.cells
+    request = reader.reqs["producer"]
+    spikes = [
+        (50, request[1].u),
+        (100, reader.start),
+        (200, reader.stage.completion.u),
+        (300, reader.commit_pulse),
+        (400, reader.reg.done_relay),
+        # The pair's final spike is after DONE; thereafter both rails are silent.
+        (500, request[0].u),
+        (1_000, producer.start),
+        (2_000, producer.stage.completion.u),
+        (30_000, reader.idle[1].u),
+    ]
+    if live_true:
+        spikes.append((30_000, request[1].u))
+    spikes.sort()
+    step = np.asarray([item[0] for item in spikes], dtype=np.int64)
+    neuron = np.asarray([item[1] for item in spikes], dtype=np.int64)
+    role = np.asarray([pl.net.roles[item[1]] for item in spikes])
+    dump_path = tmp_path / ("live_true.npz" if live_true else "dark_request.npz")
+    np.savez(dump_path, step=step, neuron=neuron, role=role)
+    campaign_path = tmp_path / "campaign.json"
+    campaign_path.write_text('{"copies": 1}')
+    monkeypatch.setattr(
+        "drosophilos.bench.stall_diag.build_tick_pipeline",
+        lambda _campaign: (PARAMS, SimpleNamespace(outputs=["reader"]), pl),
+    )
+    return analyze_dump(dump_path, campaign_path, node=0)
+
+
+def test_dark_request_names_reader_and_producer_and_renders_evidence(tmp_path, monkeypatch):
+    report = _two_cell_request_dump(tmp_path, monkeypatch, live_true=False)
+
+    assert report["classification"] == "dark_request"
+    assert report["first_blocked_cell"] == "reader"
+    assert report["waiting_producer"] == "producer"
+    assert report["anomaly"]["source"] == "producer"
+    assert report["anomaly"]["true_last"] == 50
+    assert report["anomaly"]["false_last"] == 500
+    assert report["anomaly"]["producer_stage"] == 2_000
+    assert any(candidate["kind"] == "consumer_holds" and candidate["cell"] == "producer"
+               for candidate in report["candidates"][1:])
+
+    text = render_markdown(report)
+    assert "**dark request**" in text
+    assert "Producer **`producer`**" in text
+    assert "`reader.req.producer` TRUE u" in text
+    assert "`reader.req.producer` FALSE u" in text
+    assert "**`reader` / 2 (blocked)**" in text
+
+
+def test_live_true_request_keeps_consumer_holds_classification(tmp_path, monkeypatch):
+    report = _two_cell_request_dump(tmp_path, monkeypatch, live_true=True)
+
+    assert report["classification"] == "consumer_holds"
+    assert report["anomaly"]["cell"] == "producer"
+    assert not any(candidate["kind"] == "dark_request" for candidate in report["candidates"])
 
 
 @pytest.mark.parametrize("true_guards", [False, True])

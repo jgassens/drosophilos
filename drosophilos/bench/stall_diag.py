@@ -344,6 +344,31 @@ def _candidate_anomalies(pl, dump: SpikeDump, layout: dict[str, dict[str, Any]],
                          events: dict[int, np.ndarray], gap: int, timeout: int) -> list[dict[str, Any]]:
     roles, end = pl.net.roles, dump.end
     candidates: list[dict[str, Any]] = []
+    # Veto-only (legacy) guards let go fire without a TRUE rail, so a dark pair blocks only
+    # under true guards.
+    true_guards = bool(getattr(pl, "build_options", {}).get("true_guards", True))
+
+    def waiting_to_commit(producer: str) -> dict[str, int] | None:
+        """Return the producer transaction held at commit, if it is captured."""
+        producer_info = layout.get(producer)
+        if producer_info is None or producer == "__inputs__":
+            return None
+        probes = producer_info["probes"]
+        if not (_observed(dump, roles, probes["stage"]) and
+                _observed(dump, roles, probes["commit"])):
+            return None
+        producer_events = _cell_events(producer_info, events, gap)
+        starts = producer_events["start"]
+        for index in range(len(starts) - 1, -1, -1):
+            start = starts[index]
+            stop = starts[index + 1] if index + 1 < len(starts) else None
+            stage = _first_after(producer_events["stage"], start, stop)
+            if stage is None:
+                continue
+            if _first_after(producer_events["commit"], stage, stop) is None:
+                return {"transaction": index + 1, "start": start, "stage": stage}
+        return None
+
     for name, info in layout.items():
         if name == "__inputs__":
             continue
@@ -375,6 +400,44 @@ def _candidate_anomalies(pl, dump: SpikeDump, layout: dict[str, dict[str, Any]],
         stuck = []
         usable = bool(info["requests"])
         for src, req in info["requests"].items():
+            # A true-guarded go cannot recover when both logical request rails have gone
+            # silent. Test this before the ordinary TRUE-live check makes the whole reader
+            # unusable. In a role-filtered dump, absence is evidence only for filtered roles.
+            true_observed = _observed(dump, roles, req["true_u"])
+            false_observed = _observed(dump, roles, req["false_u"])
+            if true_guards and true_observed and false_observed:
+                true_steps = events.get(req["true_u"], np.empty(0, dtype=np.int64))
+                false_steps = events.get(req["false_u"], np.empty(0, dtype=np.int64))
+                true_last = int(true_steps[-1]) if len(true_steps) else None
+                false_last = int(false_steps[-1]) if len(false_steps) else None
+                capture_start = int(dump.step[0]) if len(dump.step) else 0
+                dark_since = max((x for x in (true_last, false_last) if x is not None),
+                                 default=capture_start)
+                pair_dark = (not _is_live(events, req["true_u"], end, gap) and
+                             not _is_live(events, req["false_u"], end, gap) and
+                             end - dark_since >= timeout)
+                idle_n = info["probes"]["idle_true"]
+                reader_idle = (_observed(dump, roles, idle_n) and
+                               _is_live(events, idle_n, end, gap))
+                producer_wait = waiting_to_commit(src)
+                if pair_dark and (reader_idle or producer_wait is not None):
+                    # Date a causal producer/reader blockage at the earlier of the visible
+                    # dark interval and held stage, above the producer's consumer_holds symptom.
+                    causal_time = min(dark_since, producer_wait["stage"]) if producer_wait else dark_since
+                    candidates.append({
+                        "time": causal_time,
+                        "kind": "dark_request",
+                        "cell": name,
+                        "transaction": len(starts) + 1,
+                        "source": src,
+                        "waiting_producer": src if producer_wait is not None else None,
+                        "producer_transaction": (producer_wait or {}).get("transaction"),
+                        "producer_stage": (producer_wait or {}).get("stage"),
+                        "reader_idle": reader_idle,
+                        "dark_since": dark_since,
+                        "true_last": true_last,
+                        "false_last": false_last,
+                    })
             if not _observed(dump, roles, req["true_u"]):
                 usable = False
                 break
@@ -417,7 +480,20 @@ def _candidate_anomalies(pl, dump: SpikeDump, layout: dict[str, dict[str, Any]],
             if _first_after(ready, done) is None and end - done >= timeout:
                 candidates.append({"time": done, "kind": "producer", "cell": f"IN.{stream}",
                                    "transaction": index + 1, "done": done})
-    return sorted(candidates, key=lambda x: (x["time"], x["kind"], x["cell"]))
+    # A dark request is the cause of its waiting producer's consumer_holds, so it ranks no
+    # later than that symptom whatever the timestamps say.
+    held = defaultdict(list)
+    for c in candidates:
+        if c["kind"] == "consumer_holds":
+            held[c["cell"]].append(c["time"])
+
+    def rank(x: dict[str, Any]) -> tuple:
+        time = x["time"]
+        if x["kind"] == "dark_request" and x["waiting_producer"] is not None:
+            time = min([time, *held[x["waiting_producer"]]])
+        return (time, 0 if x["kind"] == "dark_request" else 1, x["kind"], x["cell"])
+
+    return sorted(candidates, key=rank)
 
 
 def _transaction_rows(info: dict[str, Any], events: dict[int, np.ndarray], gap: int) -> list[dict[str, Any]]:
@@ -538,7 +614,9 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
         "output_cells": list(ks.outputs), "counts": _campaign_counts(campaign, node),
         "detected_refusals": refusals, "refusal_roles": refusal_roles,
         "classification": anomaly["kind"], "anomaly": anomaly, "candidates": candidates,
-        "first_blocked_cell": cell_name if anomaly["kind"] in ("stuck_request", "blocked_go") else None,
+        "first_blocked_cell": cell_name if anomaly["kind"] in
+        ("stuck_request", "blocked_go", "dark_request") else None,
+        "waiting_producer": anomaly.get("waiting_producer"),
         "stuck_source": source, "stuck_latch_neuron": stuck_neuron,
         "repair_neuron": repair_neuron, "repair_step": repair_step,
         "clear_step": clear_step, "clear_pulses": clear_pulses, "false_intervals": false_intervals,
@@ -598,6 +676,26 @@ def render_markdown(report: dict[str, Any]) -> str:
             "Both request "
             "rails are consequently live; false vetoes the go chain, so START, ACT^d, stage "
             "completion, commit, and DONE do not occur."
+        )
+        lines.append(explanation)
+    elif report["classification"] == "dark_request":
+        cell, src = anomaly["cell"], anomaly["source"]
+        explanation = (
+            f"The first blocked cell is **`{cell}`**. Its request pair from **`{src}`** is a "
+            f"**dark request**: neither the TRUE nor FALSE rail has spiked after step "
+            f"**{anomaly['dark_since']:,}**, for longer than the stall threshold. "
+        )
+        if anomaly["waiting_producer"] is not None:
+            explanation += (
+                f"Producer **`{anomaly['waiting_producer']}`** completed stage "
+                f"{anomaly['producer_stage']:,} and waits to commit on this reader's "
+                "reversed free/request pair. "
+            )
+        else:
+            explanation += "The reader is idle, so the dark pair prevents its next go. "
+        explanation += (
+            "The TRUE-rail go guard cannot fire, and the absent FALSE/no-request rail also "
+            "keeps the producer's commit gate closed."
         )
         lines.append(explanation)
     elif report["classification"] == "blocked_go":
@@ -678,6 +776,28 @@ def render_markdown(report: dict[str, Any]) -> str:
             "; ".join(f"{a:,}–{b:,} ({count})" for a, b, count in report["false_intervals"][-3:]) + ".",
         ]
 
+    if report["classification"] == "dark_request":
+        cell, src = anomaly["cell"], anomaly["source"]
+        req = report["layout"][cell]["requests"][src]
+        producer = anomaly["waiting_producer"]
+        producer_stage_neuron = (report["layout"][producer]["probes"]["stage"]
+                                 if producer is not None else None)
+        lines += [
+            "",
+            "## Dark request evidence",
+            "",
+            "| Signal | Neuron | Last spike / state |",
+            "|---|---:|---:|",
+            f"| `{cell}.req.{src}` TRUE u | {req['true_u']} | {_n(anomaly['true_last'])}; dark thereafter |",
+            f"| `{cell}.req.{src}` FALSE u | {req['false_u']} | {_n(anomaly['false_last'])}; dark thereafter |",
+            f"| reader `{cell}` IDLE | {report['layout'][cell]['probes']['idle_true']} | "
+            + ("live at capture end" if anomaly["reader_idle"] else "not live at capture end") + " |",
+            f"| waiting producer `{producer}` stage | {_n(producer_stage_neuron)} | "
+            f"{_n(anomaly['producer_stage'])}; commit blocked |"
+            if producer is not None else
+            "| waiting producer | — | not established; reader-idle evidence used |",
+        ]
+
     if report["timelines"]:
         lines += [
             "",
@@ -700,6 +820,12 @@ def render_markdown(report: dict[str, Any]) -> str:
                 lines.append(
                     f"| **`{cell}` / {anomaly['transaction']} (blocked)** | "
                     f"{_request_text(anomaly['requests_ready'])} | **—** | — | — | — | — |"
+                )
+            elif cell == anomaly.get("cell") and anomaly["kind"] == "dark_request":
+                lines.append(
+                    f"| **`{cell}` / {anomaly['transaction']} (blocked)** | "
+                    f"{anomaly['source']} dark since {_n(anomaly['dark_since'])} | "
+                    "**—** | — | — | — | — |"
                 )
 
     counts = report["counts"]
