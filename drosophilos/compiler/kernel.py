@@ -143,8 +143,10 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
     allow_counter = [False]  # the counter's own update (i = i - 1) may read it; it is dead in the kernel
     n_cells = [0]
     written = set()
-    # variables read before they are written, and written somewhere in the body: state
-    reads_first, writes = set(), set()
+    # variables read before they are written, and written somewhere in the body: state. `writes`
+    # is a dict so the state keeps the body's first-write order: iterating a set of names follows
+    # PYTHONHASHSEED and made the doom4 netlist differ between builds (state order -> cell order)
+    reads_first, writes = set(), {}
     def scan(instrs):
         for ins in instrs:
             if isinstance(ins, str):
@@ -157,7 +159,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             if ins.op in ("JZ", "JNZ") and ins.srcs and ins.srcs[0] not in writes:
                 reads_first.add(ins.srcs[0])
             if ins.dst and ins.dst != "__x":
-                writes.add(ins.dst)
+                writes[ins.dst] = None
     scan(body)
     in_vars = set()
     def scan_in(instrs):
@@ -167,7 +169,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
             elif isinstance(ins, Instr) and ins.op == "CALL":
                 scan_in(prog.functions[ins.target])
     scan_in(body)
-    for v in (reads_first & writes) - in_vars:
+    for v in [w for w in writes if w in reads_first and w not in in_vars]:
         if v in params and v not in state:  # a value read before the loop and updated by it: state
             state[v] = params[v] & mask
             continue
@@ -305,7 +307,7 @@ def compile_kernel(prog: Program, body: list, stream: str, params: dict | None =
                 walk(else_arm, env_else)
                 # JZ skips the then-arm when cond == 0: then-arm applies when cond != 0 (SEL's a); JNZ the reverse
                 taken_nonzero = op == "JZ"
-                for v in set(env_then) | set(env_else):
+                for v in {**env_then, **env_else}:  # insertion order, not a set's hash order: one SEL per variable in a fixed order
                     t_, e_ = env_then.get(v, env.get(v)), env_else.get(v, env.get(v))
                     if t_ == e_:
                         env[v] = t_
