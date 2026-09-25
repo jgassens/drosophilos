@@ -5,6 +5,7 @@ import pytest
 
 from drosophilos.bench.a2_campaigns import MIXES
 from drosophilos.lib.control import add_kill_pair, add_kill_train
+from drosophilos.lib.kernel import add_kill_pair as add_kernel_kill_pair
 from drosophilos.lib.kernel import guarded_pulse, build_pipeline, run_pipeline_batched
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.sim.model import Params
@@ -62,17 +63,17 @@ class GuardProbe(RefSim):
         return np.bincount(self.events[neuron][1], minlength=self.B)
 
 
-def _guard_fixture(relight_hops=0, true_guards=True):
+def _guard_fixture(relight_hops=0, true_guards=True, pulses=4):
     from drosophilos.protocol.celement import add_delay_chain
 
     drive = Drive.from_params(P)
     net = Netlist(P)
-    a = add_kill_pair(net, drive, "a")
-    b = add_kill_pair(net, drive, "b")
+    a = add_kernel_kill_pair(net, drive, "a", pulses=pulses)
+    b = add_kernel_kill_pair(net, drive, "b", pulses=pulses)
     target = net.neuron("target")
     guarded_pulse(net, drive, "guard", a, b, target, true_guards=true_guards)
     # A real START consumes both TRUE rails immediately, then re-lights the FALSE rails.
-    add_kill_train(net, drive, "consume", target, [a[1], b[1]])
+    add_kill_train(net, drive, "consume", target, [a[1], b[1]], pulses=pulses)
     relight = add_delay_chain(net, drive, "relight", target, relight_hops)
     for pair in (a, b):
         net.synapse(relight, pair[0].u, drive.ignite)
@@ -81,9 +82,10 @@ def _guard_fixture(relight_hops=0, true_guards=True):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("relight_hops", [0, 5])
-def test_mix_b_nearby_rises_are_never_lost(relight_hops):
+@pytest.mark.parametrize("pulses", [3, 4])
+def test_mix_b_nearby_rises_are_never_lost(relight_hops, pulses):
     """Reviewer near.py: prior FALSE activity, real trains, B-A in [-60, +60] ms."""
-    net, drive, a, b, target = _guard_fixture(relight_hops)
+    net, drive, a, b, target = _guard_fixture(relight_hops, pulses=pulses)
     copies = 3000
     sim = GuardProbe(net, copies, 7, [target])
     offsets = np.rint(np.linspace(-600, 600, copies)).astype(int)
@@ -98,9 +100,10 @@ def test_mix_b_nearby_rises_are_never_lost(relight_hops):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("seed", range(10))
-def test_mix_b_dark_pair_never_passes(seed):
+@pytest.mark.parametrize("pulses", [3, 4])
+def test_mix_b_dark_pair_never_passes(seed, pulses):
     """10 x 1,000 actual driver trains, including strays on the whole guard."""
-    net, drive, a, b, target = _guard_fixture()
+    net, drive, a, b, target = _guard_fixture(pulses=pulses)
     sim = GuardProbe(net, 1000, seed, [target])
     for node in range(sim.B):
         # Both orderings, with the other pair completely dark. No single-spike shortcut.
@@ -213,11 +216,12 @@ def test_chained_guard_rechecks_every_original_true_rail():
     assert sim.counts(target).tolist() == [1, 0, 0, 0, 0, 0, 0]
 
 
-def test_both_arrival_orders_keep_the_legacy_latency():
+@pytest.mark.parametrize("pulses", [3, 4])
+def test_both_arrival_orders_keep_the_legacy_latency(pulses):
     offsets = np.arange(-1000, 1001, 100)
     latencies = []
     for true_guards in (False, True):
-        net, drive, a, b, target = _guard_fixture(true_guards=true_guards)
+        net, drive, a, b, target = _guard_fixture(true_guards=true_guards, pulses=pulses)
         sim = GuardProbe(net, len(offsets), 0, [target], noisy=False)
         for node, offset in enumerate(offsets):
             sim.add_events(node, [1, 1, 2500, 2500 + offset],
@@ -226,11 +230,11 @@ def test_both_arrival_orders_keep_the_legacy_latency():
         assert sim.counts(target).min() >= 1
         steps, nodes = (np.asarray(x) for x in sim.events[target])
         first = np.array([steps[nodes == node].min() for node in range(sim.B)])
-        latencies.append((first - 2500 - np.maximum(offsets, 0)) * P.dt)
-    # Recovery improvements can select an earlier path; no ordering may get >10 ms slower.
+        latencies.append(first - 2500 - np.maximum(offsets, 0))
+    # Recovery improvements can select an earlier path; no ordering may get >100 steps slower.
     delta = latencies[1] - latencies[0]
-    assert delta.max() <= 10.0, (offsets, latencies, delta)
-    print("guard latency delta (ms):", delta.min(), delta.max())
+    assert delta.max() <= 100, (offsets, latencies, delta)
+    print("guard latency delta (steps):", delta.min(), delta.max())
 
 
 def _spikes(sim, neuron, node):
@@ -315,7 +319,7 @@ def _run_dark_commit_pair(true_guards):
     starts = steps[neurons == reader.start].tolist()
     requests = steps[neurons == request].tolist()
     assert len(starts) == 1 and requests
-    return commits, (starts[0] - requests[0]) * P.dt
+    return commits, int(starts[0] - requests[0])
 
 
 def test_dark_commit_request_does_not_issue_a_second_commit():
@@ -324,6 +328,6 @@ def test_dark_commit_request_does_not_issue_a_second_commit():
 
     assert len(old_commits) == 2, old_commits
     assert len(guarded_commits) == 1, guarded_commits
-    print("reader START after request (ms):", old_start_latency, guarded_start_latency)
+    print("reader START after request (steps):", old_start_latency, guarded_start_latency)
     # Requiring a true train changes the qualification, not an ordinary request's timing.
-    assert abs(guarded_start_latency - old_start_latency) <= 10.0
+    assert abs(guarded_start_latency - old_start_latency) <= 100

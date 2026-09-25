@@ -29,17 +29,18 @@ TOKENS = [1, 2, 3]
 
 def _run(fast, retry):
     """Copies: node 0 nominal; node 1 a fast false rail (+20 % loop, -0.8 mV) with or without the retry.
-    Built with the 3 x 0.75 train of the time (the experiment's baseline; the default became
-    4 x 0.75 with the START re-light delay on 2026-09-20, which kills this rail by itself)."""
-    from drosophilos.lib import control
+    Built with the experiment's 3-pulse kernel trains and no START relight: the current default
+    is 4 x 0.75 with a delayed relight, which kills this rail by itself."""
 
     spec = [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}]
-    saved = control.KILL_PULSES, control.KILL_STRENGTH
-    control.KILL_PULSES, control.KILL_STRENGTH = 3, 0.75
-    try:
-        pl = build_pipeline(P, 4, spec, consts={"zero": 0}, retry_clear=retry, start_relight_hops=0, request_clear_pulses=3)
-    finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = saved
+    pl = build_pipeline(P, 4, spec, consts={"zero": 0}, retry_clear=retry,
+                        start_relight_hops=0, request_clear_pulses=3,
+                        kernel_kill_pulses=3, true_guards=False)
+    assert {key: pl.build_options[key] for key in
+            ("start_relight_hops", "request_clear_pulses", "kernel_kill_pulses", "true_guards")} == {
+                "start_relight_hops": 0, "request_clear_pulses": 3,
+                "kernel_kill_pulses": 3, "true_guards": False,
+            }
     roles = pl.net.roles
     cell = pl.cells[0]
     false, true = cell.reqs["input"]
