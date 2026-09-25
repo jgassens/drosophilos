@@ -101,6 +101,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         true_guards=campaign.get("true_guards", legacy["true_guards"]),  # recorded since 2026-09-23; older guards accepted dark pairs
         retry_clear=campaign.get("retry_clear", False),
         start_relight_hops=campaign.get("start_relight_hops", legacy["start_relight_hops"]),
+        relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
         request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
         kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
     )

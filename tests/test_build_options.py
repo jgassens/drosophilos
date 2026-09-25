@@ -29,6 +29,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "commit_reignite": True,
     "retry_clear": False,
     "start_relight_hops": 5,
+    "relight_repair_delay": True,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -75,7 +76,7 @@ def test_current_default_netlists_match_fixed_policy_builds():
         **tick_fixed.build_options,
     }
     _, _, tick_rebuilt = build_tick_pipeline(campaign)
-    assert (tick_default.net.n, tick_default.net.nnz) == (28982, 52113)
+    assert (tick_default.net.n, tick_default.net.nnz) == (29073, 52204)
     assert _pipeline_fingerprint(tick_default) == _pipeline_fingerprint(tick_fixed)
     assert _pipeline_fingerprint(tick_default) == _pipeline_fingerprint(tick_rebuilt)
 
@@ -94,14 +95,14 @@ def test_current_default_netlists_match_fixed_policy_builds():
     mov_default = build_pipeline(PARAMS, 1, mov_spec, consts={"zero": 0})
     mov_fixed = build_pipeline(PARAMS, 1, mov_spec, consts={"zero": 0},
                                drive=fixed_drive, **CURRENT_PIPELINE_OPTIONS)
-    assert (mov_default.net.n, mov_default.net.nnz) == (1012, 1725)
+    assert (mov_default.net.n, mov_default.net.nnz) == (1019, 1732)
     assert _pipeline_fingerprint(mov_default) == _pipeline_fingerprint(mov_fixed)
 
     mulp_spec = [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}]
     mulp_default = build_pipeline(PARAMS, 4, mulp_spec, consts={"k": 3})
     mulp_fixed = build_pipeline(PARAMS, 4, mulp_spec, consts={"k": 3},
                                 drive=fixed_drive, **CURRENT_PIPELINE_OPTIONS)
-    assert (mulp_default.net.n, mulp_default.net.nnz) == (7258, 12622)
+    assert (mulp_default.net.n, mulp_default.net.nnz) == (7286, 12650)
     assert _pipeline_fingerprint(mulp_default) == _pipeline_fingerprint(mulp_fixed)
 
 
@@ -118,6 +119,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "commit_reignite": False,
         "retry_clear": True,
         "start_relight_hops": 3,
+        "relight_repair_delay": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
