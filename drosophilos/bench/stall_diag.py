@@ -22,7 +22,7 @@ import argparse
 import json
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ import numpy as np
 
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, loop_body
-from ..lib.kernel import build_pipeline
+from ..lib.kernel import LEGACY_2026_09_20, build_pipeline
+from ..lib.netlist import Drive
 from ..sim.model import Params
 
 
@@ -70,8 +71,6 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     if campaign.get("true_guards", False) and campaign.get("true_guard_version") != TRUE_GUARD_VERSION:
         raise ValueError("unsupported true-guard circuit: rebuild this capture at its recorded commit; "
                          f"the current circuit is version {TRUE_GUARD_VERSION}")
-    from ..lib import control
-
     source = _repo_root() / "examples" / "tick2.c"
     prog = compile_c(source.read_text())
     ks = compile_kernel(prog, loop_body(prog), "i")
@@ -79,28 +78,32 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     # the kill train's shape is part of the netlist: campaigns record it since 2026-09-20;
     # earlier ones (seeds 107, 108) were built with 3 x 0.75
     pulses, strength = campaign.get("kill_train", (3, 0.75))
-    saved = control.KILL_PULSES, control.KILL_STRENGTH
-    control.KILL_PULSES, control.KILL_STRENGTH = int(pulses), float(strength)
-    try:
-        pl = build_pipeline(
-            params,
-            prog.width,
-            ks.cells,
-            consts=ks.consts,
-            mems=ks.mems,
-            outputs=ks.outputs,
-            datapath=campaign.get("datapath", "generic"),
-            relight_requests=campaign.get("relight_requests", True),
-            powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
-            commit_reignite=campaign.get("commit_reignite", False),
-            true_guards=campaign.get("true_guards", False),  # recorded since 2026-09-23; older guards accepted dark pairs
-            retry_clear=campaign.get("retry_clear", False),
-            start_relight_hops=campaign.get("start_relight_hops", 0),  # recorded since 2026-09-20; older builds relit at START
-            request_clear_pulses=campaign.get("request_clear_pulses", int(pulses)),  # older builds: the kill train's own count
-            kernel_kill_pulses=campaign.get("kernel_kill_pulses", int(pulses)),  # older builds: the kill train's own count
-        )
-    finally:
-        control.KILL_PULSES, control.KILL_STRENGTH = saved
+    legacy = {**LEGACY_2026_09_20,
+              "request_clear_pulses": int(pulses), "kernel_kill_pulses": int(pulses)}
+    drive = replace(Drive.from_params(params),
+                    kill_strength=float(campaign.get("kill_strength", strength)))
+    pl = build_pipeline(
+        params,
+        prog.width,
+        ks.cells,
+        consts=ks.consts,
+        mems=ks.mems,
+        outputs=ks.outputs,
+        drive=drive,
+        datapath=campaign.get("datapath", "generic"),
+        relight_requests=campaign.get("relight_requests", True),
+        act_hops=campaign.get("act_hops", 11),
+        idle_hops=campaign.get("idle_hops", 20),
+        watchdog_hops=campaign.get("watchdog_hops", 170),
+        in_watchdog_hops=campaign.get("in_watchdog_hops"),
+        powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
+        commit_reignite=campaign.get("commit_reignite", False),
+        true_guards=campaign.get("true_guards", legacy["true_guards"]),  # recorded since 2026-09-23; older guards accepted dark pairs
+        retry_clear=campaign.get("retry_clear", False),
+        start_relight_hops=campaign.get("start_relight_hops", legacy["start_relight_hops"]),
+        request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
+        kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
+    )
     expected_n = campaign.get("neurons")
     if expected_n is not None and int(expected_n) != pl.net.n:
         raise AssertionError(f"campaign has {expected_n} neurons; rebuilt tick kernel has {pl.net.n}")

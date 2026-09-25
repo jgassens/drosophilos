@@ -8,7 +8,7 @@ import torch
 
 from drosophilos.bench.stall_diag import analyze_dump, build_tick_pipeline, render_markdown
 from drosophilos.lib.campaign import Perturbation, make_perturbed_sim
-from drosophilos.lib.kernel import build_pipeline, load_pipeline_image, run_pipeline_batched
+from drosophilos.lib.kernel import LEGACY_2026_09_20, build_pipeline, load_pipeline_image, run_pipeline_batched
 from drosophilos.sim.model import Params
 
 
@@ -53,7 +53,7 @@ def test_precedent_dump_localizes_live_false_repair_and_failed_clear():
 
 
 @pytest.mark.parametrize("true_guards", [False, True])
-def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch, true_guards):
+def test_live_false_repair_is_vetoed_and_done_clear_survives(true_guards):
     """Encode the seed-107 mechanism directly; no impossible single-copy replay.
 
     Two RefSim copies share the measured within-token source-DONE spacing and a bounded
@@ -63,12 +63,8 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch, true_g
     rails live, and no second START. The current copy 0 must survive and complete twice.
     """
     from drosophilos.sim.ref64 import RefSim
-    from drosophilos.lib import control
-
     # the mechanism was measured on the 3 x 0.75 kill train of the time (its weights are set
     # explicitly below); pinned so the test does not depend on the default (tests/test_kill_margin.py)
-    monkeypatch.setattr(control, "KILL_PULSES", 3)
-    monkeypatch.setattr(control, "KILL_STRENGTH", 0.75)
     pl = build_pipeline(
         PARAMS,
         1,
@@ -76,8 +72,7 @@ def test_live_false_repair_is_vetoed_and_done_clear_survives(monkeypatch, true_g
           "trigger": ["input", "input:other"]}],
         consts={"zero": 0},
         streams=["input", "other"],
-        start_relight_hops=0, request_clear_pulses=3, kernel_kill_pulses=3,  # the precedent's timing: START re-lit the request rails at once, three-pulse clear
-        true_guards=true_guards,
+        **{**LEGACY_2026_09_20, "true_guards": true_guards},
     )
     cell = pl.cells[0]
     req = cell.reqs["input"]
@@ -226,7 +221,8 @@ def test_make_perturbed_sim_backends_agree_on_seeded_short_cpu_run():
 def test_kernel_campaign_torch_fast_reaches_sim_builder_and_runner(monkeypatch):
     from drosophilos.bench import kernel_campaign
 
-    assert kernel_campaign.parser().parse_args(["tick"]).backend == "torch"
+    defaults = kernel_campaign.parser().parse_args(["tick"])
+    assert defaults.backend == "torch" and defaults.observe_every is None
     real_block = kernel_campaign.block
     seen = {}
 
@@ -244,6 +240,7 @@ def test_kernel_campaign_torch_fast_reaches_sim_builder_and_runner(monkeypatch):
     def fake_run(pl, params, schedules, **kwargs):
         seen["run_backend"] = kwargs["backend"]
         seen["runner_sim"] = kwargs["sim"]
+        seen["observe_every"] = kwargs["observe_every"]
         ks, _pl, _tokens, reference = seen["built"]
         outs = []
         for _schedule in schedules:
@@ -258,7 +255,9 @@ def test_kernel_campaign_torch_fast_reaches_sim_builder_and_runner(monkeypatch):
     monkeypatch.setattr(kernel_campaign, "block", recording_block)
     monkeypatch.setattr(kernel_campaign, "make_perturbed_sim", fake_make)
     monkeypatch.setattr(kernel_campaign, "run_pipeline_batched", fake_run)
-    kernel_campaign.main(["fanout", "--copies", "1", "--max-ms", "1", "--backend", "torch-fast"])
+    kernel_campaign.main(["fanout", "--copies", "1", "--max-ms", "1", "--backend", "torch-fast",
+                          "--observe-every", "1"])
     assert seen["make_backend"] == "torch-fast"
     assert seen["run_backend"] == "torch-fast"
     assert seen["runner_sim"] is sentinel
+    assert seen["observe_every"] == 1

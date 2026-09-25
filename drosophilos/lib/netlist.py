@@ -31,6 +31,9 @@ import numpy as np
 
 from ..sim.model import Params, Topology
 
+KILL_PULSES = 3
+KILL_STRENGTH = 0.75
+
 
 @dataclass(frozen=True)
 class Drive:
@@ -45,6 +48,8 @@ class Drive:
     ignite: int = 0  # 1.8x need: the largest doublet-free ignition pulse. 2x loop produced a doublet
                      # and a latch briefly carrying two spikes read as +22 % rate to its gates
     relay_in: int = 0  # 1.8x need (~1.29x loop): edge relays fire ~1.8 ms after the source, >= 2 ms before their inhibitor lands; doublet-free below ~1.9x
+    kill_pulses: int = KILL_PULSES
+    kill_strength: float = KILL_STRENGTH
 
     @classmethod
     def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.65, or_margin=2.0, reset_factor=1.5) -> "Drive":

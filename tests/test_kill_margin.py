@@ -10,7 +10,8 @@ threshold, the kill started at 12 phases of the loop."""
 import numpy as np
 import pytest
 
-from drosophilos.lib.control import KILL_PULSES, KILL_STRENGTH, add_kill_train
+from drosophilos.lib.control import add_kill_train
+from drosophilos.lib.kernel import build_pipeline
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.protocol.latch import add_latch
 from drosophilos.sim.model import Params
@@ -58,19 +59,24 @@ def test_the_default_train_lets_a_fast_latch_through():
     # the margin problem behind seed-108 copy 8: the default 3 x 0.75 train against a
     # +20 % / -0.8 mV loop (38 steps). Stronger trains kill it but broke the kernel under noise
     # (3 x 1.5: 85 of 100 mix-B copies stalled, Juno 413672) or the control machine (4 x 1.5),
-    # so the default stays and this test records the open margin; a fix must turn it around.
-    from drosophilos.lib.kernel import REQUEST_CLEAR_PULSES
-    assert (KILL_PULSES, KILL_STRENGTH) == (3, 0.75) and REQUEST_CLEAR_PULSES == 4
+    # so the machine Drive retains that policy; the kernel derives the measured four-pulse
+    # policy, whose current margin is recorded below.
+    assert (D.kill_pulses, D.kill_strength) == (3, 0.75)
+    pl = build_pipeline(P, 1, [{"name": "out", "op": "MOV", "a": "input",
+                               "b": ("const", "zero")}], consts={"zero": 0})
+    assert (pl.build_options["kernel_kill_pulses"], pl.build_options["kill_strength"]) == (4, 0.75)
     period, survived = _survivors(3, 0.75, 1.2, -0.8)  # the general train, and the request clear until 2026-09-20
     assert 36 <= period <= 40, period
     assert survived == len(PHASES), survived  # every phase: the clear never works on this latch
+    period, survived = _survivors(4, 0.75, 1.2, -0.8)  # shipped kernel train against copy 8's +20 % / -0.8 mV latch
+    assert survived == 0, (period, survived)  # current margin: no surviving phases
     period, survived = _survivors(4, 0.75, 1.12, -0.8)  # 40 steps, copy 73's latch: the fourth pulse kills it at every phase
     assert survived == 0, survived
 
 
 @pytest.mark.parametrize("loop_scale,dvth", [(1.0, 0.0), (1.08, 0.0)])
 def test_the_default_train_kills_a_nominal_latch_at_every_phase(loop_scale, dvth):
-    period, survived = _survivors(KILL_PULSES, KILL_STRENGTH, loop_scale, dvth)
+    period, survived = _survivors(D.kill_pulses, D.kill_strength, loop_scale, dvth)
     assert survived == 0, (loop_scale, dvth, period, survived)
 
 
