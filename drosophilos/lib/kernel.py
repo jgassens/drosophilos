@@ -138,7 +138,8 @@ class _N:
 
 TRUE_GUARD_VERSION = 2  # one-shot driver, biased qualification, original TRUE-rail rechecks
 LEGACY_2026_09_20 = dict(true_guards=False, start_relight_hops=0,
-                         request_clear_pulses=3, kernel_kill_pulses=3)
+                         request_clear_pulses=3, kernel_kill_pulses=3,
+                         relight_repair_delay=False)
 
 
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
@@ -279,7 +280,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
                    retry_clear: bool = False, start_relight_hops: int = 5,
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
-                   true_guards: bool = True) -> Pipeline:
+                   true_guards: bool = True, relight_repair_delay: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -300,8 +301,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     go/commit guard; false changes only those guards to the older veto-only circuit and
     timing. `start_relight_hops` independently controls START's request-false re-light delay,
     `request_clear_pulses` the DONE-side request clear, and `kernel_kill_pulses` every other
-    kernel kill train. Pass `**LEGACY_2026_09_20` to select their complete measured legacy
-    combination in one place."""
+    kernel kill train. `relight_repair_delay=True` moves the ACT^d repair of a dark request
+    pair start_relight_hops + 2 hops later, past the veto left by the stray spikes of a failed
+    re-light (False: the 14-hop tap of builds before 2026-09-25). Pass `**LEGACY_2026_09_20`
+    to select their complete measured legacy combination in one place."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -536,25 +539,37 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # keeps firing ~85 ms after ACT is cleared, and relays need ~86 ms of source silence)
         act_d = add_delay_chain(net, drive, f"{c.name}.actd", c.start, act_hops)
         # §10.5, standard build (relight_requests=False selects §10.3 kill pairs):
-        # default tap T = START + (11+3)*5.3 ~= 74 ms,
-        # after the old true rail's kill and the veto's ~55 ms recovery. A true rail live
-        # by T-15 ms vetoes the repair. A later rise need NOT veto it: false has no kill
-        # path to true, and the independent DONE clear above kills false regardless of
-        # the true rail's edge-relay recovery. Its three pulses span ~11 ms and arrive
-        # ~10..22 ms after true's rise; their recovery tail covers a repair landing
-        # within ~15 ms of T. A still later DONE simply clears the already-repaired false.
+        # tap T = START + (11+3)*5.3 ~= 74 ms in the original timing (~111 ms at the
+        # defaults, see below), after the old true rail's kill and the veto's ~55 ms
+        # recovery. A true rail live by T-15 ms vetoes the repair. A later rise need NOT
+        # veto it: false has no kill path to true, and the independent DONE clear above
+        # kills false regardless of the true rail's edge-relay recovery. Its three pulses
+        # span ~11 ms and arrive ~10..22 ms after true's rise; their recovery tail covers
+        # a repair landing within ~15 ms of T. A still later DONE simply clears the
+        # already-repaired false.
         # Also veto on false itself: repairing a live latch can add a second circulating
         # spike. Tick copy 18 kept that faster train until the next DONE's clear, which
         # merely slowed it instead of killing it (both REQ rails then stayed live).
-        # A failed START ignition leaves at most an early spike, with >55 ms to recover
-        # before T; a sustaining false rail must be left alone.
         # Thus there is no request-arrival exclusion window around T. Bounded-delay
         # prerequisites: normal kill/ignite margins, source cycles >86 ms, and IDLE
         # remains false during this repair/clear interval. As in the original handshake,
         # a new request must survive the preceding START clear; no repair protects a
         # request injected into that clear. Custom hop counts must retain these margins.
+        # A failed START ignition can leave a few stray spikes on false, and each one vetoes
+        # the relay like a live rail. With the re-light 5 hops after START the first stray
+        # comes at ~+31 ms, only ~41 ms before the 14-hop tap: two strays, or one at a
+        # 1-sigma adverse relay corner (driver -4 %, inhibitor and veto +4 %, V_th +0.2 mV),
+        # blocked the repair; both rails stayed dark and a true-guarded producer never
+        # committed again, a silent stall (tests/test_relight_repair.py). So
+        # `relight_repair_delay` moves T by start_relight_hops + 2 hops: the re-light's own
+        # delay, plus two hops for a three-spike burst, whose veto interneuron fires last at
+        # ~+52 ms and then needs its ~55 ms. Measured on a 1-bit MOV: 0-3 strays repair at
+        # every corner up to 3 sigma (docs/tick_stalls.md). Only a failed ignition waits
+        # the extra ~37 ms; both live-rail vetoes keep their strength, so a sustaining
+        # false rail is still left alone. False rebuilds the 14-hop tap.
         if relight_requests:
-            relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, 3)
+            repair_hops = 3 + (start_relight_hops + 2 if relight_repair_delay else 0)
+            relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, repair_hops)
             for src, pr in c.reqs.items():
                 add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u, pr[0].u], pr[0])
         G = Gates(net, drive)
@@ -845,6 +860,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "commit_reignite": commit_reignite,
         "retry_clear": retry_clear,
         "start_relight_hops": start_relight_hops,
+        "relight_repair_delay": relight_repair_delay,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,
