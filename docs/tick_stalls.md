@@ -704,3 +704,27 @@ hops to 10. Netlists (neurons / synapses):
 `LEGACY_2026_09_20` sets it False. Every campaign record without the key must rebuild with
 False; that includes the 299/300 run above. `stall_diag` rebuilds with the recorded value,
 falling back to the legacy one. The seed 108–110 campaign has not been run on this build.
+
+### Review fixes merged (2026-09-25, branch `review-fixes`)
+
+A max-effort review of the guards line found 15 items; all were fixed (kill policy on
+`Drive`, complete build records and rebuilds, honest legacy pins, `--observe-every`, the
+§10.3 path guarded, circuit hash covers bias, `.tmp/` out of the repo, tests pinned to the
+circuits they document, guard fixtures at 3 and 4 pulses, FastSim default-block coverage,
+`dark_request` diagnostic class, and the repair tap above). Seeds 108–110 on the result
+(Juno 424678–424680, 29,073 neurons):
+
+| seed | ok | wrong | missing | stalled copies | wall |
+|---|---:|---:|---:|---:|---:|
+| 108 | 1,600 | 0 | 0 | 0 | 571 s |
+| 109 | 1,600 | 0 | 0 | 0 | 575 s |
+| 110 | 1,600 | 0 | 0 | 0 | 572 s |
+
+**300 of 300 copies, 4,800 of 4,800 outputs, 0 wrong, 0 stalls.** Seed 110's copy 14, the one
+stall left on the previous build, completes: consistent with the repair-margin diagnosis,
+though its capture was never read. Independent review (kimi-k3, partial: timed out after
+four of five questions): netlists differ from the previous build only in the moved repair
+tap; 36 of 39 recorded campaigns rebuild to their neuron counts and the other 3 are the
+first-version guard records the version gate refuses by design. Found in passing and
+pre-existing: **the doom4 netlist is not deterministic across builds** (same counts,
+~9,000 edges differ between two builds of the same commit, before and after this work).
