@@ -30,6 +30,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "retry_clear": False,
     "start_relight_hops": 5,
     "relight_repair_delay": True,
+    "copy_requires_rail": True,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -76,7 +77,7 @@ def test_current_default_netlists_match_fixed_policy_builds():
         **tick_fixed.build_options,
     }
     _, _, tick_rebuilt = build_tick_pipeline(campaign)
-    assert (tick_default.net.n, tick_default.net.nnz) == (29073, 52204)
+    assert (tick_default.net.n, tick_default.net.nnz) == (29375, 52808)
     assert _pipeline_fingerprint(tick_default) == _pipeline_fingerprint(tick_fixed)
     assert _pipeline_fingerprint(tick_default) == _pipeline_fingerprint(tick_rebuilt)
 
@@ -95,14 +96,14 @@ def test_current_default_netlists_match_fixed_policy_builds():
     mov_default = build_pipeline(PARAMS, 1, mov_spec, consts={"zero": 0})
     mov_fixed = build_pipeline(PARAMS, 1, mov_spec, consts={"zero": 0},
                                drive=fixed_drive, **CURRENT_PIPELINE_OPTIONS)
-    assert (mov_default.net.n, mov_default.net.nnz) == (1019, 1732)
+    assert (mov_default.net.n, mov_default.net.nnz) == (1029, 1752)
     assert _pipeline_fingerprint(mov_default) == _pipeline_fingerprint(mov_fixed)
 
     mulp_spec = [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}]
     mulp_default = build_pipeline(PARAMS, 4, mulp_spec, consts={"k": 3})
     mulp_fixed = build_pipeline(PARAMS, 4, mulp_spec, consts={"k": 3},
                                 drive=fixed_drive, **CURRENT_PIPELINE_OPTIONS)
-    assert (mulp_default.net.n, mulp_default.net.nnz) == (7286, 12650)
+    assert (mulp_default.net.n, mulp_default.net.nnz) == (7414, 12906)
     assert _pipeline_fingerprint(mulp_default) == _pipeline_fingerprint(mulp_fixed)
 
 
@@ -120,6 +121,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "retry_clear": True,
         "start_relight_hops": 3,
         "relight_repair_delay": False,
+        "copy_requires_rail": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -139,6 +141,8 @@ def test_build_options_record_every_netlist_shaping_option():
 
 def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
     _, _, pl = build_tick_pipeline({"block": "tick", "kill_train": [3, 0.75]})
+    # copy_requires_rail=False must retain the pre-fix legacy topology exactly.
+    assert (pl.net.n, pl.net.nnz) == (28439, 51071)
     assert pl.build_options == {
         "relight_requests": True,
         "datapath": "generic",

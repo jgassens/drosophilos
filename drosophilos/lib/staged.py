@@ -56,7 +56,8 @@ class StagedRegister:
 
 
 def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Register,
-                      M: Register | None = None, ordered_grant: bool = False, guard_hops: int = 12) -> StagedRegister:
+                      M: Register | None = None, ordered_grant: bool = False, guard_hops: int = 12,
+                      copy_requires_rail: bool = False) -> StagedRegister:
     """Wrap consumer register S (with completion and fault latch, i.e. after wire_fault_path)
     with a master M and a commit controller. The caller must NOT wire the producer's CLEARED
     to S's reset: S is cleared by commit-done, by F, or by the producer's TIMEOUT."""
@@ -90,10 +91,19 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     connect_trigger(net, drive, C.u, M.reset_trigger, M.reset_edge)  # granted -> clear M
     COPY = add_latch(net, drive, f"{name}.copy")
     net.synapse(M.ready, COPY.u, drive.ignite)  # M empty and recovered -> copy enable
-    copy_gates = []  # veto relays: COPY's rise ignites M rail r unless the stage holds rail 1-r
-    for i in range(n):  # (a rate-mode AND(COPY, S rail) sat on COPY alone for ~100 ms per commit and
-        for r in (0, 1):  # leaked in nodes whose COPY latch ran fast: master faults, 2 per 5,000)
-            copy_gates.append(add_veto_relay(net, drive, f"{name}.cp{i}r{r}", COPY.u, [S.rails[i][1 - r].u, F.u], M.rails[i][r]))
+    copy_gates = []
+    for i in range(n):
+        for r in (0, 1):
+            # COPY must see the selected stage rail, not merely the absence of its opposite.
+            # A stage fault can reset both rails while the commit pulse is still travelling
+            # through guardd.  The legacy absence-only arms then both fired and double-railed
+            # every master bit.  The required form remains a one-shot coincidence (rather
+            # than the old rate-mode AND that leaked while COPY held for ~100 ms).
+            require = [S.rails[i][r].u] if copy_requires_rail else []
+            copy_gates.append(add_veto_relay(
+                net, drive, f"{name}.cp{i}r{r}", COPY.u,
+                [S.rails[i][1 - r].u, F.u], M.rails[i][r], require=require,
+            ))
     # commit done = W_M's first spike, through an edge relay as a single pulse: W_M then holds
     # for as long as M is valid, and a train into the stage's edge-detected reset trigger would
     # hold that trigger down and block the F / TIMEOUT discards

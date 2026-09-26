@@ -139,7 +139,7 @@ class _N:
 TRUE_GUARD_VERSION = 2  # one-shot driver, biased qualification, original TRUE-rail rechecks
 LEGACY_2026_09_20 = dict(true_guards=False, start_relight_hops=0,
                          request_clear_pulses=3, kernel_kill_pulses=3,
-                         relight_repair_delay=False)
+                         relight_repair_delay=False, copy_requires_rail=False)
 
 
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
@@ -280,7 +280,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    datapath: str = "generic", powerup_veto: bool = True, commit_reignite: bool = True,
                    retry_clear: bool = False, start_relight_hops: int = 5,
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
-                   true_guards: bool = True, relight_repair_delay: bool = True) -> Pipeline:
+                   true_guards: bool = True, relight_repair_delay: bool = True,
+                   copy_requires_rail: bool = True) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -303,8 +304,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `request_clear_pulses` the DONE-side request clear, and `kernel_kill_pulses` every other
     kernel kill train. `relight_repair_delay=True` moves the ACT^d repair of a dark request
     pair start_relight_hops + 2 hops later, past the veto left by the stray spikes of a failed
-    re-light (False: the 14-hop tap of builds before 2026-09-25). Pass `**LEGACY_2026_09_20`
-    to select their complete measured legacy combination in one place."""
+    re-light (False: the 14-hop tap of builds before 2026-09-25).
+    `copy_requires_rail=True` makes each COPY arm require its selected stage rail as well
+    as vetoing the opposite rail, so a reset stage cannot copy an all-double word. Pass
+    `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -332,7 +335,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # out the 32-bit input register before its stage completed, cleared the stage, and the
         # commit then copied an empty stage as double rails (measured).
         add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
-        reg = add_staged_commit(net, drive, pre, S, P, ordered_grant=True)
+        reg = add_staged_commit(net, drive, pre, S, P, ordered_grant=True,
+                                copy_requires_rail=copy_requires_rail)
         creq = add_kill_pair(net, drive, f"{pre}.creq")  # [nothing to commit, commit pending]
         rl = add_edge_relay(net, drive, f"{pre}.autocommit", S.completion.u, fast_inhibitor=True)
         net.synapse(rl, creq[1].u, drive.ignite)
@@ -382,7 +386,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         c.idle = add_kill_pair(net, drive, f"{c.name}.idle")
         image.append(c.idle[1])
         _fault_latch(net, drive, c.name, c.stage)
-        c.reg = add_staged_commit(net, drive, c.name, c.stage, _NoProducer(), ordered_grant=True)
+        c.reg = add_staged_commit(net, drive, c.name, c.stage, _NoProducer(), ordered_grant=True,
+                                  copy_requires_rail=copy_requires_rail)
         c.master = c.reg.master
         c.creq = add_kill_pair(net, drive, f"{c.name}.creq")
         rl = add_edge_relay(net, drive, f"{c.name}.autocommit", c.stage.completion.u, fast_inhibitor=True)
@@ -861,6 +866,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "retry_clear": retry_clear,
         "start_relight_hops": start_relight_hops,
         "relight_repair_delay": relight_repair_delay,
+        "copy_requires_rail": copy_requires_rail,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

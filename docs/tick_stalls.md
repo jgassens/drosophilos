@@ -728,3 +728,48 @@ tap; 36 of 39 recorded campaigns rebuild to their neuron counts and the other 3 
 first-version guard records the version gate refuses by design. Found in passing and
 pre-existing: **the doom4 netlist is not deterministic across builds** (same counts,
 ~9,000 edges differ between two builds of the same commit, before and after this work).
+
+### Empty-stage COPY requires its true rail (2026-09-26)
+
+Seed 109 copy 73 exposed the same false-as-absence pattern at the stage-to-master boundary.
+A double-railed stage bit raised the fault latch and reset the stage while COMMIT was already
+travelling through the twelve-hop `guardd`. The delayed grant then reached an empty stage.
+Each legacy COPY arm vetoed only the opposite rail, so both arms passed for every dark bit
+and every master bit became double-railed.
+
+`copy_requires_rail=True` now uses `add_veto_relay(require=[selected_stage_rail])` on every
+COPY arm. The opposite stage rail and fault latch remain vetoes. The one-shot coincidence
+therefore preserves the old protection against a COPY latch's sustained train but cannot
+manufacture a value from two dark rails. The flag is recorded in `Pipeline.build_options`;
+`LEGACY_2026_09_20` and `stall_diag`'s missing-key fallback select False.
+
+A direct one-bit, two-cell RefSim/TorchSim fixture lights the other rail of a completed MOV
+stage so its reset arrives 5.4 ms after `commit_pulse`, with the pulse still in `guardd`.
+The legacy build reaches grant and COPY and leaves all four master bits double-railed. With
+the true-rail arms, the same delayed grant and COPY still occur, but the master is incomplete,
+no master bit is double-railed, and the ADD consumer produces no value: a detected stage
+fault followed by fail-stop, not a silent value. This demonstrates that cancelling the
+in-flight commit is not required for safety; a durable cancellation latch would add another
+reset/re-arm protocol while producing the same empty-master fail-stop. The true-rail COPY
+condition is the smaller sufficient mechanism.
+
+Nominal RefSim measurements at 0.1 ms/step (four transactions each):
+
+| kernel | legacy grant→master completion | true-rail grant→master completion | maximum added |
+|---|---|---|---:|
+| 1-bit MOV | 247.1, 246.3, 246.2, 246.5 ms | 250.9, 248.4, 247.9, 248.4 ms | 3.8 ms |
+| 1-bit ADD | 247.1, 246.9, 246.9, 246.9 ms | 250.9, 248.5, 248.4, 248.5 ms | 3.8 ms |
+
+Both kernels returned the same values with no faults, timeouts, or bad decodes. First-output
+latency rose 7.7 ms because a one-cell transaction crosses two protected COPY boundaries
+(input and result); steady per-token time rose 1.9 ms for MOV and 1.5 ms for ADD.
+Each COPY arm adds one coincidence neuron and two synapses. Netlists (neurons / synapses):
+
+| kernel | legacy arms | true-rail arms | delta |
+|---|---:|---:|---:|
+| 1-bit one-cell MOV or ADD | 1,019 / 1,732 | 1,029 / 1,752 | +10 / +20 |
+| 4-bit MULP | 7,286 / 12,650 | 7,414 / 12,906 | +128 / +256 |
+| `tick2.c` | 29,073 / 52,204 | 29,375 / 52,808 | +302 / +604 |
+
+These are nominal local measurements and deterministic regressions, not a new noisy or
+cluster campaign.
