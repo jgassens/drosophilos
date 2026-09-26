@@ -18,9 +18,18 @@ canonical serialized state (field order, widths, byte order, padding) rather tha
   given tokens, so 1,000 ticks = 1,000 tokens.
 - **Neural run**: `build_pipeline(..., outputs=[c4_sel, c9_sel, c12_sel])` — the kernel's two
   outputs (px, mx) plus health's carrier cell, so the host decodes every committed state word.
-  Tick *t* is complete when all three cells have committed their *t*-th word.
+  Tick *t* is complete when all three cells have committed exactly once after tick *t*'s input
+  injection and before the next input injection. The record uses the runner's `load_events`
+  (`schedule_index`, `event_step`) to assign commits to ticks, as well as their order. This
+  catches a missing state commit followed by an extra one even when the field value does not
+  change.
 - **Pass**: every copy's canonical state equals the reference's at every one of the 1,000 ticks,
-  with no commit beyond the requested ticks. Verdict `"exit met"` only then.
+  with exactly one commit from every state cell per tick, no missing or extra commits, and no
+  run-level fault or timeout latch. A run ended at `--max-ms` cannot pass. Verdict `"exit met"`
+  only then. `faults` and `timeouts` are batch counters from `lib/kernel.py`, not values that can
+  be attributed to an individual copy; the record labels that scope explicitly. Refusals and
+  retry counts are reported with the verdict counters but do not alone fail an otherwise correct
+  resend.
 
 ## 2. Canonical state (`stage-d-canonical-v1`)
 
@@ -78,22 +87,40 @@ its SEL cell still runs every tick. Over 1,000 ticks (seed 1) health changes 75 
 
 ## 5. Reporting (§6 discipline)
 
-Per copy: `requested` (ticks), `completed` (all three fields committed), `matched` (ticks equal
+Per copy: `requested` (ticks), `completed` (all three fields committed exactly once), `matched` (ticks equal
 before the first mismatch), `wrong` (1 at the first mismatch; counting stops there — a diverged
 state makes every later tick wrong and says nothing more), `unscored` (completed after it),
 `missing`, `duplicates` (commits beyond the requested ticks), `invalid` (undecodable words),
 `refusals`, `retries`, the first mismatch (`tick`, `token`, `field`, `expected`, `got`, both
 whole states, step, and a class: `state lags a tick` / `previous word applied twice` / `other`),
-and `tick_ms` (neural ms from the first load to each tick's last commit).
+and `tick_ms` (neural ms from the first load to each tick's last commit). A count mismatch is
+also a first mismatch and names its field, tick, expected commit count (always one), and observed
+count.
 
-Status per copy: `matched`, `wrong`, `blocked` (a word refused `max_retries` times: fail-stop),
-`truncated` (the run hit `--max-ms`, a resource limit), `stalled` (no output from any unfinished
-copy for `--stall-ticks` × the calibrated tick time), `unfinished`.
+Status per copy is one of `matched`, `mismatch`, `stalled`, or `truncated`. `mismatch` is the
+first wrong value or commit-count/order violation. A nonmatching copy is `stalled` if its last
+commit was more than `--stall-ticks` × the calibrated tick time before the run ended; its
+`stopped_at_tick` identifies the last fully committed tick. It is `truncated` only if it was
+still making progress when the run hit `--max-ms`. Thus a copy that ceased committing long before
+a batch's time cap is not mislabeled as truncated.
 
 Run-level: `faults`, `timeouts`, `bad_outputs`, `blocked_nodes` (the runner counts these for the
-whole batch, not per copy), `build_options` (the build's `pl.build_options`), `tokens`,
+whole batch, not per copy; `fault_timeout_scope` records this), `build_options` (the build's `pl.build_options`), `tokens`,
 `reference_canonical_hex`, `three_point_check`, `max_ms` and its source, the calibration,
-`tick_wall_s_copy0`, and `verdict`.
+`tick_wall_s_copy0`, `verdict_accounting` (faults, timeouts, refusals, retries, and scope), and
+`verdict`.
+
+New records retain compact `commit_events`, `load_events`, `run_end_step`, and `dt_ms` so a
+completed long job can be re-judged without simulation:
+
+```
+uv run python -m drosophilos.bench.stage_d --recheck data/stage_d/mixB_s108_c100.json
+```
+
+The command rewrites that record by default (or writes `--out FILE`), recomputing per-copy status
+and verdict. Older records that lack the saved injection/commit evidence are still rechecked for
+faults, timeouts, stored value mismatches, and liveness; their `recheck` note explicitly says the
+exactly-once commit-count rule was not checkable.
 
 **Sizing**: without `--max-ms`, a nominal single-copy run of `--calibrate-ticks` (4) ticks on the
 same backend measures the first-tick latency and the per-tick time; `max_ms = (first + ticks ×

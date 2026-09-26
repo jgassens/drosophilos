@@ -18,6 +18,7 @@ three comparison points, portable C <-> IR interpreter <-> neural execution.
 from __future__ import annotations
 
 import argparse
+import bisect
 import dataclasses
 import json
 import re
@@ -314,21 +315,91 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
 
 def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t_load0: int | None,
                  dt: float, load_events: list | None = None, refused: list | None = None,
-                 blocked: bool = False, limit: str | None = None) -> dict:
+                 blocked: bool = False, limit: str | None = None, run_end_step: int | None = None,
+                 stall_ms: float | None = None) -> dict:
     """One copy against the per-tick reference. Tick t is complete when every canonical field's
-    cell has committed its t-th word; its canonical state is compared with the reference's and
-    counting stops at the first mismatch (a diverged state makes every later tick wrong and says
-    nothing more). Counters follow docs/perf_campaign.md §6: requested / completed / matched /
-    wrong / missing / duplicates (commits beyond the requested ticks) / refusals / retries."""
+    cell has committed exactly one word after tick t's input injection and before the next input
+    injection.  The injection boundaries are important: positional matching cannot distinguish a
+    missed commit followed by a duplicate while a field happens to retain its value.  Counting
+    stops at the first mismatch (a diverged state makes every later tick wrong and says nothing
+    more).  `faults` and `timeouts` deliberately do not appear here: kernel.py reports those for
+    the whole batch, not for an individual copy."""
     fields, width = k.fields, k.width
     lists = [outs.get(k.cells[f], []) for f in fields]
     requested = len(ref)
-    completed = min(len(x) for x in lists)
-    duplicates = sum(max(0, len(x) - requested) for x in lists)
     ref_bytes = [canonical_state(r, width, fields) for r in ref]
     first, matched, invalid = None, 0, 0
-    for t in range(min(completed, requested)):
-        got = {f: lists[i][t][1] for i, f in enumerate(fields)}
+
+    # A retry has the same schedule_index as its original injection.  The final injection is the
+    # one whose resulting state can commit, so it is the lower boundary for that tick.
+    loads_by_tick = {}
+    for event in load_events or []:
+        index, step = event.get("schedule_index"), event.get("event_step")
+        if isinstance(index, int) and isinstance(step, (int, float)) and 0 <= index < requested:
+            loads_by_tick[index] = max(loads_by_tick.get(index, step), step)
+    load_steps = [loads_by_tick.get(t) for t in range(requested)]
+    commit_counts_checkable = requested == 0 or all(s is not None for s in load_steps)
+
+    if commit_counts_checkable:
+        # Bin each cell's commits between successive token injections.  Besides the counts, keep
+        # the bin for each positional word: a word must be both the next word and in its tick's
+        # injection interval.
+        bins = [[[] for _ in range(requested)] for _ in fields]
+        positions = [[] for _ in fields]
+        out_of_window = 0
+        for i, commits in enumerate(lists):
+            for ordinal, item in enumerate(commits):
+                step = item[0]
+                t = bisect.bisect_right(load_steps, step) - 1
+                positions[i].append(t)
+                if 0 <= t < requested:
+                    bins[i][t].append(item)
+                else:
+                    out_of_window += 1
+        count_rows = [{f: len(bins[i][t]) for i, f in enumerate(fields)} for t in range(requested)]
+        missing = sum(1 for row in count_rows if any(n == 0 for n in row))
+        duplicates = out_of_window + sum(max(0, n - 1) for row in count_rows for n in row.values())
+        completed = sum(1 for row in count_rows if all(n == 1 for n in row.values()))
+    else:
+        # Older records did not retain injections.  Preserve the former positional comparison,
+        # but label the new count invariant as uncheckable rather than claiming it passed.
+        completed = min((len(x) for x in lists), default=0)
+        duplicates = sum(max(0, len(x) - requested) for x in lists)
+        missing = requested - min(completed, requested)
+        bins = [[[] for _ in range(requested)] for _ in fields]
+        positions = [[] for _ in fields]
+        for i, commits in enumerate(lists):
+            for t, item in enumerate(commits[:requested]):
+                bins[i][t].append(item)
+                positions[i].append(t)
+        count_rows = [{f: len(bins[i][t]) for i, f in enumerate(fields)} for t in range(requested)]
+
+    for t in range(requested if commit_counts_checkable else min(completed, requested)):
+        counts = count_rows[t]
+        # The counts are the primary comparison when injection evidence is available.  Report
+        # the first bad cell and both its expected and observed count, even when its value is
+        # unchanged (the failure that positional matching missed).
+        bad_count = next((f for f in fields if counts[f] != 1), None)
+        if bad_count is not None:
+            got = {f: (bins[i][t][0][1] if len(bins[i][t]) == 1 else None) for i, f in enumerate(fields)}
+            step = max((item[0] for row in bins for item in row[t]), default=None)
+            first = {"tick": t, "token": tokens[t], "field": bad_count, "expected": ref[t][bad_count],
+                     "got": got[bad_count], "expected_state": ref[t], "got_state": got, "step": step,
+                     "class": "commit count", "expected_commits": 1, "got_commits": counts[bad_count],
+                     "commit_counts": counts}
+            break
+        # In addition to one commit in each interval, the t-th observed commit must be that
+        # interval's commit.  This makes the order constraint explicit in the record.
+        bad_order = next((fields[i] for i in range(len(fields))
+                          if len(positions[i]) > t and positions[i][t] != t), None)
+        if bad_order is not None:
+            got = {f: bins[i][t][0][1] for i, f in enumerate(fields)}
+            first = {"tick": t, "token": tokens[t], "field": bad_order, "expected": ref[t][bad_order],
+                     "got": got[bad_order], "expected_state": ref[t], "got_state": got,
+                     "step": bins[fields.index(bad_order)][t][0][0], "class": "commit order",
+                     "expected_commits": 1, "got_commits": 1, "commit_counts": counts}
+            break
+        got = {f: bins[i][t][0][1] for i, f in enumerate(fields)}
         try:
             ok = canonical_state(got, width, fields) == ref_bytes[t]
         except ValueError:
@@ -341,29 +412,49 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
                  "expected_state": ref[t], "got_state": got, "step": max(x[t][0] for x in lists),
                  "class": _mismatch_class(k, ref, tokens, t, got)}
         break
-    # per-tick timing: a tick completes at its last field's commit
-    tick_steps = [max(x[t][0] for x in lists) for t in range(completed)]
+    # Per-tick timing is meaningful only for structurally complete ticks.  In the fallback it
+    # retains the old positional calculation for compatibility with pre-v2 records.
+    if commit_counts_checkable:
+        tick_steps = [max(bins[i][t][0][0] for i in range(len(fields)))
+                      for t in range(requested) if all(count_rows[t][f] == 1 for f in fields)]
+    else:
+        tick_steps = [max(x[t][0] for x in lists) for t in range(completed)]
     tick_ms = [round((s_ - (t_load0 or 0)) * dt, 1) for s_ in tick_steps]
     retried = sorted({e["schedule_index"] for e in (load_events or []) if e.get("retry")})
-    wrong = 1 if first is not None else 0
-    if matched == requested and duplicates == 0:
+    # A missing trailing state is a liveness outcome, not a wrong state.  A missing commit
+    # followed by a later complete tick (or paired with an extra commit) is a true structural
+    # mismatch.  This distinction keeps a max-ms-cut copy from being mislabeled merely because
+    # its uncompleted final tick has no words.
+    terminal_shortfall = (first is not None and first["class"] == "commit count" and duplicates == 0 and
+                          not any(all(count_rows[u][f] == 1 for f in fields)
+                                  for u in range(first["tick"] + 1, requested)))
+    liveness_shortfall = terminal_shortfall or (first is None and missing > 0)
+    wrong = 1 if first is not None and not terminal_shortfall else 0
+    last_commit_step = max((item[0] for commits in lists for item in commits), default=None)
+    stopped_at_tick = completed - 1 if completed else None
+    if matched == requested and missing == 0 and duplicates == 0:
         status = "matched"
+    elif (liveness_shortfall and run_end_step is not None and stall_ms is not None and
+          run_end_step - (last_commit_step if last_commit_step is not None else (t_load0 or 0)) > stall_ms / dt):
+        status = "stalled"
+    elif liveness_shortfall and limit == "max_ms":
+        # A copy only earns this label when it was still making progress at the run's time cap.
+        status = "truncated"
+    elif liveness_shortfall and limit == "stall":
+        status = "stalled"
     elif first is not None:
-        status = "wrong"
-    elif blocked:
-        status = "blocked"  # a word refused max_retries times over: the node stopped (fail-stop)
-    elif limit:
-        status = "truncated" if limit == "max_ms" else "stalled"
+        status = "mismatch"
     else:
-        status = "unfinished"
+        status = "stalled" if blocked else "truncated"
     return {"status": status, "requested": requested, "completed": completed, "matched": matched,
-            "wrong": wrong, "unscored": max(0, min(completed, requested) - matched - wrong),
-            "missing": requested - min(completed, requested), "duplicates": duplicates, "invalid": invalid,
+            "wrong": wrong, "unscored": max(0, completed - matched - wrong),
+            "missing": missing, "duplicates": duplicates, "invalid": invalid,
             "first_mismatch": first, "refusals": len(refused or []), "retries": len(retried),
             "retried_ticks": retried,
             "retried_ticks_matched": all(t < matched for t in retried) if retried else None,
             "applied_twice": bool(duplicates) or (first is not None and first["class"] == "previous word applied twice"),
-            "tick_ms": tick_ms}
+            "commit_counts_checkable": commit_counts_checkable, "last_commit_step": last_commit_step,
+            "stopped_at_tick": stopped_at_tick, "tick_ms": tick_ms}
 
 
 def _mismatch_class(k: Kernel, ref, tokens, t, got) -> str:
@@ -389,11 +480,30 @@ def tick_wall_s(k: Kernel, wall: list, t0: float) -> list[float]:
     return [round(max(per[f][t] for f in k.fields) - t0, 2) for t in range(n)]
 
 
-def verdict(per_copy: list[dict], ticks: int) -> str:
-    if all(c["matched"] == ticks and c["duplicates"] == 0 for c in per_copy):
+def verdict(per_copy: list[dict], ticks: int, *, faults: int = 0, timeouts: int = 0,
+            truncated: bool = False) -> str:
+    """The Stage D exit.  Faults/timeouts are intentionally arguments rather than copy fields:
+    kernel.py counts those latches once for the entire batched run."""
+    if (per_copy and not truncated and faults == 0 and timeouts == 0 and
+            all(c["status"] == "matched" and c["matched"] == ticks and c["wrong"] == 0 and
+                c["missing"] == 0 and c["duplicates"] == 0 for c in per_copy)):
         return "exit met"
+    problems = []
+    if faults:
+        problems.append(f"{faults} faults (run-level)")
+    if timeouts:
+        problems.append(f"{timeouts} timeouts (run-level)")
+    if truncated:
+        problems.append("run truncated")
     kinds = sorted({c["status"] for c in per_copy if c["status"] != "matched"})
-    return "exit not met: " + ", ".join(f"{sum(1 for c in per_copy if c['status'] == s)} {s}" for s in kinds)
+    problems += [f"{sum(1 for c in per_copy if c['status'] == s)} {s}" for s in kinds]
+    # Include retry/refusal accounting in the verdict line as well as the counters record; this
+    # makes a pass with recovered input work visible without treating a retry as a failure.
+    refusals = sum(c.get("refusals", 0) for c in per_copy)
+    retries = sum(c.get("retries", 0) for c in per_copy)
+    problems.append(f"refusals {refusals}")
+    problems.append(f"retries {retries}")
+    return "exit not met: " + ", ".join(problems)
 
 
 # --- CLI --------------------------------------------------------------------------------------
@@ -418,7 +528,116 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--c-ticks", type=int, default=100, help="ticks cross-checked against the portable C reference")
     ap.add_argument("--fp32", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--recheck", metavar="RECORD.json",
+                    help="recompute a saved record's per-copy status and verdict; write it in place unless --out is given")
     return ap
+
+
+def _saved_load_events(events: list) -> list[dict]:
+    """The small, durable portion of runner load_events needed for tick assignment."""
+    return [{key: e[key] for key in ("schedule_index", "event_step", "retry", "attempts") if key in e}
+            for e in events]
+
+
+def _record_commit_events(outs: list[dict]) -> list[dict]:
+    """Commit evidence retained so --recheck can apply future state-order rules."""
+    return [{cell: [[step, value] for step, value in commits] for cell, commits in copy.items()}
+            for copy in outs]
+
+
+def _old_record_copy_status(copy: dict, rec: dict, ticks: int) -> dict:
+    """Reclassify an old v1 record when its raw load/commit evidence was not retained.
+    Value mismatches and liveness can still be judged; the count invariant cannot."""
+    c = dict(copy)
+    c["commit_counts_checkable"] = False
+    if c.get("first_mismatch") is not None or c.get("wrong", 0):
+        c["status"] = "mismatch"
+        return c
+    if c.get("matched", 0) == ticks and c.get("missing", 0) == 0 and c.get("duplicates", 0) == 0:
+        c["status"] = "matched"
+        return c
+    ms = c.get("tick_ms", [])
+    if not ms:
+        # v1 keeps tick_ms at the top level, and callers attach it before invoking this helper.
+        ms = []
+    last_ms = ms[-1] if ms else None
+    end_ms = rec.get("neural_s", 0) * 1000
+    stall_ms = rec.get("stall_ms")
+    if last_ms is not None and stall_ms is not None and end_ms - last_ms > stall_ms:
+        c["status"] = "stalled"
+    elif rec.get("stop") == "stall" or rec.get("stalled"):
+        c["status"] = "stalled"
+    else:
+        c["status"] = "truncated"
+    c["stopped_at_tick"] = c.get("completed", 0) - 1 if c.get("completed", 0) else None
+    return c
+
+
+def recheck_record(rec: dict) -> dict:
+    """Rejudge a persisted Stage D record without a neural run.
+
+    New records contain commit_events plus load_events, allowing the exact-once-per-tick rule to
+    be reapplied.  Old records remain useful: their saved counters, mismatch evidence, timings,
+    and batch latches are enough for the fault/timeout and per-copy-liveness rules.
+    """
+    ticks = int(rec.get("ticks", len(rec.get("tokens", []))))
+    raw = rec.get("commit_events")
+    loads = rec.get("load_events")
+    checkable = (isinstance(raw, list) and isinstance(loads, list) and len(raw) == len(loads) and
+                 all({e.get("schedule_index") for e in events if isinstance(e, dict)} >= set(range(ticks))
+                     for events in loads))
+    old_copies = rec.get("per_copy", [])
+    per_copy = []
+    if checkable:
+        k = load_kernel(rec.get("program", PROGRAM))
+        tokens = rec.get("tokens", [])
+        if len(tokens) != ticks:
+            raise ValueError("record tokens do not match record ticks")
+        ref = reference_states(k, tokens)
+        dt = float(rec.get("dt_ms", Params().dt))
+        run_end_step = rec.get("run_end_step")
+        if run_end_step is None and rec.get("neural_s") is not None:
+            run_end_step = round(float(rec["neural_s"]) * 1000 / dt)
+        for b, outs in enumerate(raw):
+            ev = loads[b]
+            first_load = next((e.get("event_step") for e in ev if e.get("schedule_index") == 0), 0)
+            c = compare_copy(k, ref, tokens, outs, t_load0=first_load, dt=dt, load_events=ev,
+                             refused=[None] * int(old_copies[b].get("refusals", 0)) if b < len(old_copies) else [],
+                             limit="max_ms" if rec.get("stop") == "max_ms" else None,
+                             run_end_step=run_end_step, stall_ms=rec.get("stall_ms"))
+            c["copy"] = b
+            per_copy.append(c)
+    else:
+        for b, old in enumerate(old_copies):
+            c = dict(old)
+            if b < len(rec.get("tick_ms", [])):
+                c["tick_ms"] = rec["tick_ms"][b]
+            c = _old_record_copy_status(c, rec, ticks)
+            c["copy"] = c.get("copy", b)
+            per_copy.append(c)
+
+    # Preserve the compact on-disk per_copy representation.  tick_ms remains top-level.
+    rec["per_copy"] = [{x: y for x, y in c.items() if x != "tick_ms"} for c in per_copy]
+    if checkable:
+        rec["tick_ms"] = [c["tick_ms"] for c in per_copy]
+    run_truncated = bool(rec.get("truncated") or rec.get("stop") == "max_ms")
+    rec["verdict"] = verdict(per_copy, ticks, faults=int(rec.get("faults", 0)),
+                             timeouts=int(rec.get("timeouts", 0)), truncated=run_truncated)
+    rec["verdict_accounting"] = {
+        "faults": int(rec.get("faults", 0)), "timeouts": int(rec.get("timeouts", 0)),
+        "refusals": sum(c.get("refusals", 0) for c in per_copy),
+        "retries": sum(c.get("retries", 0) for c in per_copy),
+        "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy",
+    }
+    rec["recheck"] = {
+        "commit_counts_checkable": checkable,
+        "note": ("exactly-once commit counts rechecked from saved load events"
+                 if checkable else "exactly-once commit counts not checkable: saved record lacks load steps/commit evidence"),
+        "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy",
+        "refusals": sum(c.get("refusals", 0) for c in per_copy),
+        "retries": sum(c.get("retries", 0) for c in per_copy),
+    }
+    return rec
 
 
 def calibrate(k: Kernel, pl, params, tokens, a, dtype) -> dict:
@@ -442,6 +661,15 @@ def calibrate(k: Kernel, pl, params, tokens, a, dtype) -> dict:
 
 def main(argv=None):
     a = parser().parse_args(argv)
+    if a.recheck:
+        source = Path(a.recheck)
+        rec = recheck_record(json.loads(source.read_text()))
+        target = Path(a.out) if a.out else source
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w") as f:
+            json.dump(rec, f, indent=1)
+        print(json.dumps({"verdict": rec["verdict"], "recheck": rec["recheck"]}, indent=1), flush=True)
+        return rec
     import torch
     P = Params()
     dtype = torch.float32 if a.fp32 else (torch.float64 if a.backend != "ref" else None)
@@ -467,13 +695,15 @@ def main(argv=None):
                    dtype=dtype, max_ms=max_ms, stall_ms=stall_ms, progress=300)
     st = r["stats"]
     limit = "stall" if st["stopped_on_stall"] else ("max_ms" if st.get("host_stalls") or st.get("truncated") else None)
+    run_end_step = round(float(st["neural_ms"]) / P.dt)
     refused = st.get("refused") or [[] for _ in range(a.copies)]
     per_copy = []
     for b in range(a.copies):
         loads = st["load_steps"][b]
         c = compare_copy(k, ref, tokens, r["outs"][b], t_load0=loads[0] if loads else 0, dt=P.dt,
                          load_events=st["load_events"][b], refused=refused[b],
-                         blocked=b in st.get("blocked_nodes", []), limit=limit)
+                         blocked=b in st.get("blocked_nodes", []), limit=limit, run_end_step=run_end_step,
+                         stall_ms=stall_ms)
         c["copy"] = b
         per_copy.append(c)
     n_ticks = [c["tick_ms"] for c in per_copy if len(c["tick_ms"]) > 1]
@@ -489,18 +719,26 @@ def main(argv=None):
         "copies": a.copies, "mix": a.mix, "datapath": pl.datapath, "neurons": pl.net.n,
         "build_options": dict(pl.build_options),
         "max_ms": round(max_ms, 1), "max_ms_source": "calibrated" if calib else "given", "calibration": calib,
-        "margin": a.margin, "stall_ms": stall_ms, "stop": limit or "complete",
+        "margin": a.margin, "stall_ms": stall_ms, "stop": limit or "complete", "dt_ms": P.dt,
+        "run_end_step": run_end_step,
         "three_point_check": check,
         "reference_canonical_hex": [canonical_state(s, k.width, k.fields).hex() for s in ref],
         "counters": totals, "faults": st["faults"], "timeouts": st["timeouts"], "bad_outputs": st.get("bad_outputs"),
+        "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy",
+        "verdict_accounting": {"faults": st["faults"], "timeouts": st["timeouts"],
+                                "refusals": totals["refusals"], "retries": totals["retries"],
+                                "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy"},
         "blocked_nodes": st.get("blocked_nodes", []), "truncated": limit == "max_ms", "stalled": limit == "stall",
         "retried_commit_applied_once": (not any(c["applied_twice"] for c in per_copy)),
         "retried_commit_scope": "host refusal resend only (lib/kernel.py retry_refused): no commit log, no TMR",
         "per_copy": [{x: y for x, y in c.items() if x != "tick_ms"} for c in per_copy],
         "tick_ms": [c["tick_ms"] for c in per_copy],
+        "commit_events": _record_commit_events(r["outs"]),
+        "load_events": [_saved_load_events(events) for events in st["load_events"]],
         "tick_wall_s_copy0": tick_wall_s(k, r["wall"][0], st["run_started_perf"]),
         "per_tick_neural_ms": per_tick_neural, "neural_s": st["neural_ms"] / 1000, "wall_s": round(time.time() - t0, 1),
-        "verdict": verdict(per_copy, a.ticks),
+        "verdict": verdict(per_copy, a.ticks, faults=st["faults"], timeouts=st["timeouts"],
+                           truncated=limit == "max_ms"),
     }
     summary = {x: rec[x] for x in ("verdict", "counters", "faults", "timeouts", "stop", "neural_s", "wall_s",
                                    "per_tick_neural_ms", "retried_commit_applied_once")}

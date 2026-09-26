@@ -18,6 +18,10 @@ def _fake_outs(states, k=K, step0=1000, per=100):
     return {k.cells[f]: [(step0 + per * t, s[f]) for t, s in enumerate(states)] for f in k.fields}
 
 
+def _fake_load_events(n, step0=1000, per=100):
+    return [{"schedule_index": t, "event_step": step0 + per * t, "retry": False} for t in range(n)]
+
+
 def test_state_cells_and_canonical_order():
     assert K.fields == ("px", "mx", "health")
     assert K.cells == {"px": "c4_sel", "mx": "c9_sel", "health": "c12_sel"}
@@ -81,13 +85,46 @@ def test_compare_counts_and_first_mismatch_on_synthetic_commits():
     bad[5]["health"] ^= 1
     c = sd.compare_copy(K, ref, tokens, _fake_outs(bad), t_load0=0, dt=0.1)
     fm = c["first_mismatch"]
-    assert (c["status"], c["matched"], c["wrong"], c["unscored"]) == ("wrong", 5, 1, 6)
+    assert (c["status"], c["matched"], c["wrong"], c["unscored"]) == ("mismatch", 5, 1, 6)
     assert (fm["tick"], fm["field"], fm["expected"], fm["got"], fm["token"]) == (5, "health", ref[5]["health"], bad[5]["health"], tokens[5])
     # unfinished: the last 3 ticks never committed, the run hit its neural-time limit
     short = sd.compare_copy(K, ref, tokens, _fake_outs(ref[:9]), t_load0=0, dt=0.1, limit="max_ms")
     assert (short["status"], short["completed"], short["missing"]) == ("truncated", 9, 3)
-    assert sd.verdict([ok, c, short], 12) == "exit not met: 1 truncated, 1 wrong"
+    assert sd.verdict([ok, c, short], 12) == "exit not met: 1 mismatch, 1 truncated, refusals 0, retries 0"
     assert sd.verdict([ok, ok], 12) == "exit met"
+
+
+def test_faults_block_exit_met_even_when_every_copy_matches():
+    tokens = sd.tokens_for(4, 2)
+    ref = sd.reference_states(K, tokens)
+    ok = sd.compare_copy(K, ref, tokens, _fake_outs(ref), t_load0=0, dt=0.1)
+    assert sd.verdict([ok], 4, faults=1) == "exit not met: 1 faults (run-level), refusals 0, retries 0"
+
+
+def test_a_copy_stalled_before_a_max_ms_cut_is_not_truncated():
+    tokens = sd.tokens_for(12, 3)
+    ref = sd.reference_states(K, tokens)
+    # Its last state word was at step 1,800, long before this max-ms run ended at 5,000.
+    c = sd.compare_copy(K, ref, tokens, _fake_outs(ref[:9]), t_load0=1000, dt=0.1,
+                        limit="max_ms", run_end_step=5000, stall_ms=100.0)
+    assert (c["status"], c["stopped_at_tick"]) == ("stalled", 8)
+
+
+def test_commit_counts_detect_missing_plus_extra_on_a_constant_field():
+    tokens = sd.tokens_for(6, 8)
+    ref = sd.reference_states(K, tokens)
+    outs = _fake_outs(ref)
+    health = outs[K.cells["health"]]
+    # health remains 100 here.  Dropping tick 1 and adding a second tick-2 commit preserves
+    # both the observed list length and its values, so the old positional comparison passed.
+    del health[1]
+    health.append((1220, ref[2]["health"]))
+    health.sort()
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=1000, dt=0.1,
+                        load_events=_fake_load_events(len(tokens)))
+    fm = c["first_mismatch"]
+    assert c["status"] == "mismatch" and c["commit_counts_checkable"] is True
+    assert (fm["field"], fm["tick"], fm["expected_commits"], fm["got_commits"]) == ("health", 1, 1, 0)
 
 
 def test_a_word_applied_twice_is_named():
@@ -134,9 +171,12 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
     assert rec["per_copy"][1]["first_mismatch"]["tick"] == 3 and rec["per_copy"][1]["first_mismatch"]["field"] == "mx"
     assert rec["counters"] == {"requested": 20, "completed": 20, "matched": 13, "wrong": 1, "unscored": 6, "missing": 0,
                                "duplicates": 0, "invalid": 0, "refusals": 0, "retries": 0}
-    assert rec["verdict"] == "exit not met: 1 wrong" and rec["retried_commit_applied_once"] is True
+    assert rec["verdict"] == "exit not met: 1 mismatch, refusals 0, retries 0" and rec["retried_commit_applied_once"] is True
     assert rec["canonical_format"] == sd.FORMAT and len(rec["reference_canonical_hex"]) == 10
     assert rec["three_point_check"]["ir_equal"] and len(rec["tick_ms"][0]) == 10
+    rechecked = sd.main(["--recheck", str(out)])
+    assert rechecked["per_copy"][1]["status"] == "mismatch"
+    assert rechecked["recheck"]["commit_counts_checkable"] is False
 
 
 @pytest.fixture(scope="module")
@@ -170,5 +210,5 @@ def test_a_corrupted_reference_gives_a_first_mismatch_record(neural6):
     ref[2] = dict(ref[2], px=(ref[2]["px"] + 1) % 256)
     c = sd.compare_copy(K, ref, tokens, r["outs"][0], t_load0=0, dt=PARAMS.dt)
     fm = c["first_mismatch"]
-    assert (c["status"], c["matched"], fm["tick"], fm["field"]) == ("wrong", 2, 2, "px")
+    assert (c["status"], c["matched"], fm["tick"], fm["field"]) == ("mismatch", 2, 2, "px")
     assert fm["expected"] == ref[2]["px"] and fm["got"] == (ref[2]["px"] - 1) % 256 and fm["token"] == tokens[2]
