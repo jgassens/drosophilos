@@ -162,3 +162,17 @@ opposite rail as sufficient. Wiring the master's existing fault gates into a fai
 would add defense in depth, but would only detect this race after the invalid COPY. The Stage
 D faults cannot be assigned this mechanism until a capture shows the same fault/commit/reset/
 all-bit-master sequence; `fault_diag.py` is intended for that check.
+
+## Recapture (Juno 425635, 2026-09-26): the trigger is a false fault, not a double rail
+
+The targeted recapture reproduced copy 73 exactly (7 ok / 9 missing, 1 fault). The Z=1 rail
+`c8_sub.Q.b9r1.u` (neuron 5250) and its driver `alu.z1.edge` never fired. Only the correct
+Z=0 rail `c8_sub.Q.b9r0.u` (5248) was live, and it was running **fast: one spike every 34
+steps** against the nominal 47 (224,539, 224,573, 224,607, ... 224,777). The fault gate
+`c8_sub.Q.fault9.and` (5325) is a rate-mode AND with both rails at 211 quanta each (0.55 of
+the train need at the *nominal* rate); one rail at 47/34 = 1.38x the rate supplies ~0.76 of
+the need alone, and a stray-input spike covers the rest. It fired at 224,804, 27 steps after
+the rail's last spike. So the chain is: a fast latch (the mix-B drift class of the kill-margin
+item) trips a rate-mode fault gate on a correct word -> the stage resets under an in-flight
+commit -> the empty stage is copied (fixed on 2026-09-26: `copy_requires_rail`, now a
+fail-stop). The hypothesis above (a stray Z=1 ignition) is **refuted**.
