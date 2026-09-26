@@ -103,6 +103,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         start_relight_hops=campaign.get("start_relight_hops", legacy["start_relight_hops"]),
         relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
         copy_requires_rail=campaign.get("copy_requires_rail", legacy["copy_requires_rail"]),
+        rate_robust=campaign.get("rate_robust", False),  # older captures used raw latch rates
         request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
         kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
     )

@@ -59,6 +59,7 @@ from .control import add_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
+from ..protocol.rate import condition_rate_gate
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
 from ..protocol.celement import add_veto_neuron
 from .staged import StagedRegister, add_staged_commit
@@ -139,7 +140,8 @@ class _N:
 TRUE_GUARD_VERSION = 2  # one-shot driver, biased qualification, original TRUE-rail rechecks
 LEGACY_2026_09_20 = dict(true_guards=False, start_relight_hops=0,
                          request_clear_pulses=3, kernel_kill_pulses=3,
-                         relight_repair_delay=False, copy_requires_rail=False)
+                         relight_repair_delay=False, copy_requires_rail=False,
+                         rate_robust=False)
 
 
 def guarded_pulse(net: Netlist, drive: Drive, name: str, A: list, B: list, target: int, d1: int = 12, d2: int = 20,
@@ -281,7 +283,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    retry_clear: bool = False, start_relight_hops: int = 5,
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
                    true_guards: bool = True, relight_repair_delay: bool = True,
-                   copy_requires_rail: bool = True) -> Pipeline:
+                   copy_requires_rail: bool = True, rate_robust: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -306,13 +308,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     pair start_relight_hops + 2 hops later, past the veto left by the stray spikes of a failed
     re-light (False: the 14-hop tap of builds before 2026-09-25).
     `copy_requires_rail=True` makes each COPY arm require its selected stage rail as well
-    as vetoing the opposite rail, so a reset stage cannot copy an all-double word. Pass
+    as vetoing the opposite rail, so a reset stage cannot copy an all-double word.
+    `rate_robust=True` gives rate-mode readers shared refractory-limited input taps and
+    larger signal-to-background margin. It is opt-in: faster fault detection changes
+    historical in-flight-fault timing, and campaign rollout is a separate experiment. Pass
     `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
         raise ValueError("relight_requests=False requires true_guards=False")
-    drive = replace(drive or Drive.from_params(params), kill_pulses=kernel_kill_pulses)
+    drive = replace(drive or Drive.from_params(params), kill_pulses=kernel_kill_pulses,
+                    rate_robust=rate_robust)
     request_clear_pulses = drive.kill_pulses if request_clear_pulses is None else request_clear_pulses
     net = Netlist(params)
     image: list = []
@@ -492,6 +498,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     net.synapse(late, gate, int(round(0.5 * drive.single_need)))
                     net.synapse(pair[0].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
                     net.synapse(pair[1].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
+                    condition_rate_gate(net, drive, gate)
                     # at the register reset's strength: a rail this fast survives 0.75 x pulses at
                     # every phase; the after-hyperpolarisation cost is paid only in the stuck case,
                     # and a false rail that then fails to re-light at START is repaired by the
@@ -867,6 +874,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "start_relight_hops": start_relight_hops,
         "relight_repair_delay": relight_repair_delay,
         "copy_requires_rail": copy_requires_rail,
+        "rate_robust": drive.rate_robust,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

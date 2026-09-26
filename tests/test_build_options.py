@@ -1,6 +1,8 @@
 """Build-policy recording and structural netlist regressions."""
 
 from dataclasses import replace
+import hashlib
+import json
 
 import pytest
 
@@ -31,6 +33,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "start_relight_hops": 5,
     "relight_repair_delay": True,
     "copy_requires_rail": True,
+    "rate_robust": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -91,6 +94,14 @@ def test_current_default_netlists_match_fixed_policy_builds():
         machine_fingerprints.append(_fingerprint(machine.net, image.neurons))
     assert (machine_default.net.n, machine_default.net.nnz) == (2449, 4513)
     assert machine_fingerprints[0] == machine_fingerprints[1]
+    # Ordered roles, edges, weights, delays and biases, not only neuron/edge counts.
+    # Captured from the pre-rate-conditioning machine; Drive's legacy default is vital.
+    assert not machine_default.drive.rate_robust
+    raw = json.dumps([machine_default.net.roles, machine_default.net.src,
+                      machine_default.net.dst, machine_default.net.quanta,
+                      machine_default.net.delay, machine_default.net.bias], separators=(",", ":"))
+    assert hashlib.sha256(raw.encode()).hexdigest() == (
+        "7175c3fcd639651dc0eee0c99a132bdb4c6f292ba0c058d5e8ae20952cb504f4")
 
     mov_spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
     mov_default = build_pipeline(PARAMS, 1, mov_spec, consts={"zero": 0})
@@ -122,6 +133,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "start_relight_hops": 3,
         "relight_repair_delay": False,
         "copy_requires_rail": False,
+        "rate_robust": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -166,3 +178,25 @@ def test_true_guards_require_request_relight_repair():
             [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}],
             consts={"zero": 0}, relight_requests=False, true_guards=True,
         )
+
+
+def test_conditioned_rates_are_recorded_rebuilt_and_shared():
+    ks, legacy, _, _ = kernel_campaign.block("tick", PARAMS)
+    pl = build_pipeline(PARAMS, ks.width, ks.cells, consts=ks.consts, mems=ks.mems,
+                        outputs=ks.outputs, rate_robust=True)
+    assert pl.build_options["rate_robust"] is pl.drive.rate_robust is True
+    assert (pl.net.n, pl.net.nnz) == (30643, 54076)
+    assert pl.net.n - legacy.net.n == pl.net.nnz - legacy.net.nnz == len(pl.net.rate_readouts) == 1268
+    _, _, rebuilt = build_tick_pipeline({"block": "tick", **pl.build_options})
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
+    # Every weak latch-train edge must go through the common conditioner, including
+    # arithmetic majority gates (built outside protocol/) and watchdog detectors.
+    for source, target, q in zip(pl.net.src, pl.net.dst, pl.net.quanta):
+        if 0 < q <= pl.drive.or_in and pl.net.roles[source].endswith(".u"):
+            pytest.fail(f"unconditioned rate input: {pl.net.roles[source]} -> {pl.net.roles[target]}")
+    # Removing the recorded option restores the exact pre-change topology, even if
+    # all the other, newer build flags are present in the capture.
+    recorded = {"block": "tick", **legacy.build_options}
+    recorded.pop("rate_robust")
+    _, _, rebuilt_legacy = build_tick_pipeline(recorded)
+    assert _pipeline_fingerprint(legacy) == _pipeline_fingerprint(rebuilt_legacy)
