@@ -499,6 +499,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     net.synapse(pair[0].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
                     net.synapse(pair[1].u, gate, int(round(0.35 / 0.65 * drive.and_in)))
                     condition_rate_gate(net, drive, gate)
+                    if drive.rate_robust:
+                        # START consuming TRUE cancels retry. Do not clear this
+                        # detector with the FALSE-kill attempt it must diagnose:
+                        # that hangover would hide a surviving FALSE rail at ~64 ms.
+                        net.mirror_inhibition(pair[1].u, gate, 1.0)
                     # at the register reset's strength: a rail this fast survives 0.75 x pulses at
                     # every phase; the after-hyperpolarisation cost is paid only in the stuck case,
                     # and a false rail that then fails to re-light at START is repaired by the

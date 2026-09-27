@@ -7,26 +7,28 @@ from functools import partial
 from drosophilos.compiler.frontend_c import compile_c
 from drosophilos.compiler.kernel import NotAKernel, compile_kernel, kernel_reference, loop_body
 from drosophilos.isa.ir import interpret
-from drosophilos.lib.kernel import LEGACY_2026_09_20, build_pipeline, run_pipeline
+from drosophilos.lib.kernel import LEGACY_2026_09_20, build_pipeline as _build_pipeline, run_pipeline
 from drosophilos.sim.model import Params
 
 PARAMS = Params()
 RENDER = open("examples/render.c").read()
 
-# Exercise the recorded opt-in policy across the whole functional kernel suite. The
-# historical reproductions explicitly override it via LEGACY_2026_09_20; the control
-# machine and timing-pinned diagnostic fixtures retain their legacy Drive defaults.
-build_pipeline = partial(build_pipeline, rate_robust=True)
+# Both policies run the same functional assertions. The additional conditioned cases
+# are slow so the default fast suite retains its original cost and shipped coverage.
+@pytest.fixture(params=[False, pytest.param(True, marks=pytest.mark.slow)],
+                ids=["default", "rate_robust"])
+def build_pipeline(request):
+    return partial(_build_pipeline, rate_robust=request.param)
 
 
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
-def test_conditioned_rate_readers_preserve_fixed_operation_cells(datapath):
+def test_conditioned_rate_readers_preserve_fixed_operation_cells(build_pipeline, datapath):
     ops = ("AND", "OR", "XOR", "MOV")
     cells = [{"name": op.lower(), "op": op, "a": "input", "b": ("const", "k")}
              for op in ops]
     pl = build_pipeline(PARAMS, 4, cells, consts={"k": 5},
                         outputs=[op.lower() for op in ops], datapath=datapath)
-    assert pl.build_options["rate_robust"]
+    assert pl.build_options["rate_robust"] == build_pipeline.keywords["rate_robust"]
     tokens = [0, 1, 7, 15, 8, 0]
     _, _, stats = run_pipeline(pl, PARAMS, tokens, max_ms=16000,
                                expect_outputs=len(tokens) * len(ops))
@@ -59,7 +61,7 @@ def test_bodies_with_branches_or_missing_parameters_are_rejected():
 
 
 @pytest.mark.slow
-def test_neural_pipeline_renders_eight_columns():
+def test_neural_pipeline_renders_eight_columns(build_pipeline):
     prog = compile_c(RENDER)
     ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
     pl = build_pipeline(PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems)
@@ -69,7 +71,7 @@ def test_neural_pipeline_renders_eight_columns():
 
 
 @pytest.mark.slow
-def test_neural_pipeline_with_a_fan_out_value():
+def test_neural_pipeline_with_a_fan_out_value(build_pipeline):
     """One master read by two cells: the producer commits only when both have sampled it."""
     spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "k1")},
             {"name": "c2", "op": "AND", "a": "c1", "b": ("const", "k7")},
@@ -204,7 +206,7 @@ def _run_request_ambiguity_reproduction(pl, cell_name, source, token, max_ms):
 
 
 @pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
-def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
+def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed(build_pipeline):
     """Shape A: one stale row request adds a second product without another input token."""
     pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
                         consts={"k": 3}, relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
@@ -217,7 +219,7 @@ def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
 
 
 @pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
-def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
+def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed(build_pipeline):
     """Shape B: a final ROM reader re-runs on the preceding address while no token arrives."""
     mem1 = {i: (i + 1) & 15 for i in range(16)}
     mem2 = {i: (i * 3) & 15 for i in range(16)}
@@ -231,7 +233,7 @@ def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     assert [len(x) for x in starts] == [1, 2]
 
 
-def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
+def test_dark_request_rail_replays_the_next_word_and_actd_relights_it(build_pipeline):
     """§10.5: a request's false rail re-lit by the start pulse ~55 ms after its own kill train
     can fail to catch; the dark pair lets the row's next IDLE start it with no request, and the
     real request then replays the word. Both copies carry the same 3 sigma corner on one rail
@@ -309,7 +311,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
 
 
 @pytest.mark.parametrize("true_guards", [False, True])
-def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
+def test_request_rising_inside_relight_veto_window_is_not_lost(build_pipeline, true_guards):
     """A real trigger rises too late to veto the repair: the old pair kills its request.
 
     Both copies have the same dark false rail and receive the same second token through
@@ -414,7 +416,7 @@ def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
 
 
 @pytest.mark.parametrize("true_guards", [False, True])
-def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear(true_guards):
+def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear(build_pipeline, true_guards):
     """Tick copy 18: a repair of live false left a fast train that survived the next DONE.
 
     Replay the measured within-token DONE spacing on a small two-request MOV, with the
@@ -541,7 +543,7 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
         assert bool(np.any((rail > 61000) & (rail < 69000))) == (node == 1)
 
 
-def test_batched_runner_captures_selected_spikes_before_trace_trimming():
+def test_batched_runner_captures_selected_spikes_before_trace_trimming(build_pipeline):
     import numpy as np
 
     from drosophilos.lib.kernel import run_pipeline_batched
@@ -578,7 +580,7 @@ def test_tick_loop_compiles_to_a_state_kernel_and_matches_the_interpreter():
 
 
 @pytest.mark.slow
-def test_neural_state_kernel_runs_three_ticks():
+def test_neural_state_kernel_runs_three_ticks(build_pipeline):
     from drosophilos.compiler.kernel import kernel_outputs
     prog = compile_c(TICK)
     ks = compile_kernel(prog, loop_body(prog, "main", "loop9"), "i", params={"vel": 5})
@@ -602,7 +604,7 @@ def test_per_tick_input_makes_the_velocity_the_token():
 
 
 @pytest.mark.slow
-def test_neural_state_kernel_with_fresh_input_every_tick():
+def test_neural_state_kernel_with_fresh_input_every_tick(build_pipeline):
     from drosophilos.compiler.kernel import kernel_outputs
     prog = compile_c(TICK2)
     ks = compile_kernel(prog, loop_body(prog), "i")
@@ -629,7 +631,7 @@ def test_constant_shifts_agree_across_the_references():
 
 
 @pytest.mark.slow
-def test_neural_shift_cells_are_wiring():
+def test_neural_shift_cells_are_wiring(build_pipeline):
     from drosophilos.compiler.kernel import kernel_outputs
     prog = compile_c(SHIFTS)
     ins = [7, 200, 255, 1]
@@ -655,7 +657,7 @@ def test_perspective_column_loop_matches_the_references():
 
 
 @pytest.mark.slow
-def test_neural_perspective_kernel_renders_eight_columns():
+def test_neural_perspective_kernel_renders_eight_columns(build_pipeline):
     """16-bit cells with a multiplier: the heights of eight columns (~6.6 s per column, the
     array multiplier's latency; ~6 minutes of wall time)."""
     from drosophilos.compiler.kernel import kernel_outputs
@@ -669,7 +671,7 @@ def test_neural_perspective_kernel_renders_eight_columns():
 
 
 @pytest.mark.slow
-def test_two_streams_with_a_parameter_edge_host_paced():
+def test_two_streams_with_a_parameter_edge_host_paced(build_pipeline):
     """A world-update cell (state: heading += 1 per tick token) and a column kernel reading the
     heading as a parameter; the host streams a frame's columns, then a tick, then the next frame."""
     spec = [{"name": "hd", "op": "ADD", "a": "hd", "b": ("const", "k1"), "init": 3, "trigger": ["input:tick"]},
@@ -715,7 +717,7 @@ def test_two_loop_renderer_compiles_to_two_kernels_and_matches_the_interpreter()
 
 
 @pytest.mark.slow
-def test_neural_two_loop_renderer_two_frames():
+def test_neural_two_loop_renderer_two_frames(build_pipeline):
     """Two kernels, two token streams, the host pacing frames: sixteen pixels and two frame
     records equal the interpreter's, with the heading advanced by the tick between frames."""
     from drosophilos.compiler.kernel import compile_program
@@ -735,7 +737,7 @@ def test_neural_two_loop_renderer_two_frames():
 
 
 @pytest.mark.slow
-def test_batched_nodes_run_the_renderer_on_different_columns():
+def test_batched_nodes_run_the_renderer_on_different_columns(build_pipeline):
     """Two copies of the column kernel on the batched simulator, each with half the columns:
     the cluster's shape (one kernel per brain, the host dealing tokens)."""
     from drosophilos.compiler.kernel import kernel_outputs
@@ -763,7 +765,7 @@ def test_game_program_compiles_to_a_tick_kernel_and_a_pixel_kernel():
 
 
 @pytest.mark.slow
-def test_neural_32bit_kernel_three_cells():
+def test_neural_32bit_kernel_three_cells(build_pipeline):
     """32-bit cells: ADD, XOR, SUB on four tokens (the input register's watchdog scales with the width)."""
     spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "k1")},
             {"name": "c2", "op": "XOR", "a": "c1", "b": ("const", "k2")},
@@ -779,7 +781,7 @@ def test_neural_32bit_kernel_three_cells():
 
 
 @pytest.mark.slow
-def test_neural_pipelined_multiplier_eight_bits():
+def test_neural_pipelined_multiplier_eight_bits(build_pipeline):
     """MULP: n row cells; one product per cell latency instead of the array's n^2 ripple."""
     pl = build_pipeline(PARAMS, 8, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}], consts={"k": 3})
     toks = [3, 7, 0, 255, 16, 100]
@@ -789,7 +791,7 @@ def test_neural_pipelined_multiplier_eight_bits():
 
 
 @pytest.mark.slow
-def test_neural_perspective_kernel_with_the_pipelined_multiplier():
+def test_neural_perspective_kernel_with_the_pipelined_multiplier(build_pipeline):
     from drosophilos.compiler.kernel import kernel_outputs
     prog = compile_c(RENDER2)
     ks = compile_kernel(prog, loop_body(prog), "col", params={"heading": 3}, mul="pipelined")
@@ -801,7 +803,7 @@ def test_neural_perspective_kernel_with_the_pipelined_multiplier():
 
 
 @pytest.mark.slow
-def test_kernel_ram_written_by_one_pass_and_read_by_the_next():
+def test_kernel_ram_written_by_one_pass_and_read_by_the_next(build_pipeline):
     """A column pass stores heights into a RAM buffer; a pixel pass reads them back by column
     (the host paces the passes: the reads start once every write has landed)."""
     spec = [{"name": "h", "op": "LOAD", "a": "input", "mem": "htab"},
@@ -822,7 +824,7 @@ def test_kernel_ram_written_by_one_pass_and_read_by_the_next():
 
 
 @pytest.mark.slow
-def test_kernel_ram_written_by_two_store_cells_in_one_pass():
+def test_kernel_ram_written_by_two_store_cells_in_one_pass(build_pipeline):
     """Two STORE cells write disjoint words of one 8-word RAM on every token (word t and word
     t + 4), each through its own write port; the ports' marks keep either port's COPY off the
     other's write (lib/kernel.py, `_share_write_ports`). A LOAD pass then reads all eight words
@@ -912,7 +914,7 @@ def test_two_pass_renderer_compiles_to_three_kernels():
 
 
 @pytest.mark.slow
-def test_neural_two_pass_renderer_with_a_ram_buffer():
+def test_neural_two_pass_renderer_with_a_ram_buffer(build_pipeline):
     """Three kernels: the tick, a column pass writing heights into a RAM buffer, a pixel pass
     reading them; the host paces the three phases of each frame."""
     from drosophilos.compiler.kernel import compile_program, kernel_outputs
@@ -973,7 +975,7 @@ def test_neural_pacing_compiles_a_ring_per_pass():
         compile_program(prog, params={"heading": 1}, pacing="neural", counts={"input": 4})  # every inner stream needs its count
 
 
-def test_pacing_ring_wraps_every_k_tokens():
+def test_pacing_ring_wraps_every_k_tokens(build_pipeline):
     """A two-cell pass (K = 2) and a one-cell tick, built by hand: the ring advances at every
     done of its trigger and wraps at the second, the wrap closes the pass's phase and opens the
     tick's, the tick's done reopens the pass's; the register's commits run at the pipeline's own
@@ -1043,7 +1045,7 @@ def test_pacing_ring_wraps_every_k_tokens():
 
 
 @pytest.mark.slow
-def test_neural_pacing_replaces_the_host_barriers():
+def test_neural_pacing_replaces_the_host_barriers(build_pipeline):
     """Stage F2, first step: the phase order (columns, pixels, tick) is enforced by phase gates in
     the substrate; the host deals the tokens in program order with no barrier at all. The phase
     counters are one-hot rings (24,721 neurons; the three-cell ALU counters made it 36,880)."""
