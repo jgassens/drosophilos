@@ -268,6 +268,11 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
     sim = make_sim(pl, params, copies, backend, mix, seed, device, dtype, n_steps)
     n_out = len(pl.outputs)
     want = len(tokens) * n_out
+    # A kernel input is accepted once its producer commits, before all downstream state cells
+    # necessarily commit.  Pace tick t behind all of tick t-1's canonical outputs so adjacent
+    # input load events are valid causal boundaries for the exactly-once comparison below.
+    stream = next(iter(pl.inputs))
+    schedule = [(stream, token, t * n_out) for t, token in enumerate(tokens)]
     got = [0] * copies
     last = [0] * copies
     wall = [[] for _ in range(copies)]
@@ -291,7 +296,7 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
 
     t0 = time.perf_counter()
     if backend == "ref":
-        _, sim, st = run_pipeline(pl, params, list(tokens), max_ms=max_ms, sim=sim, expect_outputs=want,
+        _, sim, st = run_pipeline(pl, params, schedule, max_ms=max_ms, sim=sim, expect_outputs=want,
                                   on_output=on_output, should_stop=should_stop, retry_refused=retry_refused,
                                   rail_filter=rail_filter)
         outs = [st.pop("outputs_by_cell")]  # run_pipeline's shapes -> run_pipeline_batched's (one node)
@@ -299,7 +304,7 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
         st["load_steps"] = [st["load_steps"]]
         st.setdefault("neural_ms", sim.step_index * params.dt)
     else:
-        outs, sim, st = run_pipeline_batched(pl, params, [list(tokens) for _ in range(copies)], max_ms=max_ms,
+        outs, sim, st = run_pipeline_batched(pl, params, [schedule for _ in range(copies)], max_ms=max_ms,
                                              device=device, expect_outputs=[want] * copies, sim=sim, dtype=dtype,
                                              backend=backend, progress=progress, on_output=on_output,
                                              should_stop=should_stop, retry_refused=retry_refused,
@@ -331,14 +336,22 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
     first, matched, invalid = None, 0, 0
 
     # A retry has the same schedule_index as its original injection.  The final injection is the
-    # one whose resulting state can commit, so it is the lower boundary for that tick.
+    # one whose resulting state can commit, so it is the lower boundary for that tick.  Crucially,
+    # a plain runner schedule may inject tick t+1 as soon as the input producer commits, while
+    # tick t's downstream state is still in flight.  Only Stage D's output-paced schedule makes
+    # successive loads valid output boundaries.  Old/unpaced records retain positional scoring,
+    # but must not claim that the exactly-once-per-load-window invariant was checked.
     loads_by_tick = {}
     for event in load_events or []:
         index, step = event.get("schedule_index"), event.get("event_step")
         if isinstance(index, int) and isinstance(step, (int, float)) and 0 <= index < requested:
-            loads_by_tick[index] = max(loads_by_tick.get(index, step), step)
-    load_steps = [loads_by_tick.get(t) for t in range(requested)]
-    commit_counts_checkable = requested == 0 or all(s is not None for s in load_steps)
+            previous = loads_by_tick.get(index)
+            if previous is None or step >= previous.get("event_step", step):
+                loads_by_tick[index] = event
+    load_steps = [loads_by_tick[t]["event_step"] if t in loads_by_tick else None for t in range(requested)]
+    paced_loads = all(t in loads_by_tick and loads_by_tick[t].get("min_outs") == t * len(fields)
+                       for t in range(requested))
+    commit_counts_checkable = requested == 0 or (all(s is not None for s in load_steps) and paced_loads)
 
     if commit_counts_checkable:
         # Bin each cell's commits between successive token injections.  Besides the counts, keep
@@ -537,7 +550,7 @@ def parser() -> argparse.ArgumentParser:
 
 def _saved_load_events(events: list) -> list[dict]:
     """The small, durable portion of runner load_events needed for tick assignment."""
-    return [{key: e[key] for key in ("schedule_index", "event_step", "retry", "attempts") if key in e}
+    return [{key: e[key] for key in ("schedule_index", "event_step", "min_outs", "retry", "attempts") if key in e}
             for e in events]
 
 
@@ -624,6 +637,11 @@ def recheck_record(rec: dict) -> dict:
             c["copy"] = c.get("copy", b)
             per_copy.append(c)
 
+    # Presence of load events was enough for the v2 rechecker, but only output-paced events make
+    # their intervals valid for downstream state commits.  compare_copy performs that stronger
+    # check per copy (including the retained min_outs pacing evidence).
+    checkable = checkable and all(c.get("commit_counts_checkable", False) for c in per_copy)
+
     # Preserve the compact on-disk per_copy representation.  tick_ms remains top-level.
     rec["per_copy"] = [{x: y for x, y in c.items() if x != "tick_ms"} for c in per_copy]
     if checkable:
@@ -639,8 +657,8 @@ def recheck_record(rec: dict) -> dict:
     }
     rec["recheck"] = {
         "commit_counts_checkable": checkable,
-        "note": ("exactly-once commit counts rechecked from saved load events"
-                 if checkable else "exactly-once commit counts not checkable: saved record lacks load steps/commit evidence"),
+        "note": ("exactly-once commit counts rechecked from saved output-paced load events"
+                 if checkable else "exactly-once commit counts not checkable: saved record lacks output-paced load/commit evidence"),
         "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy",
         "refusals": sum(c.get("refusals", 0) for c in per_copy),
         "retries": sum(c.get("retries", 0) for c in per_copy),
@@ -657,7 +675,7 @@ def calibrate(k: Kernel, pl, params, tokens, a, dtype) -> dict:
     st = r["stats"]
     ref = reference_states(k, tokens[:n])
     c = compare_copy(k, ref, tokens[:n], r["outs"][0], t_load0=st["load_steps"][0][0] if st["load_steps"][0] else 0,
-                     dt=params.dt)
+                     dt=params.dt, load_events=st["load_events"][0])
     ms = c["tick_ms"]
     if len(ms) < 2:
         raise SystemExit(f"calibration: {len(ms)} of {n} ticks completed ({c['status']}); give --max-ms")

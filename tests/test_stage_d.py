@@ -19,7 +19,8 @@ def _fake_outs(states, k=K, step0=1000, per=100):
 
 
 def _fake_load_events(n, step0=1000, per=100):
-    return [{"schedule_index": t, "event_step": step0 + per * t, "retry": False} for t in range(n)]
+    return [{"schedule_index": t, "event_step": step0 + per * t, "min_outs": t * len(K.fields),
+             "retry": False} for t in range(n)]
 
 
 def test_state_cells_and_canonical_order():
@@ -127,6 +128,20 @@ def test_commit_counts_detect_missing_plus_extra_on_a_constant_field():
     assert (fm["field"], fm["tick"], fm["expected_commits"], fm["got_commits"]) == ("health", 1, 1, 0)
 
 
+def test_unpaced_loads_do_not_shift_correct_commits_to_later_ticks():
+    tokens = sd.tokens_for(6, 8)
+    ref = sd.reference_states(K, tokens)
+    # The ordinary runner can load later inputs while prior downstream outputs remain in flight.
+    # These commits are all correct and ordered, but each arrives two load intervals late.  The
+    # 30b702d load-window comparison assigned them to ticks 2..5, yielding matched=0.
+    outs = _fake_outs(ref, step0=1200)
+    unpaced = [{"schedule_index": t, "event_step": 1000 + 100 * t, "min_outs": 0,
+                "retry": False} for t in range(len(tokens))]
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=1000, dt=0.1, load_events=unpaced)
+    assert c["status"] == "matched" and c["matched"] == 6
+    assert c["commit_counts_checkable"] is False
+
+
 def test_a_word_applied_twice_is_named():
     tokens = sd.tokens_for(10, 4)
     ref = sd.reference_states(K, tokens)
@@ -195,11 +210,11 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
 
 @pytest.fixture(scope="module")
 def neural6():
-    """Six ticks of the campaign tokens on one nominal RefSim copy (~40 s neural: several
+    """Six output-paced ticks on one nominal RefSim copy (<90 s neural: several
     minutes of wall on a laptop core)."""
     tokens = sd.tokens_for(6, 0)
     pl = sd.build(K, PARAMS)
-    r = sd.run_neural(K, pl, PARAMS, tokens, backend="ref", max_ms=60000, stall_ms=30000)
+    r = sd.run_neural(K, pl, PARAMS, tokens, backend="ref", max_ms=90000, stall_ms=30000)
     return tokens, pl, r
 
 
@@ -212,6 +227,7 @@ def test_neural_six_ticks_match_the_reference_every_tick(neural6):
     c = sd.compare_copy(K, ref, tokens, r["outs"][0], t_load0=st["load_steps"][0][0], dt=PARAMS.dt,
                         load_events=st["load_events"][0], refused=st["refused"][0])
     assert c["status"] == "matched" and c["matched"] == 6 and c["duplicates"] == 0, c
+    assert c["commit_counts_checkable"] is True
     assert st["faults"] == 0 and st["timeouts"] == 0 and not c["applied_twice"]
     print("stage D, 6 ticks:", {x: c[x] for x in ("tick_ms", "refusals", "retries")},
           "wall", round(st["run_wall_s"]), "neural", st["neural_ms"])
