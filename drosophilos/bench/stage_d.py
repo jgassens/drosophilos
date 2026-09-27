@@ -18,7 +18,6 @@ three comparison points, portable C <-> IR interpreter <-> neural execution.
 from __future__ import annotations
 
 import argparse
-import bisect
 import dataclasses
 import json
 import re
@@ -268,11 +267,6 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
     sim = make_sim(pl, params, copies, backend, mix, seed, device, dtype, n_steps)
     n_out = len(pl.outputs)
     want = len(tokens) * n_out
-    # A kernel input is accepted once its producer commits, before all downstream state cells
-    # necessarily commit.  Pace tick t behind all of tick t-1's canonical outputs so adjacent
-    # input load events are valid causal boundaries for the exactly-once comparison below.
-    stream = next(iter(pl.inputs))
-    schedule = [(stream, token, t * n_out) for t, token in enumerate(tokens)]
     got = [0] * copies
     last = [0] * copies
     wall = [[] for _ in range(copies)]
@@ -296,7 +290,7 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
 
     t0 = time.perf_counter()
     if backend == "ref":
-        _, sim, st = run_pipeline(pl, params, schedule, max_ms=max_ms, sim=sim, expect_outputs=want,
+        _, sim, st = run_pipeline(pl, params, list(tokens), max_ms=max_ms, sim=sim, expect_outputs=want,
                                   on_output=on_output, should_stop=should_stop, retry_refused=retry_refused,
                                   rail_filter=rail_filter)
         outs = [st.pop("outputs_by_cell")]  # run_pipeline's shapes -> run_pipeline_batched's (one node)
@@ -304,7 +298,7 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
         st["load_steps"] = [st["load_steps"]]
         st.setdefault("neural_ms", sim.step_index * params.dt)
     else:
-        outs, sim, st = run_pipeline_batched(pl, params, [schedule for _ in range(copies)], max_ms=max_ms,
+        outs, sim, st = run_pipeline_batched(pl, params, [list(tokens) for _ in range(copies)], max_ms=max_ms,
                                              device=device, expect_outputs=[want] * copies, sim=sim, dtype=dtype,
                                              backend=backend, progress=progress, on_output=on_output,
                                              should_stop=should_stop, retry_refused=retry_refused,
@@ -322,25 +316,22 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
                  dt: float, load_events: list | None = None, refused: list | None = None,
                  blocked: bool = False, limit: str | None = None, run_end_step: int | None = None,
                  stall_ms: float | None = None) -> dict:
-    """One copy against the per-tick reference. Tick t is complete when every canonical field's
-    cell has committed exactly one word after tick t's input injection and before the next input
-    injection.  The injection boundaries are important: positional matching cannot distinguish a
-    missed commit followed by a duplicate while a field happens to retain its value.  Counting
-    stops at the first mismatch (a diverged state makes every later tick wrong and says nothing
-    more).  `faults` and `timeouts` deliberately do not appear here: kernel.py reports those for
-    the whole batch, not for an individual copy."""
+    """One copy against the per-tick reference.  The k-th commit of each canonical field is
+    tick k's value; the kernel is pipelined, so tick k's commits may follow later input loads.
+    Tick k is complete once every field has a k-th commit.  A commit must follow its own tick's
+    final (last-retry) load, but the next load is not an upper bound.  Counting stops at the first
+    mismatch (a diverged state makes every later tick wrong and says nothing more).  `faults` and
+    `timeouts` deliberately do not appear here: kernel.py reports those for the whole batch, not
+    for an individual copy."""
     fields, width = k.fields, k.width
     lists = [outs.get(k.cells[f], []) for f in fields]
     requested = len(ref)
     ref_bytes = [canonical_state(r, width, fields) for r in ref]
     first, matched, invalid = None, 0, 0
 
-    # A retry has the same schedule_index as its original injection.  The final injection is the
-    # one whose resulting state can commit, so it is the lower boundary for that tick.  Crucially,
-    # a plain runner schedule may inject tick t+1 as soon as the input producer commits, while
-    # tick t's downstream state is still in flight.  Only Stage D's output-paced schedule makes
-    # successive loads valid output boundaries.  Old/unpaced records retain positional scoring,
-    # but must not claim that the exactly-once-per-load-window invariant was checked.
+    # A retry has the same schedule_index as its original injection.  Its final injection is the
+    # lower causal boundary for that tick's commits.  It is deliberately only a lower boundary:
+    # this pipeline can accept later inputs while an earlier tick's state outputs remain in flight.
     loads_by_tick = {}
     for event in load_events or []:
         index, step = event.get("schedule_index"), event.get("event_step")
@@ -349,74 +340,29 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
             if previous is None or step >= previous.get("event_step", step):
                 loads_by_tick[index] = event
     load_steps = [loads_by_tick[t]["event_step"] if t in loads_by_tick else None for t in range(requested)]
-    paced_loads = all(t in loads_by_tick and loads_by_tick[t].get("min_outs") == t * len(fields)
-                       for t in range(requested))
-    commit_counts_checkable = requested == 0 or (all(s is not None for s in load_steps) and paced_loads)
+    commit_counts_checkable = load_events is not None and (requested == 0 or all(s is not None for s in load_steps))
+    completed = min(requested, min((len(x) for x in lists), default=0))
+    missing = requested - completed
+    duplicates = sum(max(0, len(x) - requested) for x in lists)
+    invalid = sum(1 for commits in lists for t, item in enumerate(commits[:requested])
+                  if commit_counts_checkable and item[0] <= load_steps[t])
 
-    if commit_counts_checkable:
-        # Bin each cell's commits between successive token injections.  Besides the counts, keep
-        # the bin for each positional word: a word must be both the next word and in its tick's
-        # injection interval.
-        bins = [[[] for _ in range(requested)] for _ in fields]
-        positions = [[] for _ in fields]
-        out_of_window = 0
-        for i, commits in enumerate(lists):
-            for ordinal, item in enumerate(commits):
-                step = item[0]
-                t = bisect.bisect_right(load_steps, step) - 1
-                positions[i].append(t)
-                if 0 <= t < requested:
-                    bins[i][t].append(item)
-                else:
-                    out_of_window += 1
-        count_rows = [{f: len(bins[i][t]) for i, f in enumerate(fields)} for t in range(requested)]
-        missing = sum(1 for row in count_rows if any(n == 0 for n in row))
-        duplicates = out_of_window + sum(max(0, n - 1) for row in count_rows for n in row.values())
-        completed = sum(1 for row in count_rows if all(n == 1 for n in row.values()))
-    else:
-        # Older records did not retain injections.  Preserve the former positional comparison,
-        # but label the new count invariant as uncheckable rather than claiming it passed.
-        completed = min((len(x) for x in lists), default=0)
-        duplicates = sum(max(0, len(x) - requested) for x in lists)
-        missing = requested - min(completed, requested)
-        bins = [[[] for _ in range(requested)] for _ in fields]
-        positions = [[] for _ in fields]
-        for i, commits in enumerate(lists):
-            for t, item in enumerate(commits[:requested]):
-                bins[i][t].append(item)
-                positions[i].append(t)
-        count_rows = [{f: len(bins[i][t]) for i, f in enumerate(fields)} for t in range(requested)]
-
-    for t in range(requested if commit_counts_checkable else min(completed, requested)):
-        counts = count_rows[t]
-        # The counts are the primary comparison when injection evidence is available.  Report
-        # the first bad cell and both its expected and observed count, even when its value is
-        # unchanged (the failure that positional matching missed).
-        bad_count = next((f for f in fields if counts[f] != 1), None)
-        if bad_count is not None:
-            got = {f: (bins[i][t][0][1] if len(bins[i][t]) == 1 else None) for i, f in enumerate(fields)}
-            step = max((item[0] for row in bins for item in row[t]), default=None)
-            first = {"tick": t, "token": tokens[t], "field": bad_count, "expected": ref[t][bad_count],
-                     "got": got[bad_count], "expected_state": ref[t], "got_state": got, "step": step,
-                     "class": "commit count", "expected_commits": 1, "got_commits": counts[bad_count],
-                     "commit_counts": counts}
-            break
-        # In addition to one commit in each interval, the t-th observed commit must be that
-        # interval's commit.  This makes the order constraint explicit in the record.
-        bad_order = next((fields[i] for i in range(len(fields))
-                          if len(positions[i]) > t and positions[i][t] != t), None)
-        if bad_order is not None:
-            got = {f: bins[i][t][0][1] for i, f in enumerate(fields)}
-            first = {"tick": t, "token": tokens[t], "field": bad_order, "expected": ref[t][bad_order],
-                     "got": got[bad_order], "expected_state": ref[t], "got_state": got,
-                     "step": bins[fields.index(bad_order)][t][0][0], "class": "commit order",
-                     "expected_commits": 1, "got_commits": 1, "commit_counts": counts}
-            break
-        got = {f: bins[i][t][0][1] for i, f in enumerate(fields)}
+    for t in range(completed):
+        got = {f: lists[i][t][1] for i, f in enumerate(fields)}
+        if commit_counts_checkable:
+            bad_causality = next((f for i, f in enumerate(fields) if lists[i][t][0] <= load_steps[t]), None)
+            if bad_causality is not None:
+                i = fields.index(bad_causality)
+                first = {"tick": t, "token": tokens[t], "field": bad_causality,
+                         "expected": ref[t][bad_causality], "got": got[bad_causality],
+                         "expected_state": ref[t], "got_state": got, "step": lists[i][t][0],
+                         "class": "commit before input load", "expected_commits": 1,
+                         "got_commits": 1, "commit_counts": {f: 1 for f in fields}}
+                break
         try:
             ok = canonical_state(got, width, fields) == ref_bytes[t]
         except ValueError:
-            ok, invalid = False, 1
+            ok, invalid = False, invalid + 1
         if ok:
             matched += 1
             continue
@@ -425,24 +371,24 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
                  "expected_state": ref[t], "got_state": got, "step": max(x[t][0] for x in lists),
                  "class": _mismatch_class(k, ref, tokens, t, got)}
         break
-    # Per-tick timing is meaningful only for structurally complete ticks.  In the fallback it
-    # retains the old positional calculation for compatibility with pre-v2 records.
-    if commit_counts_checkable:
-        tick_steps = [max(bins[i][t][0][0] for i in range(len(fields)))
-                      for t in range(requested) if all(count_rows[t][f] == 1 for f in fields)]
-    else:
-        tick_steps = [max(x[t][0] for x in lists) for t in range(completed)]
+
+    # An extra ordinal cannot be assigned to a requested tick.  Report the first extra after
+    # value and causality checks, and count every extra commit across fields as a duplicate.
+    if first is None and duplicates:
+        i = next(i for i, commits in enumerate(lists) if len(commits) > requested)
+        item = lists[i][requested]
+        first = {"tick": requested, "token": None, "field": fields[i], "expected": None,
+                 "got": item[1], "expected_state": None, "got_state": {fields[i]: item[1]},
+                 "step": item[0], "class": "commit count", "expected_commits": requested,
+                 "got_commits": len(lists[i])}
+
+    tick_steps = [max(x[t][0] for x in lists) for t in range(completed)]
     tick_ms = [round((s_ - (t_load0 or 0)) * dt, 1) for s_ in tick_steps]
     retried = sorted({e["schedule_index"] for e in (load_events or []) if e.get("retry")})
-    # A missing trailing state is a liveness outcome, not a wrong state.  A missing commit
-    # followed by a later complete tick (or paired with an extra commit) is a true structural
-    # mismatch.  This distinction keeps a max-ms-cut copy from being mislabeled merely because
-    # its uncompleted final tick has no words.
-    terminal_shortfall = (first is not None and first["class"] == "commit count" and duplicates == 0 and
-                          not any(all(count_rows[u][f] == 1 for f in fields)
-                                  for u in range(first["tick"] + 1, requested)))
-    liveness_shortfall = terminal_shortfall or (first is None and missing > 0)
-    wrong = 1 if first is not None and not terminal_shortfall else 0
+    # A missing trailing state is a liveness outcome, not a wrong state.  This keeps a max-ms-cut
+    # copy from being mislabeled merely because its uncompleted final tick has no words.
+    liveness_shortfall = first is None and missing > 0
+    wrong = 1 if first is not None else 0
     last_commit_step = max((item[0] for commits in lists for item in commits), default=None)
     stopped_at_tick = completed - 1 if completed else None
     if matched == requested and missing == 0 and duplicates == 0:
@@ -549,8 +495,8 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _saved_load_events(events: list) -> list[dict]:
-    """The small, durable portion of runner load_events needed for tick assignment."""
-    return [{key: e[key] for key in ("schedule_index", "event_step", "min_outs", "retry", "attempts") if key in e}
+    """The small, durable portion of runner load_events needed for causality checks."""
+    return [{key: e[key] for key in ("schedule_index", "event_step", "retry", "attempts") if key in e}
             for e in events]
 
 
@@ -637,9 +583,8 @@ def recheck_record(rec: dict) -> dict:
             c["copy"] = c.get("copy", b)
             per_copy.append(c)
 
-    # Presence of load events was enough for the v2 rechecker, but only output-paced events make
-    # their intervals valid for downstream state commits.  compare_copy performs that stronger
-    # check per copy (including the retained min_outs pacing evidence).
+    # Both event streams are required for count and causal rechecking.  Input loads are lower
+    # bounds only; compare_copy does not require or infer output pacing.
     checkable = checkable and all(c.get("commit_counts_checkable", False) for c in per_copy)
 
     # Preserve the compact on-disk per_copy representation.  tick_ms remains top-level.
@@ -657,8 +602,8 @@ def recheck_record(rec: dict) -> dict:
     }
     rec["recheck"] = {
         "commit_counts_checkable": checkable,
-        "note": ("exactly-once commit counts rechecked from saved output-paced load events"
-                 if checkable else "exactly-once commit counts not checkable: saved record lacks output-paced load/commit evidence"),
+        "note": ("exactly-once commit counts and load lower bounds rechecked from saved events"
+                 if checkable else "exactly-once commit counts not checkable: saved record lacks load/commit evidence"),
         "fault_timeout_scope": "run-level batch counters (kernel.py), not per-copy",
         "refusals": sum(c.get("refusals", 0) for c in per_copy),
         "retries": sum(c.get("retries", 0) for c in per_copy),

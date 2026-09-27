@@ -18,9 +18,8 @@ def _fake_outs(states, k=K, step0=1000, per=100):
     return {k.cells[f]: [(step0 + per * t, s[f]) for t, s in enumerate(states)] for f in k.fields}
 
 
-def _fake_load_events(n, step0=1000, per=100):
-    return [{"schedule_index": t, "event_step": step0 + per * t, "min_outs": t * len(K.fields),
-             "retry": False} for t in range(n)]
+def _fake_load_events(n, step0=900, per=100):
+    return [{"schedule_index": t, "event_step": step0 + per * t, "retry": False} for t in range(n)]
 
 
 def test_state_cells_and_canonical_order():
@@ -111,35 +110,51 @@ def test_a_copy_stalled_before_a_max_ms_cut_is_not_truncated():
     assert (c["status"], c["stopped_at_tick"]) == ("stalled", 8)
 
 
-def test_commit_counts_detect_missing_plus_extra_on_a_constant_field():
+def test_overlapping_commits_are_scored_by_field_order():
+    tokens = sd.tokens_for(6, 8)
+    ref = sd.reference_states(K, tokens)
+    # Every tick's output arrives after tick t+1's load.  Those later loads are not output
+    # boundaries: the k-th commit of each field still belongs to tick k.
+    outs = _fake_outs(ref, step0=1201)
+    loads = _fake_load_events(len(tokens), step0=1000)
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=1000, dt=0.1,
+                        load_events=loads)
+    assert c["status"] == "matched" and c["matched"] == 6 and c["duplicates"] == 0
+    assert c["commit_counts_checkable"] is True
+
+
+def test_an_extra_field_commit_is_a_duplicate_mismatch():
     tokens = sd.tokens_for(6, 8)
     ref = sd.reference_states(K, tokens)
     outs = _fake_outs(ref)
-    health = outs[K.cells["health"]]
-    # health remains 100 here.  Dropping tick 1 and adding a second tick-2 commit preserves
-    # both the observed list length and its values, so the old positional comparison passed.
-    del health[1]
-    health.append((1220, ref[2]["health"]))
-    health.sort()
-    c = sd.compare_copy(K, ref, tokens, outs, t_load0=1000, dt=0.1,
+    outs[K.cells["px"]].append((1700, ref[-1]["px"]))
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=900, dt=0.1,
                         load_events=_fake_load_events(len(tokens)))
-    fm = c["first_mismatch"]
-    assert c["status"] == "mismatch" and c["commit_counts_checkable"] is True
-    assert (fm["field"], fm["tick"], fm["expected_commits"], fm["got_commits"]) == ("health", 1, 1, 0)
+    assert c["status"] == "mismatch" and c["duplicates"] == 1
+    assert c["first_mismatch"]["class"] == "commit count"
 
 
-def test_unpaced_loads_do_not_shift_correct_commits_to_later_ticks():
+def test_a_commit_before_its_load_is_invalid():
     tokens = sd.tokens_for(6, 8)
     ref = sd.reference_states(K, tokens)
-    # The ordinary runner can load later inputs while prior downstream outputs remain in flight.
-    # These commits are all correct and ordered, but each arrives two load intervals late.  The
-    # 30b702d load-window comparison assigned them to ticks 2..5, yielding matched=0.
-    outs = _fake_outs(ref, step0=1200)
-    unpaced = [{"schedule_index": t, "event_step": 1000 + 100 * t, "min_outs": 0,
-                "retry": False} for t in range(len(tokens))]
-    c = sd.compare_copy(K, ref, tokens, outs, t_load0=1000, dt=0.1, load_events=unpaced)
-    assert c["status"] == "matched" and c["matched"] == 6
-    assert c["commit_counts_checkable"] is False
+    outs = _fake_outs(ref)
+    outs[K.cells["mx"]][3] = (1249, outs[K.cells["mx"]][3][1])
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=950, dt=0.1,
+                        load_events=_fake_load_events(len(tokens), step0=950))
+    assert c["status"] == "mismatch" and c["invalid"] == 1
+    assert (c["first_mismatch"]["tick"], c["first_mismatch"]["field"],
+            c["first_mismatch"]["class"]) == (3, "mx", "commit before input load")
+
+
+def test_a_missing_final_commit_is_incomplete():
+    tokens = sd.tokens_for(6, 8)
+    ref = sd.reference_states(K, tokens)
+    outs = _fake_outs(ref)
+    outs[K.cells["health"]].pop()
+    c = sd.compare_copy(K, ref, tokens, outs, t_load0=900, dt=0.1,
+                        load_events=_fake_load_events(len(tokens)), limit="max_ms")
+    assert (c["status"], c["completed"], c["missing"], c["duplicates"]) == ("truncated", 5, 1, 0)
+    assert c["first_mismatch"] is None and c["commit_counts_checkable"] is True
 
 
 def test_a_word_applied_twice_is_named():
@@ -210,11 +225,11 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
 
 @pytest.fixture(scope="module")
 def neural6():
-    """Six output-paced ticks on one nominal RefSim copy (<90 s neural: several
+    """Six overlapping ticks on one nominal RefSim copy (<60 s neural: several
     minutes of wall on a laptop core)."""
     tokens = sd.tokens_for(6, 0)
     pl = sd.build(K, PARAMS)
-    r = sd.run_neural(K, pl, PARAMS, tokens, backend="ref", max_ms=90000, stall_ms=30000)
+    r = sd.run_neural(K, pl, PARAMS, tokens, backend="ref", max_ms=60000, stall_ms=30000)
     return tokens, pl, r
 
 
