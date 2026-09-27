@@ -9,9 +9,12 @@ import pytest
 
 from drosophilos.bench import kernel_campaign
 from drosophilos.bench.stall_diag import build_tick_pipeline
+from drosophilos.compiler.frontend_c import compile_c
+from drosophilos.compiler.kernel import compile_program
 from drosophilos.lib.control import build_machine, load_image
 from drosophilos.lib.kernel import (
     LEGACY_2026_09_20,
+    RATE_ROBUST_VERSION,
     TRUE_GUARD_VERSION,
     build_pipeline,
     load_pipeline_image,
@@ -186,6 +189,7 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
     pl = build_pipeline(PARAMS, ks.width, ks.cells, consts=ks.consts, mems=ks.mems,
                         outputs=ks.outputs, rate_robust=True)
     assert pl.build_options["rate_robust"] is pl.drive.rate_robust is True
+    assert pl.build_options["rate_robust_version"] == RATE_ROBUST_VERSION
     assert (pl.net.n, pl.net.nnz) == (30643, 55936)
     assert pl.net.n - legacy.net.n == len(pl.net.rate_readouts) == 1268
     assert pl.net.nnz - legacy.net.nnz == 1268 + 1318 + 542  # drives, readout clears, qualifier clears
@@ -205,6 +209,25 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
     recorded.pop("rate_robust")
     _, _, rebuilt_legacy = build_tick_pipeline(recorded)
     assert _pipeline_fingerprint(legacy) == _pipeline_fingerprint(rebuilt_legacy)
+
+
+def test_stall_diag_rejects_unidentified_or_obsolete_rate_circuits():
+    with pytest.raises(ValueError, match="unsupported rate-robust circuit.*missing"):
+        build_tick_pipeline({"block": "tick", "rate_robust": True, "neurons": 30643})
+    with pytest.raises(ValueError, match="unsupported rate-robust circuit.*version is 1"):
+        build_tick_pipeline({"block": "tick", "rate_robust": True,
+                             "rate_robust_version": 1})
+
+
+def test_stall_diag_accepts_versionless_rate_circuit_when_counts_prove_identity():
+    ks, _, _, _ = kernel_campaign.block("tick", PARAMS)
+    current = build_pipeline(PARAMS, ks.width, ks.cells, consts=ks.consts,
+                             mems=ks.mems, outputs=ks.outputs, rate_robust=True)
+    record = {"block": "tick", **current.build_options,
+              "neurons": current.net.n, "edges": current.net.nnz}
+    record.pop("rate_robust_version")
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert rebuilt.build_options["rate_robust_version"] == RATE_ROBUST_VERSION
 
 
 def _assert_conditioned_train_inputs(net, drive):
@@ -233,8 +256,9 @@ def test_train_audit_detects_late_raw_inputs_independent_of_source_name(role):
         _assert_conditioned_train_inputs(net, drive)
 
 
-# Captured from the merged builder before the review fixes: ordered bytes, including
-# roles, weights, delays and biases. The image tests above additionally check loading.
+# Captured from an isolated detached Git work tree at pre-rate-conditioning commit
+# a6c325d: ordered bytes, including roles, weights, delays and biases. The image tests
+# above additionally check loading.
 DEFAULT_HASHES = {
     "tick": "ebb0657dd0c7fddce934599dffb7d989cca43a828f605de9fbba41a7baf1842d",
     "render": "936a860cbfcc091147837a986c71be185952306004fb7d8065cc324851526738",
@@ -246,6 +270,9 @@ DEFAULT_HASHES = {
     "mulp": "2a65ea10a80441a8393d02a886fe11cbabddce076979b9b150eba3a3af9ae1cc",
     "machine2": "7175c3fcd639651dc0eee0c99a132bdb4c6f292ba0c058d5e8ae20952cb504f4",
     "machine4": "daed6ba1056cc57a8c9a2d5a8585d4bb81c792bbabcd798a735a63a8ee8b9671",
+    "doom4-host-array": "f0fb1dd6cb34620b64637666d1c164115ad54acab2d86857c9db5223087090f4",
+    "doom4-host-pipelined": "52e5728946d132a3aef02938cdc74234cbe82eab322efd82908613214b879888",
+    "doom4-neural-array": "04dbdb630634360dcd04950b6be4de17686e748dc45029859e4340a1266c77dc",
 }
 
 
@@ -253,6 +280,18 @@ DEFAULT_HASHES = {
 def test_default_ordered_netlists_are_byte_identical(name):
     if name.startswith("machine"):
         net = build_machine(PARAMS, n=int(name[-1]), n_prog=4, n_data=2).net
+    elif name.startswith("doom4-"):
+        prog = compile_c(open("examples/doom4.c").read())
+        neural = name.startswith("doom4-neural-")
+        ks = compile_program(
+            prog, params=None, pacing="neural" if neural else "host",
+            mul="pipelined" if name.endswith("pipelined") else "array",
+            counts={"input": 8, "s": 8, "p": 40} if neural else None,
+        )
+        net = build_pipeline(
+            PARAMS, prog.width, ks.cells, consts=ks.consts, mems=ks.mems,
+            outputs=ks.outputs, streams=ks.streams, phases=ks.phases,
+        ).net
     elif name in ("mov", "mulp"):
         net = build_pipeline(
             PARAMS, 1 if name == "mov" else 4,

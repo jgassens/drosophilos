@@ -59,7 +59,7 @@ from .control import add_kill_pair, add_kill_train
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
-from ..protocol.rate import condition_rate_gate
+from ..protocol.rate import RATE_ROBUST_VERSION, condition_rate_gate
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
 from ..protocol.celement import add_veto_neuron
 from .staged import StagedRegister, add_staged_commit
@@ -886,6 +886,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "true_guards": true_guards,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
+    if drive.rate_robust:
+        pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 

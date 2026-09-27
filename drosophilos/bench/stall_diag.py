@@ -30,7 +30,7 @@ import numpy as np
 
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, loop_body
-from ..lib.kernel import LEGACY_2026_09_20, build_pipeline
+from ..lib.kernel import LEGACY_2026_09_20, RATE_ROBUST_VERSION, build_pipeline
 from ..lib.netlist import Drive
 from ..sim.model import Params
 
@@ -60,6 +60,33 @@ class SpikeDump:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
+    """Accept an old versionless record only when it identifies this exact rebuild."""
+    from .repro import circuit_hash
+
+    records = [campaign]
+    for key in ("reproducibility", "repro", "netlist"):
+        value = campaign.get(key)
+        if isinstance(value, dict):
+            records.append(value)
+    for record in records:
+        saved_hash = record.get("circuit_sha256", record.get("circuit_hash"))
+        if saved_hash is not None and saved_hash == circuit_hash(pl):
+            return True
+
+    def recorded_int(names: tuple[str, ...]) -> int | None:
+        for record in records:
+            for name in names:
+                value = record.get(name)
+                if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+                    return int(value)
+        return None
+
+    neurons = recorded_int(("neurons", "neurons_per_node", "kernel_neurons"))
+    edges = recorded_int(("edges", "edges_per_node", "synapses", "kernel_synapses"))
+    return neurons == pl.net.n and edges == pl.net.nnz
 
 
 def build_tick_pipeline(campaign: dict[str, Any]):
@@ -107,6 +134,17 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
         kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
     )
+    recorded_rate_version = campaign.get("rate_robust_version")
+    if (campaign.get("rate_robust", False) and
+            recorded_rate_version != RATE_ROBUST_VERSION and
+            not _proves_current_rate_circuit(campaign, pl)):
+        recorded = "missing" if recorded_rate_version is None else repr(recorded_rate_version)
+        raise ValueError(
+            "unsupported rate-robust circuit: the capture's rate_robust_version is "
+            f"{recorded}, while the current circuit is version {RATE_ROBUST_VERSION}; "
+            "rebuild at the recorded commit or provide a matching circuit_sha256 or both "
+            "neuron and edge counts"
+        )
     expected_n = campaign.get("neurons")
     if expected_n is not None and int(expected_n) != pl.net.n:
         raise AssertionError(f"campaign has {expected_n} neurons; rebuilt tick kernel has {pl.net.n}")

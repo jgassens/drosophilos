@@ -960,9 +960,10 @@ and the normal five-hop FALSE relight. Duplicate STARTs are **0/901 with rate_ro
 50/901 with the merged unreset readout, and 0/901 with mirrored inhibition**. The test
 asserts all three, and the ordinary after-fix assertion fails on the merged circuit.
 An additional 901-offset sweep for each 1-, 2- and 3-sigma START corner, with both nominal
-and fast TRUE loops, has **0 duplicates and 0 misses in all 5,406 cases**. Readout reset
-alone left one duplicate at the combined three-sigma/fast-TRUE corner; clearing the
-require neuron's retained vote removes it. The final sweep is asserted by
+and fast TRUE loops, has **0 duplicates and 0 misses in all 5,406 cases**. **Not retained;
+measured ad hoc:** readout reset alone left one duplicate at the combined
+three-sigma/fast-TRUE corner; clearing the require neuron's retained vote removes it.
+The final sweep is asserted by
 `test_late_guard_across_target_corners`.
 
 Mirroring the source's inhibition fixes the stored-current cause while preserving the
@@ -1010,8 +1011,9 @@ member; a negative value means the readout stopped first.
 
 A separate `retry_stuck` case tests recovery: the known fast FALSE rail survives a
 three-pulse first clear, then the retry pulse arrives 65…155 ms after that attempt.
-Both before and after pass **201/201** with no duplicate. Resetting the retry detector
-from the attempted FALSE clear itself caused 18/201 misses here; the final wiring
+Both before and after pass **201/201** with no duplicate. **Not retained; measured ad
+hoc:** resetting the retry detector from the attempted FALSE clear itself caused 18/201
+misses here; the final wiring
 therefore cancels the detector only when TRUE is consumed. Both readouts still inherit
 all of their own clear inputs.
 
@@ -1040,6 +1042,12 @@ limitation of retaining refractory saturation while clearing it promptly. Tick h
 `ceil(abs(q)/64)` per edge gives a k_max=4 anatomical lower bound of
 **3,166,284 → 4,685,110** for generic tick;
 it is not evidence that those edges can be placed on a particular connectome.
+
+**Anatomical cost.** At k_max 4, the conditioned tick circuit puts about **49.9k**
+output synapses on a single reset-inhibitor neuron; the perspective circuit reaches
+about **188k** on one such neuron. The largest conditioned edges are **43,456 quanta**
+(ordinary mirrored reset) and **86,912 quanta** (optional retry). Whether these hubs and
+the rest of the conditioned circuit can be placed on a connectome remains an open problem.
 
 | Build | Legacy neurons / synapses | Conditioned | Delta |
 |---|---:|---:|---:|

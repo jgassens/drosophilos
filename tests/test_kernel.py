@@ -18,7 +18,18 @@ RENDER = open("examples/render.c").read()
 @pytest.fixture(params=[False, pytest.param(True, marks=pytest.mark.slow)],
                 ids=["default", "rate_robust"])
 def build_pipeline(request):
-    return partial(_build_pipeline, rate_robust=request.param)
+    builder = partial(_build_pipeline, rate_robust=request.param)
+
+    def checked_build(*args, **kwargs):
+        assert "rate_robust" not in kwargs, "fixture policy must not be overridden by a test"
+        pl = builder(*args, **kwargs)
+        if request.param:
+            assert pl.build_options["rate_robust"] is True
+            assert pl.net.rate_readouts, "rate_robust case built no conditioned readers"
+        return pl
+
+    checked_build.keywords = builder.keywords
+    return checked_build
 
 
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
@@ -206,10 +217,10 @@ def _run_request_ambiguity_reproduction(pl, cell_name, source, token, max_ms):
 
 
 @pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
-def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed(build_pipeline):
+def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed():
     """Shape A: one stale row request adds a second product without another input token."""
-    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3}, relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
+    pl = _build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                         consts={"k": 3}, relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "m.r1", "m.r0", 3, 8000)
     assert got == [[9], [9, 9]], (got, starts, stats)
@@ -219,21 +230,21 @@ def test_mulp_row_request_ambiguity_reproduces_an_extra_output_and_is_vetoed(bui
 
 
 @pytest.mark.xfail(strict=False, reason="§10.4's remedy (one-hot guards, four-pulse REQ arbitration, 14/22-hop margins) stalled copies under mix B and was reverted; this reproduction records the failure it was written against")
-def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed(build_pipeline):
+def test_load_request_ambiguity_reproduces_an_old_address_and_is_vetoed():
     """Shape B: a final ROM reader re-runs on the preceding address while no token arrives."""
     mem1 = {i: (i + 1) & 15 for i in range(16)}
     mem2 = {i: (i * 3) & 15 for i in range(16)}
     spec = [{"name": "a", "op": "LOAD", "a": "input", "mem": "m1"},
             {"name": "out", "op": "LOAD", "a": "a", "mem": "m2"}]
-    pl = build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)},
-                        relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
+    pl = _build_pipeline(PARAMS, 4, spec, mems={"m1": (16, mem1), "m2": (16, mem2)},
+                         relight_requests=False, **LEGACY_2026_09_20)  # §10.3 control
     assert pl.net.n < 30000
     got, starts, stats = _run_request_ambiguity_reproduction(pl, "out", "a", 2, 5000)
     assert got == [[9], [9, 9]], (got, starts, stats)
     assert [len(x) for x in starts] == [1, 2]
 
 
-def test_dark_request_rail_replays_the_next_word_and_actd_relights_it(build_pipeline):
+def test_dark_request_rail_replays_the_next_word_and_actd_relights_it():
     """§10.5: a request's false rail re-lit by the start pulse ~55 ms after its own kill train
     can fail to catch; the dark pair lets the row's next IDLE start it with no request, and the
     real request then replays the word. Both copies carry the same 3 sigma corner on one rail
@@ -249,8 +260,8 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it(build_pipe
     # Pinned to the timing the corner was measured in: START re-lighting the rail at once and
     # the 3 x 0.75 train. On the 2026-09-20 build (START's re-light 5 hops later, 4 x 0.75) the
     # rail catches on copy 1 as well and nothing replays: both copies give [9, 15, 6].
-    pl = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                        consts={"k": 3}, relight_requests=True, **LEGACY_2026_09_20)
+    pl = _build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                         consts={"k": 3}, relight_requests=True, **LEGACY_2026_09_20)
     assert pl.net.n < 30000
     cell = next(c for c in pl.cells if c.name == "m.r2")
     req = cell.reqs["m.r1"]
@@ -311,7 +322,7 @@ def test_dark_request_rail_replays_the_next_word_and_actd_relights_it(build_pipe
 
 
 @pytest.mark.parametrize("true_guards", [False, True])
-def test_request_rising_inside_relight_veto_window_is_not_lost(build_pipeline, true_guards):
+def test_request_rising_inside_relight_veto_window_is_not_lost(true_guards):
     """A real trigger rises too late to veto the repair: the old pair kills its request.
 
     Both copies have the same dark false rail and receive the same second token through
@@ -325,13 +336,13 @@ def test_request_rising_inside_relight_veto_window_is_not_lost(build_pipeline, t
     from drosophilos.sim.ref64 import RefSim
 
     spec = [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}]
-    legacy = build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False,
-                            **LEGACY_2026_09_20)
+    legacy = _build_pipeline(PARAMS, 1, spec, consts={"zero": 0}, relight_requests=False,
+                             **LEGACY_2026_09_20)
     # recorded before the fourth remedy; +2 synapses on 2026-09-20 (the stage's reset clears
     # the producer watchdog's TIMEOUT latch, protocol/handshake.py add_liveness)
     assert (legacy.net.n, legacy.net.nnz) == (990, 1680)  # measured §10.3 veto-only, immediate-re-light, three-pulse netlist
-    pl = build_pipeline(PARAMS, 1, spec, consts={"zero": 0},
-                        **{**LEGACY_2026_09_20, "true_guards": true_guards})
+    pl = _build_pipeline(PARAMS, 1, spec, consts={"zero": 0},
+                         **{**LEGACY_2026_09_20, "true_guards": true_guards})
     cell = pl.cells[0]
     req = cell.reqs["input"]
     roles = pl.net.roles
@@ -416,7 +427,7 @@ def test_request_rising_inside_relight_veto_window_is_not_lost(build_pipeline, t
 
 
 @pytest.mark.parametrize("true_guards", [False, True])
-def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear(build_pipeline, true_guards):
+def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_clear(true_guards):
     """Tick copy 18: a repair of live false left a fast train that survived the next DONE.
 
     Replay the measured within-token DONE spacing on a small two-request MOV, with the
@@ -432,16 +443,16 @@ def test_live_request_false_repair_cannot_accelerate_the_latch_and_defeat_done_c
     from drosophilos.lib.kernel import load_pipeline_image
     from drosophilos.sim.ref64 import RefSim
 
-    legacy = build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
-                            consts={"k": 3}, relight_requests=False,
-                            **LEGACY_2026_09_20)  # measured §10.3 count control
+    legacy = _build_pipeline(PARAMS, 4, [{"name": "m", "op": "MULP", "a": "input", "b": ("const", "k")}],
+                             consts={"k": 3}, relight_requests=False,
+                             **LEGACY_2026_09_20)  # measured §10.3 count control
     assert (legacy.net.n, legacy.net.nnz) == (7188, 12487)  # measured veto-only, immediate-re-light, three-pulse netlist
     # pinned to the timing the corner was measured in (START re-lighting the rail at once, 3 x 0.75)
-    pl = build_pipeline(PARAMS, 1,
-                        [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
-                          "trigger": ["input", "input:other"]}],
-                        consts={"zero": 0}, streams=["input", "other"],
-                        **{**LEGACY_2026_09_20, "true_guards": true_guards})
+    pl = _build_pipeline(PARAMS, 1,
+                         [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": ("const", "zero"),
+                           "trigger": ["input", "input:other"]}],
+                         consts={"zero": 0}, streams=["input", "other"],
+                         **{**LEGACY_2026_09_20, "true_guards": true_guards})
     assert 2 * pl.net.n < 30000
     cell = pl.cells[0]
     req = cell.reqs["input"]
