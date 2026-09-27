@@ -789,8 +789,9 @@ in `Pipeline.build_options`. The flag is **opt-in** pending the integrator's cam
 The default and `stall_diag`'s missing-field fallback are False. In particular, the faster
 fault detector changes when an injected double rail meets an in-flight commit; the
 historical `test_empty_stage_copy.py` injection schedule remains a legacy-policy replay.
-`tests/test_kernel.py` explicitly enables the new policy for its functional kernels,
-while its historical reproductions use `LEGACY_2026_09_20`. No cluster campaign was run.
+`tests/test_kernel.py` runs its functional kernels with both the default build and the
+conditioned build; the additional conditioned cases are marked slow. Its historical
+reproductions still explicitly use `LEGACY_2026_09_20`. No cluster campaign was run here.
 
 ### Period measurements
 
@@ -831,6 +832,22 @@ source becomes. Gates are calibrated to 25 steps (`n_ref + 3`), and measured rea
 average 23.50–25.59 steps across mix B. The upper rate bound, rather than the source's
 nominal loop period, now limits the current attributable to one distinct input.
 
+The review fix also puts every readout in its source's inhibition domain: each inhibitory
+input to the source is mirrored to the readout with **16×** weight and the same delay.
+This covers existing inputs and kill/reset edges wired later. The original source edges,
+kill neurons, delays and strengths are unchanged. The gain is twice the excitatory input
+gain because a saturated readout stores substantially more charge than a storage member
+needs to finish its final spike. Fall measurements, including independent noisy mirror
+edges, appear below. There is still no feedback into storage.
+
+Required-rail coincidence neurons also inherit their required source's inhibition
+at 1× gain. Retry inherits its TRUE source's inhibition at its ordinary 2× input gain.
+Their own membrane/current can otherwise retain a consumed vote even after the readout
+stops. `clear_with_inputs=True` discharges require state as part of the same clear. Retry
+is cancelled by START consuming TRUE; it must recover after an unsuccessful FALSE-clear
+attempt, so that attempt does not directly reset the retry detector. Ordinary
+latched AND/OR gates retain their existing reset domains.
+
 The common conditioner rescales each train weight by 25/47. For sustained rate gates
 and the optional retry gate it also doubles **all** currents and the threshold-to-rest
 gap: ordinary rate gates have −7 mV bias (14 mV gap). This reduces the relative effect
@@ -838,11 +855,13 @@ of unscaled stray input and threshold/bias drift. `Netlist.scale_inputs` include
 reset and veto edges; omitting them would weaken the reset domain.
 
 Required-rail coincidence neurons retain their existing −2 mV bias, 9 mV gap and
-0.92-single-need pulse. Only their train input is normalized. Doubling their pulse and
-gap did **not** preserve one-shot behavior because V_reset stays fixed: it produced
-duplicate pulses in 25/2,000 noisy qualifiers. Retaining the original pulse eliminates
-those duplicates (0/2,000), with no false passes or missed conjunctions. Retry qualifiers
-also have 0/2,000 duplicates; their smaller 0.5-single-need pulse tolerates voltage scaling.
+0.92-single-need pulse. Only their train input is normalized; doubling pulse and gap
+does not scale V_reset. **Historical, not reproduced:** the earlier claim of 25/2,000
+duplicates with doubled qualifier pulses has no retained probe code and is not used as
+regression evidence. The retained `gate_survey` does assert 0/2,000 duplicates, false
+passes and missed conjunctions with the original pulse, for both legacy and conditioned
+qualifiers. Retry qualifiers also have 0/2,000 duplicates; their smaller 0.5-single-need
+pulse tolerates voltage scaling.
 
 Conditioned fault detectors use the ordinary 0.65 AND fraction instead of 0.55. Their
 compiled per-input weight is 264 quanta. Even at the absolute 22-step readout floor,
@@ -857,14 +876,17 @@ failure or arbitrarily dense stray burst.
 The common ignition helper applies the conditioner to arithmetic majority gates as well
 as latched AND/OR gates. Unlatched faults, watchdog starts and stale detectors, serial
 `require` checks, and the optional retry-clear gate are wired explicitly. A structural
-test rejects any remaining weak raw-latch input in the tick build. Veto interneurons
+test rejects raw train inputs regardless of source name and undoes the compiled gain to
+catch edges added after conditioning (including doubled `or_in` inputs). Veto interneurons
 already receive full pulse drive and have OR semantics; they retain that circuit and
 are included in the measurements below.
 
-Simple inhibitory autapses were also probed before choosing reader conditioning. Across
+**Historical, not reproduced:** simple inhibitory autapses were reported as probed before
+choosing reader conditioning. Across
 loop gains 1–4, inhibitory gains 0–3 and delays 0/18/35/45/55, none both retained a
 44–51-step nominal period and kept the +20% loop/−0.8 mV corner above 43 steps. Adding
-negative feedback alone did not establish a useful floor. Reader conditioning preserves
+negative feedback alone reportedly did not establish a useful floor. No code for this
+sweep was retained; it is not regression evidence. Reader conditioning preserves
 the storage and kill dynamics and also covers sources whose loops are already fast.
 
 ### False fires and misses
@@ -882,12 +904,22 @@ rail starts at 10 and the driver at 2,500, respecting the established-input cont
 | Completion AND (grant, stale detector) | 0/2,000 → 0/2,000 | 0/2,000 → 0/2,000 |
 | Arithmetic 2-of-3 majority | 0/2,000 → 0/2,000 | 0/2,000 → 0/2,000 |
 | Valid OR (watchdog start) | n/a: one live correctly fires in 2,000/2,000 → 2,000/2,000 | 0/2,000 → 0/2,000 |
-| Veto interneuron | n/a: one live correctly fires in 2,000/2,000 → 2,000/2,000 | 0/2,000 → 0/2,000 |
+| Veto interneuron (firing only) | n/a: one live correctly fires in 2,000/2,000 → 2,000/2,000 | 0/2,000 → 0/2,000 |
 | True guard `require` (required rail alone; both = rail + driver) | 0/2,000 → 0/2,000 | 0/2,000 → 0/2,000 |
 | Optional retry-clear (delayed pulse present; one/two live request rails) | **15/2,000 (0.75%) → 0/2,000** | 0/2,000 → 0/2,000 |
 
 All-dark AND/majority/OR/veto cases, and driver-only `require`/retry cases, also had 0/2,000
 false fires before and after. Thus the OR/veto one-live miss probability is also 0/2,000.
+`test_mix_b_gate_probabilities` asserts **both** columns, including the legacy retry's
+15 false passes. The zero-to-zero fault and completion rows establish compatibility in
+this sample; the deterministic fast/slow probes supply the evidence of improvement.
+
+`veto_blocking_survey` measures the relay itself, with the veto established at step 10,
+driver at 2,500, and independent mix-B draws plus strays on every neuron. For **both**
+ordinary and required-form veto relays, legacy → conditioned blocked leaks are
+**0/2,000 → 0/2,000**; unblocked misses are **0/2,000 → 0/2,000**. These four before/after
+comparisons are asserted by `test_veto_blocks_the_relay_not_just_fires`.
+
 These observed zeros are **not zero-probability claims**: each has a one-sided 95% upper
 bound of **0.1497% per measured exposure**. This survey does not resolve a fault as rare
 as copy 73's across thousands of gates and seconds of activity. The deterministic tail
@@ -916,25 +948,118 @@ is 0.02995%). The readout adds no feedback or inhibition to the latch, so these 
 measurements of the existing four-pulse policy, not a newly improved kill margin. The
 machine's three-pulse policy still has the documented fast-corner limitation.
 
+### Review correction: readout fall and consumed guards (2026-09-27)
+
+The original 8× input left enough current to fire for about 20 ms after its source died.
+In the late 19-hop true-guard path, this let a require check pass on a TRUE rail already
+consumed by START. The second qualified pulse could then outlast `once_inh`'s protection
+and issue a second transaction. `late_guard_probe` reproduces this without random noise:
+TRUE loops +20%, TRUE thresholds −0.8 mV; START positive/negative inputs +8%/−8%,
+threshold −0.4 mV, bias +0.4 mV; 901 A/B offsets −45…+45 ms; previous FALSE activity
+and the normal five-hop FALSE relight. Duplicate STARTs are **0/901 with rate_robust=False,
+50/901 with the merged unreset readout, and 0/901 with mirrored inhibition**. The test
+asserts all three, and the ordinary after-fix assertion fails on the merged circuit.
+An additional 901-offset sweep for each 1-, 2- and 3-sigma START corner, with both nominal
+and fast TRUE loops, has **0 duplicates and 0 misses in all 5,406 cases**. Readout reset
+alone left one duplicate at the combined three-sigma/fast-TRUE corner; clearing the
+require neuron's retained vote removes it. The final sweep is asserted by
+`test_late_guard_across_target_corners`.
+
+Mirroring the source's inhibition fixes the stored-current cause while preserving the
+existing 22-step refractory bound, measured live readout distribution, gate weights,
+and latch dynamics. The same kill signal clears require/retry qualifiers' own stored
+votes. Reducing the positive drive would require recalibrating those rate
+margins; bypassing require conditioning would give up the fast-source bound at those
+checks. The chosen fix pays for additional inhibitory edges instead. No `once_inh`
+extension or timing-dependent simulator reset is used.
+
+`prescribed_fall_survey` covers every period 32…56, every phase, and all 16 combinations
+of independent ±3-sigma excitatory weight, inhibitory weight, threshold and bias corners:
+**17,600 cases**. It stops source emission at the first kill volley but keeps previously
+emitted spikes in flight, and applies the ordinary four kill volleys to the readout.
+The latest readout spike after that volley is **24.8 → 5.3 ms**. The asserted budget is
+5.6 ms (one slow-end latch interval), including the 1.8 ms input delay. This is not a
+claim of less than each individual fast interval: 2,738/17,600 cases exceed their own
+3.2–5.6 ms interval after the fix. `readout_fall_survey`, 2,000 actual noisy killed
+latches with independent noisy kill/readout edges and all-neuron strays, gives a maximum
+tail after the **final spike of either latch member** of **24.5 → 4.2 ms**. Measured
+against `u` alone the maximum is 25.1 → 6.9 ms; `v` can finish the circulating spike later.
+These are finite probes, not bounds on unbounded Gaussian draws or arbitrary stray bursts.
+
+The kill-pair reader inventory is: original request/IDLE/commit/phase rails used by
+`guarded_pulse` require checks and serial rechecks; cached passed pairs in `_chain_true`;
+wrapped pairs in multi-source pacing joins; and both request rails in optional retry.
+Ordinary pacing **line** readers and FALSE vetoes use full pulse drive, not conditioned
+taps. Their late inhibitory fall can delay a pass; it cannot supply a missing TRUE vote.
+The blocking measurements above cover ordinary and required-form vetoes separately.
+
+`kill_pair_reader_survey` builds the actual guard, chained-guard and two-source pacing
+primitives, plus the retry qualifier with its kernel weights. All conditioned source
+loops get the +20%/−0.8 mV fast corner. There are 201 offsets per row. The guard target
+gets the START corner above; retry keeps its nominal target. Its stuck-pair fixture
+disables mutual arbitration, consumes TRUE, then sweeps the retry pulse 35…125 ms after
+the consume input. The table's tail is measured after the last spike of either source
+member; a negative value means the readout stopped first.
+
+| Reader | Maximum tail, unreset → reset | Behavioral result, unreset → reset |
+|---|---:|---:|
+| START require/recheck | 23.0 → −6.3 ms | Duplicate STARTs 11/201 → 0/201; no misses |
+| `_chain_true` passed pair and original-rail rechecks | 23.0 → −5.3 ms | Duplicate/missing outputs 0/201 → 0/201 |
+| Pacing wrapped-pair join (line vetoes remain pulse driven) | 23.0 → 1.2 ms | Duplicate/missing wraps 0/201 → 0/201 |
+| Optional retry qualifier | 13.0 → −7.9 ms | Passes after consumption 35/201 → 0/201 |
+
+A separate `retry_stuck` case tests recovery: the known fast FALSE rail survives a
+three-pulse first clear, then the retry pulse arrives 65…155 ms after that attempt.
+Both before and after pass **201/201** with no duplicate. Resetting the retry detector
+from the attempted FALSE clear itself caused 18/201 misses here; the final wiring
+therefore cancels the detector only when TRUE is consumed. Both readouts still inherit
+all of their own clear inputs.
+
+The structural tick audit also verifies **every** readout's inherited inhibitory edges,
+including source, gain and delay, irrespective of whether the kill was wired before or
+after conditioning. Fast-corner and 10,000-copy mix-B kill/reload tests check that the
+readouts restart as well as their source latches.
+
 ### Costs, rebuilds, and handoff
 
-Each distinct source used by a rate-mode gate costs **one neuron and one synapse**,
-shared across every such consumer. No latch member, kill relay, or control-machine
-neuron is added. The strong readout edge is 28,968 quanta with default Params; this
-increases spike activity and synaptic charge as well as neuron count.
+Each distinct source costs **one neuron, one excitatory edge, and one inhibitory edge
+per inhibitory source input**, shared across consumers. Require/retry coincidence
+neurons additionally receive their required sources' clear edges. No latch member, kill relay or
+control-machine neuron is added. The incoming-edge index maintained by `Netlist.synapse`
+makes conditioning, input scaling, and inhibition inheritance O(edges) overall. Hub
+splitting also replaces the index with its transformed incoming lists.
+
+The 28,968-quanta excitatory edge is retained to preserve the measured rate margin:
+it requires **453 anatomical synapses at k_max=4**, versus 57 for a loop edge. A standard
+mirrored kill edge is **43,456 quanta / 679 anatomical synapses**, now the largest edge
+in these conditioned builds (the previous default maximum was 7,966 / 125). With optional
+retry's 1.5-strength kill, the largest mirror is 86,912 / 1,358. This fix does **not**
+bring the edges into the old placement range; that anatomical cost is an explicit
+limitation of retaining refractory saturation while clearing it promptly. Tick has
+1,268 drive edges, 1,318 readout clear edges and 542 qualifier clear edges. Summing
+`ceil(abs(q)/64)` per edge gives a k_max=4 anatomical lower bound of
+**3,166,284 → 4,685,110** for generic tick;
+it is not evidence that those edges can be placed on a particular connectome.
 
 | Build | Legacy neurons / synapses | Conditioned | Delta |
 |---|---:|---:|---:|
-| 1-bit MOV, generic | 1,029 / 1,752 | 1,069 / 1,792 | +40 / +40 |
-| 1-bit MOV, specialized | 851 / 1,416 | 891 / 1,456 | +40 / +40 |
-| 4-bit MULP | 7,414 / 12,906 | 7,932 / 13,424 | +518 / +518 |
-| `tick2.c`, generic | 29,375 / 52,808 | 30,643 / 54,076 | +1,268 / +1,268 |
-| `tick2.c`, specialized | 25,415 / 45,248 | 26,683 / 46,516 | +1,268 / +1,268 |
+| 1-bit MOV, generic | 1,029 / 1,752 | 1,069 / 1,854 | +40 / +102 |
+| 1-bit MOV, specialized | 851 / 1,416 | 891 / 1,518 | +40 / +102 |
+| 4-bit MULP | 7,414 / 12,906 | 7,932 / 14,106 | +518 / +1,200 |
+| `tick2.c`, generic | 29,375 / 52,808 | 30,643 / 55,936 | +1,268 / +3,128 |
+| `tick2.c`, specialized | 25,415 / 45,248 | 26,683 / 48,376 | +1,268 / +3,128 |
+| Perspective, MULP | 112,677 / 199,070 | 120,123 / 215,988 | +7,446 / +16,918 |
 | 2-bit control-machine regression | 2,449 / 4,513 | 2,449 / 4,513 | 0 / 0 |
 
+`tests/test_build_options.py:build_cost_survey` prints these counts, anatomical lower
+bounds and wall times. Perspective build time was **0.665 s default / 0.753 s conditioned**
+in the final review-fix cost run, versus the independent review's 0.8 / 30.3 s before
+indexing. Generic tick was 0.174 / 0.150 s. Wall times are
+reported, not asserted as hardware-dependent test limits.
+
 The conditioned generic tick exceeds 30,000 neurons; placement/campaign capacity must
-account for that. The readout adds a synaptic hop to rate readers but produces their
-trains sooner and with more margin. For MOV tokens `[0,1,1,0]`, generic first-output
+account for that. **Historical, not reproduced after the reset correction:** for MOV
+tokens `[0,1,1,0]`, generic first-output
 latency changes **1,127.8 → 1,085.6 ms** (−42.2 ms), and mean per-token latency
 **898.767 → 867.967 ms** (−30.8 ms). Specialized MOV changes **1,119.4 → 1,077.6 ms**
 and **891.900 → 860.333 ms**. Values, faults and timeouts are unchanged in these runs.
@@ -945,8 +1070,11 @@ this is why enabling the option is a new timing policy rather than a step-identi
 old builders. `tests/test_build_options.py` checks exact recorded on/off rebuilds,
 shared-reader counts, complete legacy fingerprints, and the ordered machine topology's
 SHA-256 (`7175c3fcd639651dc0eee0c99a132bdb4c6f292ba0c058d5e8ae20952cb504f4`).
-The main kernel suite explicitly enables conditioning, including generic/specialized
-AND/OR/XOR/MOV comparisons; legacy timing reproductions stay explicitly legacy.
+The main kernel suite now parametrizes default and conditioned builds, including render,
+RAM, multiply, streams, pacing and generic/specialized AND/OR/XOR/MOV comparisons;
+legacy timing reproductions stay explicitly legacy. Ten ordered SHA-256 regressions
+pin the merged default tick (generic/specialized/legacy/retry), render, perspective,
+MOV, MULP, and 2-/4-bit machine netlists byte for byte.
 
 Reproduce the printed measurements with
 `uv run pytest -q -s tests/test_fast_latch.py -m slow`. The fast regressions are selected
@@ -957,14 +1085,36 @@ and `--basetemp=.tmp/pytest-required` if the configured external TMPDIR is not w
 The portable C reference also needs `TMPDIR="$PWD/.tmp"` in this sandbox: pytest's
 `--basetemp` only relocates its own fixtures, not Clang's temporary object files.
 
-Final validation of this implementation: the requested `test_fast_latch`,
+Historical validation of the original unreset build (not a result for the review fix):
+the requested `test_fast_latch`,
 `test_kill_margin`, `test_build_options`, `test_true_guards`, `test_machine`,
 `test_empty_stage_copy`, and `test_stall_diag` group passes **83 tests in 723.13 s**,
 including the slow surveys. The six fast regressions take about one second combined
 (each 0.08–0.18 s in the measured run).
 
-The final `test_kernel`, `test_compiler`, and `test_kernel_specialized` run passes
+That build's `test_kernel`, `test_compiler`, and `test_kernel_specialized` run passed
 **122 tests in 5,967.53 s (1:39:27)**, with 64 configured skips (the exhaustive
 specialized cases require `RUN_SLOW=1`) and two pre-existing expected failures
 (legacy MULP/load request ambiguity). There are no unexpected failures. This run includes
 the conditioned kernels' renderer, multiplication, RAM, and neural-pacing simulations.
+
+Review-fix validation (2026-09-27): the requested `test_fast_latch`, `test_build_options`,
+`test_kill_margin`, and `test_machine` run passed **63 tests in 499.78 s**. After refining
+retry cancellation, the retry/cost/default-fingerprint selection passed **14 tests in
+25.97 s**, including the added `retry_stuck` recovery case. The final code therefore
+has 64 cases in the four-file group. The selected default/conditioned fixed-operation,
+render, RAM, multiply, stream, pacing, and chained-guard checks passed **16 tests in
+470.09 s**. The additional hub-splitting/true-guard/kill regression run passed 44 tests.
+The complete slow kernel/compiler suite was not rerun. No new kernel-level mix-B
+campaign was run; Juno jobs built before this correction measure the earlier circuit.
+
+The new late-guard regression was also run directly against the reviewer's unchanged
+2ed4d74 checkout. It failed at the duplicate-START assertion with exactly **50/901**
+duplicates, while the same regression passes here; the baseline was not only emulated
+by disabling the reset edges.
+
+The requested `TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest ...` could not start
+inside this worktree's sandbox: both the default uv cache and that TMPDIR were denied
+writes. Validation used the same tests with
+`PYTHONPATH=. UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv TMPDIR="$PWD/.tmp" uv run --no-sync --no-cache pytest`,
+plus `-o addopts='' -q` for counts/timings. Work remains uncommitted for integration.

@@ -174,9 +174,9 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
             net.synapse(tap, relay, int(round(0.76 * drive.rate_need)))
             # Keep the already biased one-shot's pulse amplitude. Scaling its voltage
             # gap and pulse together does not scale V_reset: after the first spike the
-            # enlarged pulse can fire a second time (25/2,000 mix-B qualifiers). Only
+            # enlarged pulse can fire a second time. Only
             # normalize the train here; the existing -2 mV bias supplies stray margin.
-            condition_rate_gate(net, drive, relay, gain=1.0)
+            condition_rate_gate(net, drive, relay, gain=1.0, clear_with_inputs=True)
             pulse = relay
     else:
         relay = add_edge_relay(net, drive, name, driver)

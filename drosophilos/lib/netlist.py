@@ -79,6 +79,13 @@ class Netlist:
     rate_readouts: dict = field(default_factory=dict)  # source -> shared refractory-limited rate tap
     rate_gates: set = field(default_factory=set)
     input_scales: dict = field(default_factory=dict)  # compiled input gain, including later reset/veto edges
+    incoming: list = field(default_factory=list)  # target -> edge indices, in insertion order
+    inhibition_mirrors: dict = field(default_factory=dict)  # source -> [(readout, gain)]
+
+    def __post_init__(self) -> None:
+        self.incoming = [[] for _ in self.roles]
+        for edge, target in enumerate(self.dst):
+            self.incoming[target].append(edge)
 
     @property
     def n(self) -> int:
@@ -93,17 +100,35 @@ class Netlist:
         Profile 2 parameter edit: the flip-flop latch's members are driven this way)."""
         self.roles.append(role)
         self.bias.append(float(bias))
+        self.incoming.append([])
         return len(self.roles) - 1
 
     def set_bias(self, i: int, mv: float) -> None:
         self.bias[int(i)] = float(mv)
 
     def synapse(self, pre: int, post: int, quanta: int, delay_steps: int | None = None) -> None:
+        self.incoming[int(post)].append(len(self.src))
         self.src.append(int(pre))
         self.dst.append(int(post))
         scale = self.input_scales.get(int(post))
-        self.quanta.append(int(quanta) if scale is None else int(round(quanta * scale)))
+        compiled_quanta = int(quanta) if scale is None else int(round(quanta * scale))
+        self.quanta.append(compiled_quanta)
         self.delay.append(self.params.default_delay_steps if delay_steps is None else int(delay_steps))
+        if compiled_quanta < 0:
+            for readout, gain in self.inhibition_mirrors.get(int(post), ()):
+                self.synapse(pre, readout, int(round(compiled_quanta * gain)), delay_steps)
+
+    def mirror_inhibition(self, source: int, readout: int, gain: float) -> None:
+        """Put a feed-forward readout in its source's reset/kill domain.
+
+        Include both existing and subsequently wired inhibition; builder order must
+        not decide whether a readout survives its source. The storage is untouched.
+        """
+        for edge in list(self.incoming[source]):
+            if self.quanta[edge] < 0:
+                self.synapse(self.src[edge], readout,
+                             int(round(self.quanta[edge] * gain)), self.delay[edge])
+        self.inhibition_mirrors.setdefault(source, []).append((readout, gain))
 
     def scale_inputs(self, neuron: int, scale: float) -> None:
         """Compile a voltage gain into all current and future inputs, and the resting bias.
@@ -112,9 +137,8 @@ class Netlist:
         vote unchanged while reducing sensitivity to unscaled background input. Resets
         and vetoes added after gate construction must receive the same gain.
         """
-        for k, target in enumerate(self.dst):
-            if target == neuron:
-                self.quanta[k] = int(round(self.quanta[k] * scale))
+        for k in self.incoming[neuron]:
+            self.quanta[k] = int(round(self.quanta[k] * scale))
         gap = self.params.V_th - self.params.E_L
         self.bias[neuron] = gap - scale * (gap - self.bias[neuron])
         self.input_scales[neuron] = self.input_scales.get(neuron, 1) * scale
@@ -248,4 +272,5 @@ class Netlist:
             return {}
         self.roles, self.src, self.dst, self.quanta, self.delay = new_roles, src, dst, quanta, delay
         self.bias = new_bias
+        self.incoming = inc
         return copies
