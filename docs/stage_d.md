@@ -18,11 +18,14 @@ canonical serialized state (field order, widths, byte order, padding) rather tha
   given tokens, so 1,000 ticks = 1,000 tokens.
 - **Neural run**: `build_pipeline(..., outputs=[c4_sel, c9_sel, c12_sel])` — the kernel's two
   outputs (px, mx) plus health's carrier cell, so the host decodes every committed state word.
-  Tick *t* is complete when all three cells have committed exactly once after tick *t*'s input
-  injection and before the next input injection. The record uses the runner's `load_events`
-  (`schedule_index`, `event_step`) to assign commits to ticks, as well as their order. This
-  catches a missing state commit followed by an extra one even when the field value does not
-  change.
+  Inputs use the runner's ordinary unpaced token schedule. The kernel is a pipeline: it can
+  accept tick *t*+1's input while tick *t*'s downstream state outputs remain in flight.
+  Consequently input-load intervals are not state-output windows.
+  Each canonical field commits once per tick, so the k-th commit of a field is tick k's value.
+  Tick *k* is complete when all three fields have a k-th commit. The runner's final (last-retry)
+  load event for tick *k* is only a causal lower bound: every k-th field commit must occur after
+  it. The next tick's load is never an upper bound. Each field must have exactly as many commits
+  as requested ticks; extras are duplicates, while a trailing shortfall is incomplete.
 - **Pass**: every copy's canonical state equals the reference's at every one of the 1,000 ticks,
   with exactly one commit from every state cell per tick, no missing or extra commits, and no
   run-level fault or timeout latch. A run ended at `--max-ms` cannot pass. Verdict `"exit met"`
@@ -87,15 +90,16 @@ its SEL cell still runs every tick. Over 1,000 ticks (seed 1) health changes 75 
 
 ## 5. Reporting (§6 discipline)
 
-Per copy: `requested` (ticks), `completed` (all three fields committed exactly once), `matched` (ticks equal
+Per copy: `requested` (ticks), `completed` (all three fields have their ordinal commit), `matched` (ticks equal
 before the first mismatch), `wrong` (1 at the first mismatch; counting stops there — a diverged
 state makes every later tick wrong and says nothing more), `unscored` (completed after it),
 `missing`, `duplicates` (commits beyond the requested ticks), `invalid` (undecodable words),
 `refusals`, `retries`, the first mismatch (`tick`, `token`, `field`, `expected`, `got`, both
-whole states, step, and a class: `state lags a tick` / `previous word applied twice` / `other`),
-and `tick_ms` (neural ms from the first load to each tick's last commit). A count mismatch is
-also a first mismatch and names its field, tick, expected commit count (always one), and observed
-count.
+whole states, step, and a class: `state lags a tick` / `previous word applied twice` /
+`commit before input load` / `commit count` / `other`),
+and `tick_ms` (neural ms from the first load to each tick's last commit). `invalid` also counts
+commits that precede their own tick's final load. An extra commit is a first mismatch and names
+its field and observed count; a missing trailing commit remains an incomplete liveness outcome.
 
 Status per copy is one of `matched`, `mismatch`, `stalled`, or `truncated`. `mismatch` is the
 first wrong value or commit-count/order violation. A nonmatching copy is `stalled` if its last
@@ -110,7 +114,7 @@ whole batch, not per copy; `fault_timeout_scope` records this), `build_options` 
 `tick_wall_s_copy0`, `verdict_accounting` (faults, timeouts, refusals, retries, and scope), and
 `verdict`.
 
-New records retain compact `commit_events`, `load_events`, `run_end_step`, and `dt_ms` so a
+New records retain compact `commit_events`, unpaced `load_events`, `run_end_step`, and `dt_ms` so a
 completed long job can be re-judged without simulation:
 
 ```
@@ -118,9 +122,12 @@ uv run python -m drosophilos.bench.stage_d --recheck data/stage_d/mixB_s108_c100
 ```
 
 The command rewrites that record by default (or writes `--out FILE`), recomputing per-copy status
-and verdict. Older records that lack the saved injection/commit evidence are still rechecked for
-faults, timeouts, stored value mismatches, and liveness; their `recheck` note explicitly says the
-exactly-once commit-count rule was not checkable.
+and verdict. Records with both saved load and commit events are fully rechecked; no pacing
+evidence is required. Records from before those events were retained are still
+rechecked positionally for faults, timeouts, stored value mismatches, and liveness; their
+`recheck` note explicitly says the exactly-once commit-count rule was not checkable. Treating
+unpaced input injections as both lower and upper output boundaries was the cause of the former
+six-tick false failure (`completed=2`, `matched=0`): only the lower bound is causal.
 
 **Sizing**: without `--max-ms`, a nominal single-copy run of `--calibrate-ticks` (4) ticks on the
 same backend measures the first-tick latency and the per-tick time; `max_ms = (first + ticks ×
@@ -141,7 +148,7 @@ the default cluster, partition h200, 1-day default time, 2-day limit):
 slurm/submit.sh --time=6:00:00 -- drosophilos.bench.stage_d --ticks 1000 --seed 1 \
     --backend torch-fast --device cuda --copies 1 --mix none --out data/stage_d/nominal_s1.json
 
-# mix B, 100 perturbed copies (~18 h; a run cut at max_ms could take ~27 h)
+# mix B, 100 perturbed copies (~18 h)
 slurm/submit.sh --time=2-00:00:00 -- drosophilos.bench.stage_d --ticks 1000 --seed 108 \
     --backend torch-fast --device cuda --copies 100 --mix B --out data/stage_d/mixB_s108_c100.json
 
@@ -152,14 +159,18 @@ slurm/fetch.sh <jobid> data/stage_d/nominal_s1.json
 On G2 add `--cluster g2 --gres=gpu:nvidia_h200_nvl:1` (not a 3090: slow at float64).
 `--backend torch` (TorchSim) is the comparison backend: ~5.9× slower (docs/perf_final_comparison.md).
 
-Estimates. Measured on the laptop (2026-09-25, RefSim, nominal, the 6-tick test): tick commits
-at 12.1 / 17.6 / 23.9 / 29.5 / 35.8 / 41.3 s neural after the first load — first tick **12.1 s**,
-then **5.84 s** per tick on average (alternating ~5.5 and ~6.35 s); a 2-tick FastSim run gave the
-same first two ticks. 1,000 ticks ≈ 12.1 + 999 × 5.84 ≈ **5,850 s neural** (1.6 h). One H200,
-FastSim: single copy at ~1.08× wall/neural (tick-kernel row, docs/perf_final_comparison.md) ≈
-**6,300 s ≈ 1.75 h**; 100 copies at ~11× ≈ **64,000 s ≈ 18 h**. The calibrated default `max_ms`
-is ≈ 8,700 s neural, so a 100-copy run cut there would take ≈ 27 h: hence `--time=2-00:00:00`.
-On the laptop, RefSim ran at ~5.4× wall/neural under heavy load (226 s for 6 ticks).
+Estimates. Measured on the laptop (2026-09-25, RefSim, nominal, the unpaced 6-tick test): tick
+commits at 12.1 / 17.6 / 23.9 / 29.5 / 35.8 / 41.3 s neural after the first load — first tick
+**12.1 s**, then **5.84 s per tick** on average (alternating ~5.5 and ~6.35 s); a 2-tick FastSim
+run gave the same first two ticks. The throughput is faster than first-tick latency because ticks
+overlap: later inputs are accepted while prior downstream commits are still in flight. The
+commit-order scorer preserves that resident-kernel behavior and uses loads only as lower bounds.
+
+1,000 ticks ≈ 12.1 + 999 × 5.84 ≈ **5,850 s neural** (1.6 h). Applying the measured FastSim
+ratios from `docs/perf_final_comparison.md` gives about **1.75 h** wall for one H200 copy and
+**18 h** for 100 copies. The calibrated 1.5× neural ceiling is ≈ 8,700 s, so a 100-copy run cut
+there would take ≈ 27 h; `--time=2-00:00:00` leaves margin. On the laptop, RefSim ran at ~5.4×
+wall/neural under heavy load (226 s for 6 ticks).
 
 ## 7. What this does NOT cover
 
