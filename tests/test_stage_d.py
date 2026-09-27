@@ -162,10 +162,12 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "run_neural", fake_run)
     out = tmp_path / "stage_d" / "rec.json"
     sd.main(["--ticks", "10", "--seed", "5", "--copies", "2", "--mix", "B", "--max-ms", "90000",
-             "--c-ticks", "10", "--out", str(out)])
+             "--c-ticks", "10", "--rate-robust", "--out", str(out)])
     rec = json.loads(out.read_text())
     assert calls["mix"] == "B" and calls["max_ms"] == 90000 and calls["copies"] == 2
     assert rec["build_options"]["relight_repair_delay"] is True and "true_guard_version" in rec["build_options"]
+    assert rec["rate_robust"] is rec["build_options"]["rate_robust"] is True
+    assert rec["neurons"] > sd.build(K, PARAMS).net.n
     assert rec["tokens"] == sd.tokens_for(10, 5) and rec["max_ms_source"] == "given"
     assert rec["per_copy"][0]["status"] == "matched"
     assert rec["per_copy"][1]["first_mismatch"]["tick"] == 3 and rec["per_copy"][1]["first_mismatch"]["field"] == "mx"
@@ -174,7 +176,19 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
     assert rec["verdict"] == "exit not met: 1 mismatch, refusals 0, retries 0" and rec["retried_commit_applied_once"] is True
     assert rec["canonical_format"] == sd.FORMAT and len(rec["reference_canonical_hex"]) == 10
     assert rec["three_point_check"]["ir_equal"] and len(rec["tick_ms"][0]) == 10
+    # Old records had no top-level opt-in field.  Recheck must retain their default build.
+    rec.pop("rate_robust")
+    out.write_text(json.dumps(rec))
+    real_build = sd.build
+    rechecked_build = {}
+
+    def recording_build(*args, **kwargs):
+        rechecked_build["rate_robust"] = kwargs["rate_robust"]
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(sd, "build", recording_build)
     rechecked = sd.main(["--recheck", str(out)])
+    assert rechecked_build["rate_robust"] is False
     assert rechecked["per_copy"][1]["status"] == "mismatch"
     assert rechecked["recheck"]["commit_counts_checkable"] is False
 

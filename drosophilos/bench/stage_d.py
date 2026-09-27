@@ -228,12 +228,12 @@ def three_point_check(k: Kernel, tokens: list[int], ref: list[dict], c_ticks: in
 
 # --- neural run -------------------------------------------------------------------------------
 
-def build(k: Kernel, params: Params, datapath: str = "generic"):
+def build(k: Kernel, params: Params, datapath: str = "generic", rate_robust: bool = False):
     """The tick kernel's pipeline with every state cell decoded by the host: the kernel's own
     outputs (px, mx) plus health's carrier, so each tick commits one word per canonical field."""
     outputs = list(k.ks.outputs) + [k.cells[f] for f in k.fields if k.cells[f] not in k.ks.outputs]
     return build_pipeline(params, k.width, k.ks.cells, consts=k.ks.consts, mems=k.ks.mems,
-                          outputs=outputs, datapath=datapath)
+                          outputs=outputs, datapath=datapath, rate_robust=rate_robust)
 
 
 def make_sim(pl, params: Params, copies: int, backend: str, mix: str, seed: int, device: str, dtype, n_steps: int):
@@ -519,6 +519,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--mix", default="none", choices=("none", "0", "B", "B+"),
                     help="none: nominal weights; B: the campaigns' perturbation (make_perturbed_sim)")
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
+    ap.add_argument("--rate-robust", action="store_true",
+                    help="use refractory-limited rate readers (opt-in; changes the netlist)")
     ap.add_argument("--max-ms", type=float, default=None,
                     help="neural-time ceiling; default: calibrated from a short nominal run x --margin")
     ap.add_argument("--calibrate-ticks", type=int, default=4)
@@ -581,6 +583,12 @@ def recheck_record(rec: dict) -> dict:
     and batch latches are enough for the fault/timeout and per-copy-liveness rules.
     """
     ticks = int(rec.get("ticks", len(rec.get("tokens", []))))
+    # Rebuild even though recheck only rejudges saved observations: this confirms the saved
+    # configuration remains constructible and keeps the rate-conditioning choice attached to
+    # the record.  Old records predate the opt-in and therefore mean the legacy false value.
+    rate_robust = bool(rec.get("rate_robust", False))
+    k_for_build = load_kernel(rec.get("program", PROGRAM))
+    build(k_for_build, Params(), rec.get("datapath", "generic"), rate_robust=rate_robust)
     raw = rec.get("commit_events")
     loads = rec.get("load_events")
     checkable = (isinstance(raw, list) and isinstance(loads, list) and len(raw) == len(loads) and
@@ -589,7 +597,7 @@ def recheck_record(rec: dict) -> dict:
     old_copies = rec.get("per_copy", [])
     per_copy = []
     if checkable:
-        k = load_kernel(rec.get("program", PROGRAM))
+        k = k_for_build
         tokens = rec.get("tokens", [])
         if len(tokens) != ticks:
             raise ValueError("record tokens do not match record ticks")
@@ -680,7 +688,7 @@ def main(argv=None):
     print("three-point check:", json.dumps({x: y for x, y in check.items()}), flush=True)
     if not check["ir_equal"] or check.get("c_equal") is False:
         raise SystemExit("the references disagree; not running the neural comparison")
-    pl = build(k, P, a.datapath)
+    pl = build(k, P, a.datapath, rate_robust=a.rate_robust)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -716,7 +724,8 @@ def main(argv=None):
         "state_cells": k.cells, "width": k.width,
         "ticks": a.ticks, "seed": a.seed, "scripted_prefix": min(a.ticks, len(SCRIPTED_TOKENS)), "tokens": tokens,
         "backend": a.backend, "simulator": st["simulator"], "device": a.device, "dtype": str(dtype),
-        "copies": a.copies, "mix": a.mix, "datapath": pl.datapath, "neurons": pl.net.n,
+        "copies": a.copies, "mix": a.mix, "datapath": pl.datapath,
+        "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n,
         "build_options": dict(pl.build_options),
         "max_ms": round(max_ms, 1), "max_ms_source": "calibrated" if calib else "given", "calibration": calib,
         "margin": a.margin, "stall_ms": stall_ms, "stop": limit or "complete", "dt_ms": P.dt,
