@@ -11,6 +11,11 @@ synapses, not simulator-side clipping or knowledge of which rail is logically li
 from ..lib.netlist import Drive, Netlist
 
 
+# v1 (2ed4d74) left conditioned readers and qualifiers outside their sources'
+# reset domains; v2 (71e78d5) mirrors every source kill into those consumers.
+RATE_ROBUST_VERSION = 2
+
+
 def rate_tap(net: Netlist, drive: Drive, source: int) -> int:
     """Shared saturator in the source's reset domain, without feedback into storage."""
     if not drive.rate_robust:
