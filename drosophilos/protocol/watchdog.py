@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from ..lib.netlist import Drive, Netlist
 from .celement import _ignite_from
 from .latch import Latch, add_edge_relay, add_latch, connect_trigger
+from .rate import condition_rate_gate
 
 
 @dataclass
@@ -38,6 +39,7 @@ def add_watchdog(net: Netlist, drive: Drive, name: str, start_taps: list[int], c
     g = net.neuron(f"{name}.start")
     for t in start_taps:
         net.synapse(t, g, drive.or_in)
+    condition_rate_gate(net, drive, g)
     relay = add_edge_relay(net, drive, f"{name}.start", g)  # one start pulse per activation
     chain = []
     prev = relay
@@ -100,6 +102,7 @@ def add_stale_monitor(net: Netlist, drive: Drive, name: str, latch_taps: list[in
         d = net.neuron(f"{name}.d{k}")
         net.synapse(E.u, d, drive.and_in)
         net.synapse(t, d, drive.and_in)
+        condition_rate_gate(net, drive, d)
         net.synapse(d, gate, drive.pulse)
     S = add_latch(net, drive, f"{name}.stale")
     _ignite_from(net, drive, f"{name}.stale", gate, S)

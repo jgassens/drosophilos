@@ -1,6 +1,7 @@
 """Latched completion elements.
 
-Every gate here reads only latch trains (a standard 213 Hz rate), and every gate output
+In legacy mode every gate here assumes a standard 213 Hz latch train. With rate_robust
+enabled, train inputs pass through shared refractory-limited readouts instead. Every gate output
 that feeds another gate is latched, so rate-mode weights never depend on an upstream
 gate's firing rate. A completion element therefore is: gate neuron -> latch.
   bit_valid(i)  : OR of the bit's two rails, latched      (rate-mode OR, or_in per rail)
@@ -15,6 +16,7 @@ from __future__ import annotations
 from ..lib.netlist import Drive, Netlist
 from .flipflop import FlipFlop, add_flipflop, add_set_chain
 from .latch import Latch, add_edge_relay, add_latch
+from .rate import condition_rate_gate
 
 
 def add_state(net: Netlist, drive: Drive, name: str, storage: str = "latch", proxy: bool = False):
@@ -53,6 +55,7 @@ def _ignite_from(net: Netlist, drive: Drive, name: str, gate: int, latch) -> Non
     latch's train holds the relay down (hold_from): a gate source is too slow to do that
     itself, and a re-firing relay re-ignites the latch every ~43 ms (see add_edge_relay).
     A flip-flop target takes the pulse through its set chain (set_input)."""
+    condition_rate_gate(net, drive, gate)
     relay = add_edge_relay(net, drive, f"{name}.ign", gate, hold_from=[rail_of(latch)])
     net.synapse(relay, set_input(net, drive, name, latch), drive.ignite)
 
@@ -77,14 +80,20 @@ def add_and_latched(net: Netlist, drive: Drive, name: str, inputs: list[int], st
 
 
 def add_and_gate(net: Netlist, drive: Drive, name: str, inputs: list[int], fraction: float | None = None) -> int:
-    """Unlatched rate-mode AND. `fraction` overrides drive.and_in (as a fraction of the
-    sustained-train need); the fault gates use 0.6 so that one rail plus noise never trips
-    them, while completion ANDs use 0.75 so that two inputs fire under -10 % weights."""
+    """Unlatched two-input AND. Legacy faults use 0.55 of nominal train need per rail;
+    ordinary ANDs use drive.and_in (0.65). Conditioned faults use at least and_in, since
+    the readout bounds one input's rate and leaves room to detect two slow inputs.
+    """
     assert len(inputs) == 2
     g = net.neuron(f"{name}.and")
+    # A normalized input no longer needs the legacy fault gate's tiny 0.55 margin;
+    # the ordinary AND fraction detects two slow rails, including weak input weights.
     q = drive.and_in if fraction is None else int(round(fraction * drive.rate_need))
+    if drive.rate_robust:
+        q = max(q, drive.and_in)
     for x in inputs:
         net.synapse(x, g, q)
+    condition_rate_gate(net, drive, g)
     return g
 
 
@@ -163,6 +172,11 @@ def add_veto_relay(net: Netlist, drive: Drive, name: str, driver: int, vetoes: l
             relay = net.neuron(f"{name}.edge" if k == len(require) - 1 else f"{name}.require{k}", bias=-2.0)
             net.synapse(pulse, relay, int(round(0.92 * drive.single_need)))
             net.synapse(tap, relay, int(round(0.76 * drive.rate_need)))
+            # Keep the already biased one-shot's pulse amplitude. Scaling its voltage
+            # gap and pulse together does not scale V_reset: after the first spike the
+            # enlarged pulse can fire a second time (25/2,000 mix-B qualifiers). Only
+            # normalize the train here; the existing -2 mV bias supplies stray margin.
+            condition_rate_gate(net, drive, relay, gain=1.0)
             pulse = relay
     else:
         relay = add_edge_relay(net, drive, name, driver)

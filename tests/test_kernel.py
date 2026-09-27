@@ -2,6 +2,7 @@
 run as spatial dataflow (lib/kernel.py)."""
 
 import pytest
+from functools import partial
 
 from drosophilos.compiler.frontend_c import compile_c
 from drosophilos.compiler.kernel import NotAKernel, compile_kernel, kernel_reference, loop_body
@@ -11,6 +12,29 @@ from drosophilos.sim.model import Params
 
 PARAMS = Params()
 RENDER = open("examples/render.c").read()
+
+# Exercise the recorded opt-in policy across the whole functional kernel suite. The
+# historical reproductions explicitly override it via LEGACY_2026_09_20; the control
+# machine and timing-pinned diagnostic fixtures retain their legacy Drive defaults.
+build_pipeline = partial(build_pipeline, rate_robust=True)
+
+
+@pytest.mark.parametrize("datapath", ["generic", "specialized"])
+def test_conditioned_rate_readers_preserve_fixed_operation_cells(datapath):
+    ops = ("AND", "OR", "XOR", "MOV")
+    cells = [{"name": op.lower(), "op": op, "a": "input", "b": ("const", "k")}
+             for op in ops]
+    pl = build_pipeline(PARAMS, 4, cells, consts={"k": 5},
+                        outputs=[op.lower() for op in ops], datapath=datapath)
+    assert pl.build_options["rate_robust"]
+    tokens = [0, 1, 7, 15, 8, 0]
+    _, _, stats = run_pipeline(pl, PARAMS, tokens, max_ms=16000,
+                               expect_outputs=len(tokens) * len(ops))
+    expected = {"and": [x & 5 for x in tokens], "or": [x | 5 for x in tokens],
+                "xor": [x ^ 5 for x in tokens], "mov": [5] * len(tokens)}
+    for name, values in expected.items():
+        assert [value for _, value in stats["outputs_by_cell"][name]] == values
+    assert stats["faults"] == stats["timeouts"] == stats["bad_outputs"] == 0
 
 
 def test_column_loop_compiles_to_four_cells_and_matches_the_interpreter():

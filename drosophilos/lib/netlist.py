@@ -50,6 +50,7 @@ class Drive:
     relay_in: int = 0  # 1.8x need (~1.29x loop): edge relays fire ~1.8 ms after the source, >= 2 ms before their inhibitor lands; doublet-free below ~1.9x
     kill_pulses: int = KILL_PULSES
     kill_strength: float = KILL_STRENGTH
+    rate_robust: bool = False  # kernel opt-in; preserve the control machine's original primitives
 
     @classmethod
     def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.65, or_margin=2.0, reset_factor=1.5) -> "Drive":
@@ -75,6 +76,9 @@ class Netlist:
     delay: list = field(default_factory=list)
     groups: dict = field(default_factory=dict)
     bias: list = field(default_factory=list)  # mV added to each neuron's resting potential; parallel to `roles`
+    rate_readouts: dict = field(default_factory=dict)  # source -> shared refractory-limited rate tap
+    rate_gates: set = field(default_factory=set)
+    input_scales: dict = field(default_factory=dict)  # compiled input gain, including later reset/veto edges
 
     @property
     def n(self) -> int:
@@ -97,8 +101,23 @@ class Netlist:
     def synapse(self, pre: int, post: int, quanta: int, delay_steps: int | None = None) -> None:
         self.src.append(int(pre))
         self.dst.append(int(post))
-        self.quanta.append(int(quanta))
+        scale = self.input_scales.get(int(post))
+        self.quanta.append(int(quanta) if scale is None else int(round(quanta * scale)))
         self.delay.append(self.params.default_delay_steps if delay_steps is None else int(delay_steps))
+
+    def scale_inputs(self, neuron: int, scale: float) -> None:
+        """Compile a voltage gain into all current and future inputs, and the resting bias.
+
+        Scaling the threshold-to-rest gap with the inputs leaves the intended analogue
+        vote unchanged while reducing sensitivity to unscaled background input. Resets
+        and vetoes added after gate construction must receive the same gain.
+        """
+        for k, target in enumerate(self.dst):
+            if target == neuron:
+                self.quanta[k] = int(round(self.quanta[k] * scale))
+        gap = self.params.V_th - self.params.E_L
+        self.bias[neuron] = gap - scale * (gap - self.bias[neuron])
+        self.input_scales[neuron] = self.input_scales.get(neuron, 1) * scale
 
     def group(self, name: str, neurons) -> None:
         self.groups[name] = [int(x) for x in neurons]
