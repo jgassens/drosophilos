@@ -76,6 +76,8 @@ def _first_between(values: list[int], start: int, stop: int | None) -> int | Non
 
 def _observed(dump, roles: list[str], neuron: int) -> bool:
     """Whether silence is meaningful for a standard role-filtered replay."""
+    if dump.capture_ids is not None:
+        return neuron in dump.capture_ids
     return (
         dump.full_capture
         or neuron in dump.current_to_dump
@@ -244,6 +246,7 @@ def analyze_faults(dump_path: str | Path, campaign_path: str | Path, node: int) 
         "campaign": str(campaign_path),
         "node": node,
         "dump_format": dump.format_name,
+        "capture_window": dump.window,
         "dump_end": dump.end,
         "captured_neurons": len(mapping),
         "neuron_roles": mapping,
@@ -260,6 +263,10 @@ def render_text(report: dict[str, Any]) -> str:
         f"node {report['node']}: {len(report['faults'])} stage fault-gate rise(s); "
         f"{report['captured_neurons']} captured neuron ids mapped",
     ]
+    if report.get("capture_window") is not None:
+        window = report["capture_window"]
+        lines.append(f"capture window: steps {window['start_step']}–{window['end_step']} inclusive; "
+                     "transaction numbers count events in this window")
     for fault in report["faults"]:
         transaction = fault["transaction"]
         active = ",".join(str(bit) for bit in fault["valid_bits_active"]) or "none"

@@ -17,8 +17,9 @@ from drosophilos.sim.model import Params
 PARAMS = Params()
 
 
+@pytest.mark.parametrize("compact", [False, True])
 @pytest.mark.parametrize("datapath,rate_robust", [("generic", False), ("specialized", True)])
-def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_path, datapath, rate_robust):
+def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_path, datapath, rate_robust, compact):
     from drosophilos.bench import stage_d
     from drosophilos.bench.fault_diag import analyze_faults
 
@@ -45,8 +46,13 @@ def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_
     cell = pl.cells[0]
     neurons = np.asarray([cell.start, cell.stage.fault[0]], dtype=np.int64)
     dump = tmp_path / "copy1.npz"
-    np.savez(dump, step=np.asarray([100, 200]), neuron=neurons,
-             role=np.asarray(pl.net.roles)[neurons])
+    window = {"start_step": 90, "end_step": 250}
+    if compact:
+        stage_d.write_compact_dump(dump, np.asarray([100, 200]), neurons, pl.net.roles,
+                                   window=window, capture_ids=neurons)
+    else:
+        np.savez(dump, step=np.asarray([100, 200]), neuron=neurons,
+                 role=np.asarray(pl.net.roles)[neurons])
     campaign = tmp_path / "stage_d.json"
     campaign.write_text(json.dumps(record))
     stall = analyze_dump(dump, campaign, node=1)
@@ -55,6 +61,9 @@ def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_
                                "completed_outputs": 3, "wrong": 0, "duplicates": 0,
                                "campaign_refusals": 0, "unfinished": 6}
     fault = analyze_faults(dump, campaign, node=1)
+    if compact:
+        assert stall["capture_window"] == fault["capture_window"] == window
+        assert fault["dump_end"] == 250
     assert fault["build_options"] == pl.build_options
     assert len(fault["faults"]) == 1 and fault["faults"][0]["step"] == 200
 
@@ -63,6 +72,94 @@ def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_
     for diagnose in (analyze_dump, analyze_faults):
         with pytest.raises(AssertionError, match="dump role mismatch"):
             diagnose(dump, campaign, node=1)
+
+
+@pytest.mark.parametrize("wide_steps", [False, True])
+def test_compact_dump_roundtrip_size_and_filtered_silence(tmp_path, wide_steps):
+    from drosophilos.bench.stall_diag import load_dump, write_compact_dump, _observed
+    from drosophilos.bench.fault_diag import _observed as fault_observed
+
+    count = 100_000
+    roles = ["cell.start", "cell.req.very_long_role_name_that_must_not_repeat_per_spike", "ignored"]
+    steps = np.arange(count, dtype=np.int64) + (2**31 if wide_steps else 0)
+    neurons = np.ones(count, dtype=np.int64)
+    path = tmp_path / "compact.npz"
+    window = {"start_step": int(steps[0]), "end_step": int(steps[-1]) + 20}
+    write_compact_dump(path, steps, neurons, roles, window=window, capture_ids=[0, 1])
+    dump = load_dump(path, roles)
+    np.testing.assert_array_equal(dump.step, steps)
+    np.testing.assert_array_equal(dump.neuron, neurons)
+    assert dump.step.dtype == (np.int64 if wide_steps else np.int32)
+    assert dump.neuron.dtype == np.int32
+    assert not dump.full_capture
+    assert _observed(dump, roles, 0) and fault_observed(dump, roles, 0)
+    assert not _observed(dump, roles, 2) and not fault_observed(dump, roles, 2)
+    assert dump.window == window and dump.end == window["end_step"]
+    per_spike = 12 if wide_steps else 8
+    assert per_spike <= path.stat().st_size / count < per_spike + 0.1
+    with np.load(path, allow_pickle=False) as raw:
+        assert "role" not in raw
+        assert raw["uniq"].tolist() == [1] and raw["role_of"].tolist() == [roles[1]]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_atomic_dump_failure_never_replaces_target_or_leaves_partial(tmp_path, monkeypatch, existing):
+    from drosophilos.bench.stall_diag import write_compact_dump
+
+    target = tmp_path / "dump.npz"
+    if existing:
+        target.write_bytes(b"previous complete dump")
+
+    def fail(stream, **arrays):
+        stream.write(b"partial zip")
+        raise OSError("injected short write")
+
+    monkeypatch.setattr(np, "savez", fail)
+    with pytest.raises(OSError, match="injected short write"):
+        write_compact_dump(target, [1], [0], ["cell.start"])
+    if existing:
+        assert target.read_bytes() == b"previous complete dump"
+    else:
+        assert not target.exists()
+    assert list(tmp_path.iterdir()) == ([target] if existing else [])
+
+
+@pytest.mark.parametrize("fail_write", [False, True])
+def test_kernel_campaign_dump_is_compact_and_json_survives_failure(tmp_path, monkeypatch, capsys, fail_write):
+    from drosophilos.bench import kernel_campaign as kc
+
+    built = kc.block("fanout", PARAMS)
+    ks, pl, tokens, reference = built
+    monkeypatch.setattr(kc, "block", lambda *args, **kwargs: built)
+    sim = object()
+    monkeypatch.setattr(kc, "make_perturbed_sim", lambda *args, **kwargs: sim)
+    neuron = pl.cells[0].start
+
+    def fake_run(*args, **kwargs):
+        outs = [{name: [(i, row[j]) for i, row in enumerate(reference)] for j, name in enumerate(ks.outputs)}]
+        return outs, sim, {"simulator": "Fake", "faults": 0, "timeouts": 0, "bad_outputs": 0,
+                           "neural_ms": 1, "first_output_ms": None, "per_token_ms": None,
+                           "captured_spikes": (np.asarray([1, 2]), np.asarray([neuron, neuron]))}
+
+    monkeypatch.setattr(kc, "run_pipeline_batched", fake_run)
+    if fail_write:
+        def fail(*args, **kwargs):
+            raise OSError("injected campaign write failure")
+        monkeypatch.setattr(kc, "write_compact_dump", fail)
+    dump = tmp_path / "copy.npz"
+    record = tmp_path / "record.json"
+    kc.main(["fanout", "--copies", "1", "--max-ms", "1", "--dump-node", "0",
+             "--dump-roles", "start$", "--dump-out", str(dump), "--out", str(record)])
+    saved = json.loads(record.read_text())
+    if fail_write:
+        assert not dump.exists()
+        assert saved["spike_dump_errors"]["0"]["error"] == "OSError: injected campaign write failure"
+        assert "Traceback (most recent call last)" in capsys.readouterr().err
+    else:
+        assert not saved["spike_dump_errors"]
+        with np.load(dump, allow_pickle=False) as raw:
+            assert raw["step"].dtype == raw["neuron"].dtype == np.int32
+            assert "role" not in raw and raw["uniq"].tolist() == [neuron]
 
 
 def test_stage_d_record_rejects_obsolete_nested_circuit_version():

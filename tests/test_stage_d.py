@@ -199,10 +199,124 @@ def test_capture_hook_restored_after_runner_error(tmp_path, monkeypatch):
     assert runner._attach_observer is original
 
 
+def test_dump_window_preserves_last_commit_pre_and_stall_post_then_freezes():
+    window = sd.DumpWindow(7, 4)
+    window.BLOCK_SPIKES = 4  # exercise trimming inside and across packed blocks
+    for step in range(101):
+        window.append(step, np.asarray([2, 3]))
+        window.advance(step, min(step, 20), stall_steps=10)
+    steps, neurons = window.capture_spikes()
+    assert window.stall_step == 31 and window.frozen
+    assert (window.start_step, window.end_step, window.last_commit_step) == (13, 35, 20)
+    np.testing.assert_array_equal(steps, np.repeat(np.arange(13, 36), 2))
+    np.testing.assert_array_equal(neurons, np.tile([2, 3], 23))
+    assert steps.dtype == neurons.dtype == np.int32
+    # A later commit does not unfreeze or move the recorded evidence.
+    window.advance(200, 199, 10)
+    assert window.last_commit_step == 20
+
+
+@pytest.mark.parametrize("stall_steps", [None, 20])
+def test_dump_window_healthy_copies_remain_bounded_over_870_ticks(stall_steps):
+    windows = [sd.DumpWindow(30, 10) for _ in range(5)]
+    for window in windows:
+        window.BLOCK_SPIKES = 128
+    for step in range(870):
+        for window in windows:
+            window.append(step, np.arange(100))
+            window.advance(step, step, stall_steps)
+    for window in windows:
+        steps, neurons = window.capture_spikes()
+        assert not window.frozen and window.stall_step is None
+        assert (window.start_step, window.end_step) == (839, 869)
+        assert len(steps) == 3100
+        assert steps.nbytes + neurons.nbytes == 8 * len(steps)
+        allocated = sum(s.nbytes + n.nbytes for s, n, _, _ in window.blocks)
+        assert allocated <= 8 * (len(steps) + 2 * window.BLOCK_SPIKES)
+
+
+def test_dump_window_without_commits_and_with_silent_post():
+    window = sd.DumpWindow(3, 4)
+    window.append(0, np.asarray([1]))
+    window.advance(6, 0, 5)
+    assert window.stall_step == 6 and not window.frozen
+    window.advance(10, 0, 5)
+    assert window.frozen and (window.start_step, window.end_step) == (0, 10)
+    assert window.capture_spikes()[0].tolist() == [0]
+    partial = sd.DumpWindow(3, 4)
+    partial.advance(6, 0, 5)
+    partial.finish(8)
+    assert not partial.frozen and partial.end_step == 8
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_dump_freeze_writes_immediately_and_json_survives_failure(tmp_path, monkeypatch, capsys, fail_first):
+    from drosophilos.lib import kernel as runner
+
+    sim = SimpleNamespace(step_index=0)
+    monkeypatch.setattr(sd, "make_sim", lambda *args, **kwargs: sim)
+    real_write = sd.write_compact_dump
+    write_steps = []
+
+    def writing(path, *args, **kwargs):
+        write_steps.append(sim.step_index)
+        if fail_first and str(path).endswith("copy0.npz"):
+            raise OSError("injected disk failure")
+        return real_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(sd, "write_compact_dump", writing)
+
+    def fake_runner(pl, params, schedules, **kwargs):
+        observer = runner._attach_observer(sim, pl, 2, window=1)
+        neuron = pl.cells[0].start
+        for step in range(180):
+            observer._append_host(step, np.asarray([0, 1]), np.asarray([neuron, neuron]))
+            observer.available_through = step
+            sim.step_index = step + 1
+            kwargs["should_stop"]()
+            if step == 101:
+                # All copies meet the original stall test, but their post windows
+                # still need two observed steps. Exercise the watch's 1000-poll gate.
+                assert all(not kwargs["should_stop"]() for _ in range(1000))
+            if step == 104:
+                assert any(kwargs["should_stop"]() for _ in range(1000))
+            if step == 110:
+                # Both copies froze at 103, before this runner returned. A failed copy
+                # must not prevent the other copy's file from being written.
+                assert (tmp_path / "dump_copy1.npz").exists()
+                assert (tmp_path / "dump_copy0.npz").exists() != fail_first
+                assert not observer._cap_steps  # no hidden whole-run capture
+        stats = {"load_steps": [[], []], "load_events": [[], []], "refused": [[], []],
+                 "faults": 0, "timeouts": 0, "neural_ms": sim.step_index * params.dt,
+                 "host_stalls": True}
+        return [{}, {}], sim, stats
+
+    monkeypatch.setattr(sd, "run_pipeline_batched", fake_runner)
+    out = tmp_path / "record.json"
+    rec = sd.main(["--ticks", "1", "--copies", "2", "--max-ms", "10", "--stall-ticks", "1",
+                   "--c-ticks", "0", "--dump-copies", "0,1", "--dump-out", str(tmp_path / "dump"),
+                   "--dump-pre-ms", "0.5", "--dump-post-ms", "0.2", "--out", str(out)])
+    saved = json.loads(out.read_text())
+    assert saved == rec
+    assert write_steps == [104, 104]
+    assert saved["dump_windows"]["0"]["start_step"] == 0
+    assert saved["dump_windows"]["0"]["end_step"] == 103
+    assert saved["dump_windows"]["0"]["frozen"]
+    stderr = capsys.readouterr().err
+    if fail_first:
+        assert saved["spike_dump_errors"]["0"]["error"] == "OSError: injected disk failure"
+        assert "Traceback (most recent call last)" in stderr and "injected disk failure" in stderr
+        assert set(saved["spike_dumps"]) == {"1"}
+    else:
+        assert not saved["spike_dump_errors"] and not stderr
+
+
 @pytest.mark.parametrize("args", [["--dump-copies", "0"], ["--dump-out", "x"],
                                    ["--dump-copies", "1", "--dump-out", "x"],
                                    ["--dump-copies", "x", "--dump-out", "x"],
-                                   ["--dump-copies", "0", "--dump-out", "x", "--dump-roles", "["]])
+                                   ["--dump-copies", "0", "--dump-out", "x", "--dump-roles", "["],
+                                   ["--dump-copies", "0", "--dump-out", "x", "--dump-pre-ms", "-1"],
+                                   ["--dump-copies", "0", "--dump-out", "x", "--dump-post-ms", "nan"]])
 def test_dump_cli_rejects_invalid_selection(args):
     with pytest.raises(SystemExit, match="2"):
         sd.main(args)
