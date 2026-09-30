@@ -2,8 +2,11 @@
 
 import json
 import shutil
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import torch
 
 from drosophilos.bench import stage_d as sd
 from drosophilos.sim.model import Params
@@ -48,6 +51,161 @@ def test_tokens_scripted_prefix_then_seeded_random():
     assert len(t) == 1000 and t[:8] == sd.CAMPAIGN_TOKENS and t[:len(sd.SCRIPTED_TOKENS)] == sd.SCRIPTED_TOKENS
     assert t == sd.tokens_for(1000, 7) and t != sd.tokens_for(1000, 8)
     assert all(0 <= x < 256 for x in t) and sd.tokens_for(6, 0) == sd.CAMPAIGN_TOKENS[:6]
+    for ticks in (3, 40, 50, 54, 73, 999):
+        assert sd.tokens_for(ticks, 7) == t[:ticks]
+
+
+@pytest.mark.parametrize("backend", ["torch", "torch-fast"])
+def test_short_replay_preserves_perturbations_and_stray_prefix(monkeypatch, backend):
+    from drosophilos.lib.kernel import build_pipeline
+
+    pl = build_pipeline(PARAMS, 1, [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}],
+                        consts={"zero": 0})
+    draws = []
+
+    def inspect_run(pl, params, schedules, *, sim, **kwargs):
+        masks = [torch.rand((sim.B, sim.n), generator=sim._stray_gen) < sim.stray_p for _ in range(8)]
+        draws.append((sim.t_quanta.clone(), sim.V_th.clone(), sim.bias.clone(), torch.stack(masks)))
+        return [{"out": []} for _ in schedules], sim, {}
+
+    monkeypatch.setattr(sd, "run_pipeline_batched", inspect_run)
+    for ticks in (3, 50):
+        # The ceiling and stall watch both change, as they do on a calibrated replay.
+        sd.run_neural(K, pl, PARAMS, sd.tokens_for(ticks, 108), copies=2, backend=backend,
+                      mix="B", seed=108, max_ms=ticks * 10000, stall_ms=ticks * 1000)
+        # Even unrelated global draws (e.g. from calibration) cannot shift main draws.
+        np.random.random(30)
+        torch.rand(30)
+    assert all(torch.equal(short, long) for short, long in zip(*draws))
+    assert sd.tokens_for(3, 108) == sd.tokens_for(50, 108)[:3]
+
+
+def test_calibration_cannot_shift_main_simulator_draws(monkeypatch):
+    pl = sd.build(K, PARAMS)
+
+    def fake_run(pl, params, schedules, *, sim, **kwargs):
+        assert sim.B == 1 and sim._stray_gen is None  # nominal, independent calibration
+        tokens = schedules[0]
+        st = {"load_steps": [[900]], "load_events": [_fake_load_events(len(tokens))], "neural_ms": 1000}
+        return [_fake_outs(sd.reference_states(K, tokens))], sim, st
+
+    monkeypatch.setattr(sd, "run_pipeline_batched", fake_run)
+    before = sd.make_sim(pl, PARAMS, 2, "torch", "B", 108, "cpu", torch.float64, 30000)
+    a = SimpleNamespace(calibrate_ticks=4, backend="torch", device="cpu")
+    calibration = sd.calibrate(K, pl, PARAMS, sd.tokens_for(50, 108), a, torch.float64)
+    after = sd.make_sim(pl, PARAMS, 2, "torch", "B", 108, "cpu", torch.float64, 500000)
+    assert calibration["matched"] == 4
+    for name in ("t_quanta", "V_th", "bias"):
+        assert torch.equal(getattr(before, name), getattr(after, name))
+    assert torch.equal(before._stray_gen.get_state(), after._stray_gen.get_state())
+
+
+@pytest.mark.parametrize("backend,copies,selected", [("ref", 1, [0]), ("torch", 3, [2, 0]),
+                                                     ("torch-fast", 3, [2, 0])])
+def test_capture_uses_runner_observer_and_writes_readable_dumps(tmp_path, monkeypatch, backend, copies, selected):
+    from drosophilos.lib import kernel as runner
+    from drosophilos.lib.kernel import build_pipeline
+    from drosophilos.bench.stall_diag import load_dump
+
+    pl = build_pipeline(PARAMS, 1, [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}],
+                        consts={"zero": 0})
+    original_attach = runner._attach_observer
+    neuron = pl.cells[0].start
+    other = next(i for i, role in enumerate(pl.net.roles) if not sd.REPLAY_ROLE_FILTER.search(role))
+
+    def fake_runner(pl, params, schedules, *, sim, **kwargs):
+        observer = runner._attach_observer(sim, pl, copies, window=100)
+        # Exercise both ingestion paths and trimming, without a long neural run.
+        for step in (0, 1000):
+            mask = torch.zeros((copies, pl.net.n), dtype=torch.bool)
+            mask[:, neuron] = True
+            if step == 1000 and copies > 1:
+                mask[2, neuron] = False
+                mask[2, pl.cells[0].reg.done_relay] = True
+            mask[:, other] = True
+            if backend == "torch-fast":
+                observer.write_dense(step, mask)
+                observer.flush()
+            else:
+                nodes, neurons = np.nonzero(mask.numpy())
+                sim._spk_step.append(np.full(len(nodes), step, dtype=np.int64))
+                sim._spk_node.append(nodes)
+                sim._spk_neuron.append(neurons)
+                sim.step_index = step + 1
+                observer.feed_legacy(sim)
+        assert observer.retained_from > 0
+        st = {"load_steps": [], "load_events": []}
+        if backend == "ref":
+            st["outputs_by_cell"] = {"out": []}
+            return [], sim, st
+        return [{"out": []} for _ in schedules], sim, st
+
+    monkeypatch.setattr(sd, "run_pipeline" if backend == "ref" else "run_pipeline_batched", fake_runner)
+    r = sd.run_neural(K, pl, PARAMS, [0], backend=backend, copies=copies,
+                      dump_copies=selected, dump_out=tmp_path / "dump")
+    assert runner._attach_observer is original_attach
+    assert set(r["stats"]["spike_dumps"]) == {str(b) for b in selected}
+    for b in selected:
+        dump = load_dump(tmp_path / f"dump_copy{b}.npz", pl.net.roles)
+        assert dump.step.tolist() == [0, 1000]
+        last = pl.cells[0].reg.done_relay if b == 2 else neuron
+        assert dump.neuron.tolist() == [neuron, last]
+
+
+def test_dumping_does_not_change_seeded_neural_execution(tmp_path, monkeypatch):
+    from drosophilos.lib.kernel import build_pipeline
+    from drosophilos.bench.stall_diag import load_dump
+
+    pl = build_pipeline(PARAMS, 1, [{"name": "out", "op": "MOV", "a": ("const", "zero"), "b": "input"}],
+                        consts={"zero": 0})
+    sims = []
+    make_sim = sd.make_sim
+
+    def remember_sim(*args, **kwargs):
+        sim = make_sim(*args, **kwargs)
+        sims.append(sim)
+        return sim
+
+    monkeypatch.setattr(sd, "make_sim", remember_sim)
+    kwargs = dict(copies=2, backend="torch-fast", mix="B", seed=108, max_ms=500)
+    plain = sd.run_neural(K, pl, PARAMS, [0], **kwargs)
+    captured = sd.run_neural(K, pl, PARAMS, [0], **kwargs,
+                             dump_copies=[0, 1], dump_out=tmp_path / "actual")
+    assert plain["outs"] == captured["outs"]
+    for key in ("load_steps", "neural_ms", "faults", "timeouts"):
+        assert plain["stats"][key] == captured["stats"][key]
+    assert [sd._saved_load_events(events) for events in plain["stats"]["load_events"]] == [
+        sd._saved_load_events(events) for events in captured["stats"]["load_events"]]
+    assert sims[0].step_index == sims[1].step_index
+    for name in ("V", "g", "r"):
+        assert torch.equal(getattr(sims[0], name), getattr(sims[1], name))
+    assert torch.equal(sims[0]._stray_gen.get_state(), sims[1]._stray_gen.get_state())
+    for b in (0, 1):
+        assert len(load_dump(tmp_path / f"actual_copy{b}.npz", pl.net.roles).step) > 0
+
+
+def test_capture_hook_restored_after_runner_error(tmp_path, monkeypatch):
+    from drosophilos.lib import kernel as runner
+
+    original = runner._attach_observer
+
+    def fail(*args, **kwargs):
+        assert runner._attach_observer is not original
+        raise RuntimeError("runner failed")
+
+    monkeypatch.setattr(sd, "run_pipeline_batched", fail)
+    with pytest.raises(RuntimeError, match="runner failed"):
+        sd.run_neural(K, sd.build(K, PARAMS), PARAMS, [0], dump_copies=[0], dump_out=tmp_path / "fail")
+    assert runner._attach_observer is original
+
+
+@pytest.mark.parametrize("args", [["--dump-copies", "0"], ["--dump-out", "x"],
+                                   ["--dump-copies", "1", "--dump-out", "x"],
+                                   ["--dump-copies", "x", "--dump-out", "x"],
+                                   ["--dump-copies", "0", "--dump-out", "x", "--dump-roles", "["]])
+def test_dump_cli_rejects_invalid_selection(args):
+    with pytest.raises(SystemExit, match="2"):
+        sd.main(args)
 
 
 def test_scripted_prefix_reaches_the_walls_and_contact():
@@ -221,6 +379,34 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
     assert rechecked_build["rate_robust"] is False
     assert rechecked["per_copy"][1]["status"] == "mismatch"
     assert rechecked["recheck"]["commit_counts_checkable"] is False
+
+
+def test_cli_records_per_field_stall_evidence_and_recheck_preserves_it(tmp_path, monkeypatch):
+    def fake_run(k, pl, params, tokens, **kwargs):
+        outs = _fake_outs(sd.reference_states(k, tokens)[:2])
+        for field in ("mx", "health"):
+            outs[k.cells[field]] = outs[k.cells[field]][:1]
+        st = {"load_steps": [[900]], "load_events": [_fake_load_events(len(tokens))],
+              "refused": [[]], "faults": 0, "timeouts": 0, "blocked_nodes": [0],
+              "host_stalls": True, "stopped_on_stall": False, "simulator": "Fake", "neural_ms": 9000,
+              "run_started_perf": 0, "spike_dumps": {"0": "prefix_copy0.npz"}}
+        wall = [[(cell, step, 1) for cell, commits in outs.items() for step, _ in commits]]
+        return {"outs": [outs], "stats": st, "wall": wall}
+
+    monkeypatch.setattr(sd, "run_neural", fake_run)
+    out = tmp_path / "stalled.json"
+    rec = sd.main(["--ticks", "3", "--max-ms", "9000", "--stall-ticks", "1", "--c-ticks", "0",
+                   "--dump-copies", "0", "--dump-out", str(tmp_path / "prefix"), "--out", str(out)])
+    copy = rec["per_copy"][0]
+    assert copy["status"] == "stalled" and rec["faults"] == 0
+    evidence = copy["stall_evidence"]
+    assert evidence["last_commit_step_by_field"] == {"px": 1100, "mx": 1000, "health": 1000}
+    assert evidence["blocked_node"] and evidence["stop_step"] == 90000
+    assert evidence["fields_awaiting_commits"] == list(K.fields)
+    assert evidence["pending_cells"] is evidence["pending_requests"] is None
+    assert rec["replay"]["calibration_rng"] == "skipped (--max-ms)"
+    assert rec["dump_roles"] == sd.REPLAY_ROLE_FILTER.pattern
+    assert sd.recheck_record(rec)["per_copy"][0]["stall_evidence"] == evidence
 
 
 @pytest.fixture(scope="module")

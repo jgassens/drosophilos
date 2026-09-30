@@ -1,6 +1,6 @@
 """Read-only fault-gate diagnostic for a role-filtered kernel spike dump.
 
-The campaign record is used to rebuild the exact tick pipeline.  Every captured neuron is
+A kernel_campaign or Stage D record is used to rebuild the exact tick pipeline.  Every captured neuron is
 checked against that netlist by :func:`stall_diag.load_dump`; the analysis then reports each
 stage fault-gate rise, the surrounding cell transaction, and the stage valid latches at the
 fault step.  Spike selection and grouping are vectorized -- no Python loop visits individual
@@ -278,7 +278,7 @@ def render_text(report: dict[str, Any]) -> str:
 def parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser(description=__doc__)
     argument_parser.add_argument("dump", help="one copy's role-filtered .npz spike dump")
-    argument_parser.add_argument("--campaign", required=True, help="campaign JSON with build options")
+    argument_parser.add_argument("--campaign", required=True, help="kernel_campaign or Stage D JSON with build options")
     argument_parser.add_argument("--node", type=int, required=True, help="copy index in the campaign")
     argument_parser.add_argument("--json", action="store_true", help="emit the complete structured report")
     return argument_parser
