@@ -22,7 +22,17 @@ cd ~/drosophilos
 if [ -n "${DROSO_SHA:-}" ]; then
   wt=~/drosophilos-jobs/$SLURM_JOB_ID
   mkdir -p ~/drosophilos-jobs
-  git worktree add -q --detach "$wt" "$DROSO_SHA"
+  # Retry the transient cluster filesystem getcwd failure seen on 2026-09-30.
+  for attempt in 1 2 3; do
+    if cd ~/drosophilos && git worktree add -q --detach "$wt" "$DROSO_SHA"; then break; fi
+    if [ "$attempt" -eq 3 ]; then
+      echo "job $SLURM_JOB_ID: could not create worktree for $DROSO_SHA" >&2
+      exit 1
+    fi
+    rm -rf "$wt" || true
+    cd ~/drosophilos && git worktree prune || true
+    sleep 10
+  done
   trap 'cd ~/drosophilos && git worktree remove --force "$wt"' EXIT
   ln -s ~/drosophilos/data "$wt/data"
   ln -s ~/drosophilos/runs "$wt/runs"
