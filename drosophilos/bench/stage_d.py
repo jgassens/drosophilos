@@ -18,12 +18,14 @@ three comparison points, portable C <-> IR interpreter <-> neural execution.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from contextlib import contextmanager
 import dataclasses
 import json
 import re
 import shutil
 import time
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +35,7 @@ from ..compiler.kernel import KernelSpec, compile_kernel, kernel_outputs, loop_b
 from ..isa.ir import interpret
 from ..lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
 from ..sim.model import Params
-from .stall_diag import REPLAY_ROLE_FILTER
+from .stall_diag import REPLAY_ROLE_FILTER, write_compact_dump
 
 PROGRAM = "examples/tick2.c"
 FORMAT = "stage-d-canonical-v1"
@@ -237,63 +239,152 @@ def build(k: Kernel, params: Params, datapath: str = "generic", rate_robust: boo
                           outputs=outputs, datapath=datapath, rate_robust=rate_robust, **build_options)
 
 
-@contextmanager
-def _capture_copies(sim, copies, ids):
-    """Extend the runner's single-copy capture without another simulation or full trace.
+class DumpWindow:
+    """Packed per-copy ring with inclusive bounds around the last output commit.
 
-    Use the same _attach_observer / Observer retention path as kernel_campaign. The
-    runner currently has no observer-factory argument, so this CLI-only hook is scoped
-    to this simulator and restored even if the run fails. No hook is installed normally.
+    Retain [last_commit-pre, now] while waiting for the stall watch. At detection pin
+    that lower bound, retain through detection+post, then freeze. The maximum duration
+    is pre+stall+post (plus observation latency), independent of total run length.
+    With the stall watch disabled retain only [now-pre, now].
+    Blocks avoid allocating a pair of tiny arrays for every neural step.
     """
+    BLOCK_SPIKES = 65536
+
+    def __init__(self, pre_steps, post_steps, *, step_dtype=np.int32):
+        self.pre_steps = int(pre_steps)
+        self.post_steps = int(post_steps)
+        if self.pre_steps < 0 or self.post_steps < 0:
+            raise ValueError("dump windows must be nonnegative")
+        self.step_dtype = step_dtype
+        self.blocks = deque()
+        self.start_step = 0
+        self.end_step = -1
+        self.stall_step = None
+        self.last_commit_step = 0
+        self.frozen = False
+        self.written = False
+        self.observer = None
+
+    def _trim(self, lower):
+        while self.blocks:
+            steps, neurons, start, used = self.blocks[0]
+            if int(steps[used - 1]) < lower:
+                self.blocks.popleft()
+                continue
+            self.blocks[0][2] = max(start, int(np.searchsorted(steps[:used], lower)))
+            break
+
+    def append(self, step, neurons):
+        if self.frozen or (self.stall_step is not None and step > self.end_step):
+            return
+        if self.stall_step is None:
+            self._trim(self.start_step)
+        offset = 0
+        while offset < len(neurons):
+            if not self.blocks or self.blocks[-1][3] == self.BLOCK_SPIKES:
+                self.blocks.append([np.empty(self.BLOCK_SPIKES, dtype=self.step_dtype),
+                                    np.empty(self.BLOCK_SPIKES, dtype=np.int32), 0, 0])
+            steps, ids, start, used = self.blocks[-1]
+            count = min(len(neurons) - offset, self.BLOCK_SPIKES - used)
+            steps[used:used + count] = step
+            ids[used:used + count] = neurons[offset:offset + count]
+            self.blocks[-1][3] += count
+            offset += count
+
+    def advance(self, now, last_commit, stall_steps, *, complete=False):
+        """Called after runner output decoding, including steps with no selected spikes."""
+        if self.frozen:
+            return
+        if self.stall_step is None:
+            self.last_commit_step = int(last_commit)
+            if not complete and stall_steps is not None and now - last_commit > stall_steps:
+                self.stall_step = int(now)
+                self.end_step = int(now) + self.post_steps
+            else:
+                self.end_step = int(now)
+            anchor = now if stall_steps is None or complete else last_commit
+            self.start_step = max(0, int(anchor) - self.pre_steps)
+            self._trim(self.start_step)
+        if self.stall_step is not None and now >= self.end_step:
+            self.frozen = True
+
+    def finish(self, now):
+        """At run end write the ring or the available part of an unfinished post window."""
+        if not self.frozen:
+            self.end_step = int(now) if self.stall_step is None else min(int(now), self.end_step)
+
+    def capture_spikes(self):
+        if not self.blocks:
+            return np.empty(0, dtype=self.step_dtype), np.empty(0, dtype=np.int32)
+        return (np.concatenate([steps[start:used] for steps, _, start, used in self.blocks]),
+                np.concatenate([ids[start:used] for _, ids, start, used in self.blocks]))
+
+    def metadata(self, dt):
+        return {"start_step": self.start_step, "end_step": self.end_step,
+                "start_ms": self.start_step * dt, "end_ms": self.end_step * dt,
+                "stall_step": self.stall_step, "last_commit_step": self.last_commit_step,
+                "pre_ms": self.pre_steps * dt, "post_ms": self.post_steps * dt,
+                "frozen": self.frozen,
+                "bounds": "inclusive; pre before last commit, post after stall detection"}
+
+
+@contextmanager
+def _capture_copies(sim, windows, ids):
+    """Add capture ids to the runner's watch set, but retain them only in packed rings."""
     from ..lib import kernel as runner
-    from ..sim.observe import Observer
 
     attach = runner._attach_observer
-    captured = {}
 
     def attach_captures(actual_sim, pl, B, **kwargs):
         if actual_sim is not sim:
             return attach(actual_sim, pl, B, **kwargs)
-        kwargs["capture"] = (copies[0], ids)
+        kwargs["capture"] = (next(iter(windows)), ids)
         observer = attach(actual_sim, pl, B, **kwargs)
-        captured[copies[0]] = observer
-        # Extra observers receive the already-filtered host events, never step the
-        # simulator, and use Observer's existing bounded history and capture buffers.
-        extras = [Observer(ids, B, n_neurons=pl.net.n, retain_steps=1, capture=(b, ids))
-                  for b in copies[1:]]
-        captured.update(zip(copies[1:], extras))
+        # Keep the configured capture node (runner may request its empty result), while
+        # disabling Observer's unbounded whole-run storage. Watch ids remain unchanged.
+        observer.capture_ids = np.empty(0, dtype=np.int64)
+        selected = np.zeros(pl.net.n, dtype=bool)
+        selected[ids] = True
+        for window in windows.values():
+            window.observer = observer
         append = observer._append_host
 
         def append_captures(step, nodes, neurons):
             append(step, nodes, neurons)
-            for extra in extras:
-                keep = nodes == extra.capture_node
-                if keep.any():
-                    extra._append_host(step, nodes[keep], neurons[keep])
-                extra.available_through = step
-                extra._trim()
+            matching = selected[neurons]
+            for b, window in windows.items():
+                if not window.frozen and not window.written:
+                    window.append(step, neurons[matching & (nodes == b)])
 
         observer._append_host = append_captures
         return observer
 
     runner._attach_observer = attach_captures
     try:
-        yield captured
+        yield windows
     finally:
         runner._attach_observer = attach
 
 
-def _write_dumps(pl, captures, prefix, primary_spikes=None):
-    """kernel_campaign's step/neuron/per-spike-role NPZ schema, one file per copy."""
-    paths = {}
-    for index, (b, observer) in enumerate(captures.items()):
-        steps, neurons = primary_spikes if index == 0 and primary_spikes is not None else observer.capture_spikes()
+def _write_dumps(pl, captures, prefix, *, ids, dt, paths, errors, records):
+    """Write each ready copy once; a failed dump must not prevent the run's JSON record."""
+    for b, window in captures.items():
+        if window.written:
+            continue
         path = Path(f"{prefix}_copy{b}.npz")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        roles = np.asarray(pl.net.roles, dtype=str)[neurons]
-        np.savez(path, step=steps, neuron=neurons, role=roles)
-        paths[str(b)] = str(path)
-    return paths
+        record = window.metadata(dt)
+        records[str(b)] = record
+        try:
+            steps, neurons = window.capture_spikes()
+            record["spikes"] = len(steps)
+            write_compact_dump(path, steps, neurons, pl.net.roles, window=record, capture_ids=ids)
+            paths[str(b)] = str(path)
+        except Exception as exc:
+            errors[str(b)] = {"path": str(path), "error": f"{type(exc).__name__}: {exc}"}
+            traceback.print_exc()
+        finally:
+            window.written = True
+            window.blocks.clear()
 
 
 def make_sim(pl, params: Params, copies: int, backend: str, mix: str, seed: int, device: str, dtype, n_steps: int):
@@ -320,7 +411,8 @@ def make_sim(pl, params: Params, copies: int, backend: str, mix: str, seed: int,
 def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int = 1, backend: str = "torch",
                mix: str = "none", seed: int = 0, device: str = "cpu", dtype=None, max_ms: float = 60000,
                stall_ms: float | None = None, progress=0, retry_refused: bool = True, rail_filter=None,
-               dump_copies=(), dump_roles: str = REPLAY_ROLE_FILTER.pattern, dump_out=None) -> dict:
+               dump_copies=(), dump_roles: str = REPLAY_ROLE_FILTER.pattern, dump_out=None,
+               dump_pre_ms: float = 30000, dump_post_ms: float = 10000) -> dict:
     """Runs `copies` copies on the same tokens. Returns per copy the decoded state-cell lists
     (cell -> [(step, value)]), load events, refusals, the wall time of every output, and the
     run's stats. `stall_ms`: stop once every copy has finished or gone that long (neural)
@@ -330,6 +422,17 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
     dump_copies = tuple(dict.fromkeys(dump_copies))
     if dump_copies and (dump_out is None or any(b < 0 or b >= copies for b in dump_copies)):
         raise ValueError("dump copies must be in range and have a dump output prefix")
+    windows = {}
+    dump_paths, dump_errors, dump_records = {}, {}, {}
+    ids = []
+    if dump_copies:
+        if not np.isfinite(dump_pre_ms) or not np.isfinite(dump_post_ms) or min(dump_pre_ms, dump_post_ms) < 0:
+            raise ValueError("dump windows must be finite and nonnegative")
+        role_re = re.compile(dump_roles)
+        ids = [i for i, role in enumerate(pl.net.roles) if role_re.search(role)]
+        step_dtype = np.int32 if n_steps <= np.iinfo(np.int32).max else np.int64
+        windows = {b: DumpWindow(int(dump_pre_ms / params.dt), int(dump_post_ms / params.dt),
+                                 step_dtype=step_dtype) for b in dump_copies}
     n_out = len(pl.outputs)
     want = len(tokens) * n_out
     got = [0] * copies
@@ -345,10 +448,21 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
 
     def should_stop():
         watch["polls"] += 1
+        for b, window in windows.items():
+            if window.written or window.observer is None:
+                continue
+            window.advance(window.observer.available_through, last[b], stall_steps, complete=got[b] >= want)
+            if window.frozen:
+                _write_dumps(pl, {b: window}, dump_out, ids=ids, dt=params.dt,
+                             paths=dump_paths, errors=dump_errors, records=dump_records)
         if stall_steps is None or watch["polls"] % 1000:
             return False
         now = sim.step_index
         if all(got[b] >= want or now - last[b] > stall_steps for b in range(copies)) and any(got[b] < want for b in range(copies)):
+            # Dump runs allow selected copies' post windows to finish. Ordinary runs
+            # retain the original stall-watch stopping behavior.
+            if any(got[b] < want and not w.frozen for b, w in windows.items()):
+                return False
             watch["stalled"] = True
             return True
         return False
@@ -372,12 +486,16 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
                                     rail_filter=rail_filter, capture_spikes=capture)
 
     if dump_copies:
-        role_re = re.compile(dump_roles)
-        ids = [i for i, role in enumerate(pl.net.roles) if role_re.search(role)]
-        with _capture_copies(sim, dump_copies, ids) as captures:
+        with _capture_copies(sim, windows, ids):
             outs, sim, st = execute((dump_copies[0], ids))
-            primary = st.pop("captured_spikes", None)  # kernel_campaign's capture result
-            st["spike_dumps"] = _write_dumps(pl, captures, dump_out, primary)
+            st.pop("captured_spikes", None)  # the runner's whole-run capture is disabled
+            for b, window in windows.items():
+                now = max(sim.step_index - 1, window.observer.available_through if window.observer else -1)
+                window.advance(now, last[b], stall_steps, complete=got[b] >= want)
+                window.finish(now)
+            _write_dumps(pl, windows, dump_out, ids=ids, dt=params.dt,
+                         paths=dump_paths, errors=dump_errors, records=dump_records)
+            st.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors, dump_windows=dump_records)
     else:
         outs, sim, st = execute()
     st["run_wall_s"] = time.perf_counter() - t0
@@ -572,6 +690,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--dump-roles", default=REPLAY_ROLE_FILTER.pattern,
                     help="neuron-role regex (default: stall_diag's replay filter)")
     ap.add_argument("--dump-out", help="spike dump prefix; writes PREFIX_copyN.npz for each selected copy")
+    ap.add_argument("--dump-pre-ms", type=float, default=30000,
+                    help="neural ms in the ring before the last commit (default: 30000)")
+    ap.add_argument("--dump-post-ms", type=float, default=10000,
+                    help="neural ms after stall detection before freezing (default: 10000)")
     ap.add_argument("--recheck", metavar="RECORD.json",
                     help="recompute a saved record's per-copy status and verdict; write it in place unless --out is given")
     return ap
@@ -734,6 +856,9 @@ def main(argv=None):
             ap.error(f"invalid --dump-roles expression: {exc}")
         if a.recheck:
             ap.error("spike dumping requires a neural run, not --recheck")
+    if dump_copies and (not np.isfinite(a.dump_pre_ms) or not np.isfinite(a.dump_post_ms) or
+                        min(a.dump_pre_ms, a.dump_post_ms) < 0):
+        ap.error("--dump-pre-ms and --dump-post-ms must be finite and nonnegative")
     if a.recheck:
         source = Path(a.recheck)
         rec = recheck_record(json.loads(source.read_text()))
@@ -766,7 +891,8 @@ def main(argv=None):
     t0 = time.time()
     r = run_neural(k, pl, P, tokens, copies=a.copies, backend=a.backend, mix=a.mix, seed=a.seed, device=a.device,
                    dtype=dtype, max_ms=max_ms, stall_ms=stall_ms, progress=300,
-                   dump_copies=dump_copies, dump_roles=a.dump_roles, dump_out=a.dump_out)
+                   dump_copies=dump_copies, dump_roles=a.dump_roles, dump_out=a.dump_out,
+                   dump_pre_ms=a.dump_pre_ms, dump_post_ms=a.dump_post_ms)
     st = r["stats"]
     limit = "stall" if st["stopped_on_stall"] else ("max_ms" if st.get("host_stalls") or st.get("truncated") else None)
     run_end_step = round(float(st["neural_ms"]) / P.dt)
@@ -803,6 +929,10 @@ def main(argv=None):
         "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n, "edges": pl.net.nnz,
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
+        "spike_dump_errors": st.get("spike_dump_errors", {}),
+        "dump_windows": st.get("dump_windows", {}),
+        "dump_pre_ms": a.dump_pre_ms if dump_copies else None,
+        "dump_post_ms": a.dump_post_ms if dump_copies else None,
         "dump_roles": a.dump_roles if dump_copies else None,
         "replay": {"seed": a.seed, "copies": a.copies, "rng_independent_of_time_budget": True,
                    "calibration_rng": "separate nominal simulator" if calib else "skipped (--max-ms)",
@@ -831,10 +961,11 @@ def main(argv=None):
     }
     summary = {x: rec[x] for x in ("verdict", "counters", "faults", "timeouts", "stop", "neural_s", "wall_s",
                                    "per_tick_neural_ms", "retried_commit_applied_once")}
-    print(json.dumps(summary, indent=1), flush=True)
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-        json.dump(rec, open(a.out, "w"), indent=1)
+        with open(a.out, "w") as stream:
+            json.dump(rec, stream, indent=1)
+    print(json.dumps(summary, indent=1), flush=True)
     return rec
 
 

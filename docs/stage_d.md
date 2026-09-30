@@ -187,6 +187,7 @@ from the beginning with 40 tokens. Keep **all 100 copies** in the simulator:
 slurm/submit.sh --cluster juno --time=4:00:00 -- drosophilos.bench.stage_d \
     --ticks 40 --seed 108 --backend torch-fast --device cuda --copies 100 --mix B \
     --max-ms 450000 --dump-copies 18,34 \
+    --dump-pre-ms 30000 --dump-post-ms 10000 \
     --dump-out data/stage_d/mixB_s108_c100_replay40 \
     --out data/stage_d/mixB_s108_c100_replay40.json
 ```
@@ -196,8 +197,57 @@ predates these dump flags. This is the base replay; retain `--rate-robust` when 
 the rate-robust record, and use enough ticks to reach its stalled copies.
 
 The command writes `mixB_s108_c100_replay40_copy18.npz` and
-`mixB_s108_c100_replay40_copy34.npz`. Each contains `step`, `neuron`, and one `role` string
-per spike, using the same observer capture path and NPZ schema as `kernel_campaign`.
+`mixB_s108_c100_replay40_copy34.npz`. Each contains int32 `step` (int64 for steps beyond
+2^31−1), int32 `neuron`, and a single `uniq`/`role_of` table mapping observed neuron IDs to
+roles. `kernel_campaign` writes the same compact format. Both diagnostics also accept
+old dumps containing one `role` string per spike and old compact dumps.
+
+Juno job 428569 exposed two problems in the original writer: it retained the entire run
+and expanded each spike into a fixed-width NumPy Unicode role. The current base netlist's
+longest role is 37 characters, so that array alone cost **148 bytes per spike**, before
+step/neuron storage and write-time copies. Continuously firing stalled latches made both
+costs grow for hundreds of seconds. Its truncated file stopped at exactly 960 MiB; the
+precise external I/O/stdio failure cannot be established from exit code 120 alone. These
+writers neither close nor redirect stdout or stderr. The new numeric payload costs
+**8 bytes per spike**, or 12 with int64 steps, plus a small role table and metadata.
+
+`--dump-pre-ms` defaults to **30000 neural ms** before a selected copy's last output
+commit. A packed ring advances with commits and retains the intervening silence while
+Stage D's existing `stall_ms` watch decides whether that copy has stalled. Anchoring at
+the last commit preserves the failure onset even when `stall_ms` exceeds 30 seconds.
+Once the watch detects a stall, `--dump-post-ms` (default **10000 neural ms**) records
+another 10 seconds and then freezes that copy. Its dump is written immediately and its
+buffer released, while the other copies continue. With `--stall-ticks 0`, captures are
+ordinary rolling pre-window rings; completed copies also keep only their latest ring.
+Non-dump execution and the netlist are unchanged. A dump run's global stall stop allows
+selected copies' post windows to finish, subject to the original `--max-ms` ceiling and
+the runner's completion stop.
+
+The maximum retained duration is approximately `dump_pre_ms + stall_ms + dump_post_ms`,
+plus the runner's observation/decode latency. For `N` continuously firing selected
+neurons at 213 Hz, expect `N × 213 × duration_seconds × 8` bytes per copy. For example,
+1,000 active neurons over 160 seconds produce about **273 MB**. As a conservative sizing
+example, if all **5,674** neurons selected by the current base filter fired continuously,
+a 160-second window (30 + 120 + 10) would occupy **1.55 GB per copy**. Five such rings
+use about **7.7 GB**, regardless of whether the run is 40 or 870 ticks. Writes concatenate
+one copy at a time; allow another two copy payloads for concatenation and NumPy's unique
+ID scratch space (about 3.1 GB in this example), plus simulator/runner memory. In the
+40-tick command above, the uncalibrated watch is 225 seconds, so the conservative bound
+is **2.56 GB per copy** over 265 seconds. Most selected roles do not fire continuously,
+so actual sizes are smaller. int64 steps increase these numeric payload estimates by 50%.
+
+`window_json` in each NPZ and the record's `dump_windows[copy]` give inclusive step/ms
+bounds, the last commit, stall-detection step, configured pre/post durations, spike count,
+and whether the full post window froze. A run ending early writes the available partial
+window with `frozen: false`. `capture_ids` identifies selected neurons, including silent
+ones; diagnostics report the capture window and use its end even if the tail is silent.
+Each NPZ is written to a temporary file in its destination directory, flushed, and
+atomically renamed. A failed write leaves the previous complete target intact (or no
+target), prints a traceback to stderr, and records `spike_dump_errors[copy]`; other copies
+still write. The final JSON is written even when dump writes fail, before printing the
+final stdout summary. A process killed during writing can leave a `.tmp` file, never a
+partial replacement `.npz`.
+
 `--dump-roles REGEX` defaults to the filter documented by `stall_diag`:
 
 ```text

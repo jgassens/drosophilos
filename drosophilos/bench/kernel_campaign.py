@@ -10,9 +10,9 @@ exact 95 % upper limits, like the block campaigns of A2.
 
 import argparse
 import json
-from pathlib import Path
 import re
 import time
+import traceback
 
 import numpy as np
 
@@ -22,6 +22,7 @@ from ..lib.campaign import make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
 from ..sim.model import Params
 from .a2_campaigns import MIXES
+from .stall_diag import write_compact_dump
 
 
 def _upper95(errors: int, n: int) -> float:
@@ -79,7 +80,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
     ap.add_argument("--dump-roles", default=None, help="regular expression matched against neuron roles")
-    ap.add_argument("--dump-out", default=None, help="write the selected step/neuron/role arrays to this .npz")
+    ap.add_argument("--dump-out", default=None, help="atomically write compact step/neuron and uniq/role_of arrays")
     return ap
 
 
@@ -113,12 +114,16 @@ def main(argv=None):
                                          expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
                                          capture_spikes=capture, backend=a.backend, observe_every=a.observe_every)
     captured = st.pop("captured_spikes", None)
+    dump_errors = {}
+    dump_paths = {}
     if captured is not None:
         steps, neurons = captured
-        dump_path = Path(a.dump_out)
-        dump_path.parent.mkdir(parents=True, exist_ok=True)
-        roles = np.asarray([pl.net.roles[int(i)] for i in neurons], dtype=str)
-        np.savez(dump_path, step=steps, neuron=neurons, role=roles)
+        try:
+            write_compact_dump(a.dump_out, steps, neurons, pl.net.roles, capture_ids=capture[1])
+            dump_paths[str(a.dump_node)] = str(a.dump_out)
+        except Exception as exc:
+            dump_errors[str(a.dump_node)] = {"path": str(a.dump_out), "error": f"{type(exc).__name__}: {exc}"}
+            traceback.print_exc()
     ok = wrong = missing = 0
     per_node = []
     for b in range(B):
@@ -150,9 +155,12 @@ def main(argv=None):
            "outputs": [{o: [[int(s_), (None if v is None else int(v))] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
     rec.update(pl.build_options)
-    print(json.dumps(rec, indent=1), flush=True)
+    if capture is not None:
+        rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
     if a.out:
-        json.dump(rec, open(a.out, "w"), indent=1)
+        with open(a.out, "w") as stream:
+            json.dump(rec, stream, indent=1)
+    print(json.dumps(rec, indent=1), flush=True)
 
 
 if __name__ == "__main__":

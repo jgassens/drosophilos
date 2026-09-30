@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -52,10 +54,51 @@ class SpikeDump:
     format_name: str
     current_to_dump: dict[int, int]
     role_id_drift: int
+    window: dict[str, Any] | None = None
+    capture_ids: set[int] | None = None
 
     @property
     def end(self) -> int:
+        if self.window is not None:
+            return int(self.window["end_step"])
         return int(self.step[-1]) if len(self.step) else 0
+
+
+def write_compact_dump(path, steps, neurons, roles, *, window=None, capture_ids=None):
+    """Write 8/12 bytes per spike plus one role table, replacing the target atomically.
+
+    The temporary file is on the target filesystem. On any exception the previous target
+    is untouched and the temporary file is removed; callers report the exception.
+    """
+    path = Path(path)
+    steps = np.asarray(steps)
+    neurons = np.asarray(neurons, dtype=np.int32)
+    if steps.ndim != 1 or neurons.ndim != 1 or len(steps) != len(neurons):
+        raise ValueError("step and neuron must be equal-length one-dimensional arrays")
+    fits_int32 = not len(steps) or (steps.min() >= 0 and steps.max() <= np.iinfo(np.int32).max)
+    step_dtype = np.int32 if fits_int32 else np.int64
+    steps = steps.astype(step_dtype, copy=False)
+    uniq = np.unique(neurons)
+    arrays = dict(step=steps, neuron=neurons, uniq=uniq,
+                  role_of=np.asarray(roles, dtype=str)[uniq])
+    if capture_ids is not None:
+        arrays["capture_ids"] = np.asarray(capture_ids, dtype=np.int32)
+        arrays["full_capture"] = np.asarray(len(set(capture_ids)) == len(roles))
+    else:
+        arrays["full_capture"] = np.asarray(False)
+    if window is not None:
+        arrays["window_json"] = np.asarray(json.dumps(window))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            np.savez(stream, **arrays)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _repo_root() -> Path:
@@ -177,16 +220,20 @@ def build_tick_pipeline(campaign: dict[str, Any]):
 def load_dump(path: str | Path, roles: list[str]) -> SpikeDump:
     """Load arrays and validate recorded roles in vectorized chunks.
 
-    No Python loop visits individual spikes.  The only chunked loop is the role assertion;
-    it bounds the temporary string array for the new per-spike-role format.
+    No Python loop visits individual spikes. The chunked legacy role assertion bounds
+    temporary strings; compact dumps preserve their numeric dtypes on load.
     """
     path = Path(path)
     role_table = np.asarray(roles)
     with np.load(path, allow_pickle=False) as raw:
         if "step" not in raw or "neuron" not in raw:
             raise ValueError(f"{path} must contain step and neuron arrays")
-        step = np.asarray(raw["step"], dtype=np.int64)
-        neuron = np.asarray(raw["neuron"], dtype=np.int64)
+        step = np.asarray(raw["step"])
+        neuron = np.asarray(raw["neuron"])
+        if step.dtype.kind not in "iu" or neuron.dtype.kind not in "iu":
+            raise ValueError("step and neuron must be integer arrays")
+        window = json.loads(str(raw["window_json"].item())) if "window_json" in raw else None
+        capture_ids = set(int(x) for x in raw["capture_ids"]) if "capture_ids" in raw else None
         if step.ndim != 1 or neuron.ndim != 1 or len(step) != len(neuron):
             raise ValueError("step and neuron must be equal-length one-dimensional arrays")
         if len(step) and np.any(step[1:] < step[:-1]):
@@ -229,7 +276,8 @@ def load_dump(path: str | Path, roles: list[str]) -> SpikeDump:
             if not np.array_equal(np.sort(uniq), observed):
                 raise AssertionError("compact dump uniq does not match the neuron array")
             present = set(int(x) for x in uniq.tolist())
-            full_capture, format_name = True, "compact/full"
+            full_capture = bool(raw["full_capture"].item()) if "full_capture" in raw else True
+            format_name = "compact/full" if full_capture else "compact/role-filtered"
         elif "role" in raw:
             dump_roles = np.asarray(raw["role"])
             if len(dump_roles) != len(neuron):
@@ -254,7 +302,8 @@ def load_dump(path: str | Path, roles: list[str]) -> SpikeDump:
 
     return SpikeDump(step=step, neuron=neuron, present_ids=present,
                      full_capture=full_capture, format_name=format_name,
-                     current_to_dump=current_to_dump, role_id_drift=drift)
+                     current_to_dump=current_to_dump, role_id_drift=drift,
+                     window=window, capture_ids=capture_ids)
 
 
 def rises(steps: np.ndarray, gap: int) -> list[int]:
@@ -373,6 +422,8 @@ def _extract_steps(dump: SpikeDump, probe_ids: np.ndarray, n_neurons: int) -> di
 def _observed(dump: SpikeDump, roles: list[str], neuron: int | None) -> bool:
     if neuron is None:
         return False
+    if dump.capture_ids is not None:
+        return neuron in dump.capture_ids
     return dump.full_capture or bool(REPLAY_ROLE_FILTER.search(roles[neuron]))
 
 
@@ -685,6 +736,7 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
     return {
         "dump": str(dump_path), "campaign": str(campaign_path), "node": node,
         "dump_format": dump.format_name, "spikes": len(dump.step), "distinct_neurons": len(dump.present_ids),
+        "capture_window": dump.window,
         "role_id_drift": dump.role_id_drift,
         "first_step": int(dump.step[0]) if len(dump.step) else None, "last_step": dump.end,
         "dt_ms": params.dt, "gap_steps": gap, "stall_threshold_steps": timeout,
@@ -733,6 +785,13 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Classification",
         "",
     ]
+    if report.get("capture_window") is not None:
+        window = report["capture_window"]
+        lines.extend([
+            f"Captured window: steps **{window['start_step']:,}–{window['end_step']:,}**, inclusive. "
+            "Transaction ordinals count events in this window; earlier history is unavailable.",
+            "",
+        ])
     if report["classification"] == "stuck_request":
         cell, src = anomaly["cell"], report["stuck_source"]
         latch, repair = report["stuck_latch_neuron"], report["repair_neuron"]
