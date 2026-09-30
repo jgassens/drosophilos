@@ -1,6 +1,7 @@
 """Regression coverage for docs/perf_campaign.md §6 tick-stall diagnosis."""
 
 from pathlib import Path
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,6 +15,59 @@ from drosophilos.sim.model import Params
 
 
 PARAMS = Params()
+
+
+@pytest.mark.parametrize("datapath,rate_robust", [("generic", False), ("specialized", True)])
+def test_stage_d_record_rebuilds_three_outputs_and_both_diagnostics_read_it(tmp_path, datapath, rate_robust):
+    from drosophilos.bench import stage_d
+    from drosophilos.bench.fault_diag import analyze_faults
+
+    k = stage_d.load_kernel()
+    # A non-default option proves the record is applied, not just the two CLI flags.
+    pl = stage_d.build(k, PARAMS, datapath, rate_robust=rate_robust, idle_hops=21)
+    record = {"stage": "D", "program": stage_d.PROGRAM, "datapath": datapath, "rate_robust": rate_robust,
+              "build_options": pl.build_options, "neurons": pl.net.n, "copies": 2, "ticks": 3,
+              "tokens": [5, 5, 250], "state_cells": k.cells,
+              "per_copy": [{}, {"completed": 1, "wrong": 0, "missing": 2, "duplicates": 0, "refusals": 0}],
+              "commit_events": [{}, {cell: [[300, 0]] for cell in k.cells.values()}]}
+    params, ks, rebuilt = build_tick_pipeline(record)
+    assert ks.outputs == ["c4_sel", "c9_sel", "c12_sel"]
+    assert rebuilt.net.roles == pl.net.roles and rebuilt.build_options == pl.build_options
+    np.testing.assert_array_equal(rebuilt.net.topology().quanta, pl.net.topology().quanta)
+    if rate_robust:
+        versionless = {**record, "build_options": dict(pl.build_options)}
+        versionless["build_options"].pop("rate_robust_version")
+        with pytest.raises(ValueError, match="unsupported rate-robust circuit.*missing"):
+            build_tick_pipeline(versionless)
+        versionless["edges"] = pl.net.nnz
+        assert build_tick_pipeline(versionless)[2].build_options == pl.build_options
+
+    cell = pl.cells[0]
+    neurons = np.asarray([cell.start, cell.stage.fault[0]], dtype=np.int64)
+    dump = tmp_path / "copy1.npz"
+    np.savez(dump, step=np.asarray([100, 200]), neuron=neurons,
+             role=np.asarray(pl.net.roles)[neurons])
+    campaign = tmp_path / "stage_d.json"
+    campaign.write_text(json.dumps(record))
+    stall = analyze_dump(dump, campaign, node=1)
+    assert stall["output_cells"] == ks.outputs
+    assert stall["counts"] == {"requested_transactions": 3, "requested_outputs": 9,
+                               "completed_outputs": 3, "wrong": 0, "duplicates": 0,
+                               "campaign_refusals": 0, "unfinished": 6}
+    fault = analyze_faults(dump, campaign, node=1)
+    assert fault["build_options"] == pl.build_options
+    assert len(fault["faults"]) == 1 and fault["faults"][0]["step"] == 200
+
+    # Both tools must still reject a dump whose neuron/role mapping drifted.
+    np.savez(dump, step=np.asarray([100, 200]), neuron=neurons, role=np.asarray(["wrong", "wrong"]))
+    for diagnose in (analyze_dump, analyze_faults):
+        with pytest.raises(AssertionError, match="dump role mismatch"):
+            diagnose(dump, campaign, node=1)
+
+
+def test_stage_d_record_rejects_obsolete_nested_circuit_version():
+    with pytest.raises(ValueError, match="unsupported true-guard circuit"):
+        build_tick_pipeline({"stage": "D", "build_options": {"true_guards": True, "true_guard_version": "old"}})
 
 
 def test_obsolete_true_guard_capture_is_not_silently_rebuilt_with_new_roles():

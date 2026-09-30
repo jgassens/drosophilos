@@ -90,7 +90,11 @@ def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
 
 
 def build_tick_pipeline(campaign: dict[str, Any]):
-    """Rebuild exactly the kernel shape used by ``kernel_campaign tick``."""
+    """Rebuild kernel_campaign tick or Stage D, including its output selection."""
+    if campaign.get("stage") == "D":
+        # Stage D stores options together and decodes health as a third output.
+        # Never use legacy campaign defaults for this netlist.
+        campaign = {**campaign, **campaign.get("build_options", {})}
     if campaign.get("block", "tick") != "tick":
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
     from ..lib.kernel import TRUE_GUARD_VERSION
@@ -98,42 +102,61 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     if campaign.get("true_guards", False) and campaign.get("true_guard_version") != TRUE_GUARD_VERSION:
         raise ValueError("unsupported true-guard circuit: rebuild this capture at its recorded commit; "
                          f"the current circuit is version {TRUE_GUARD_VERSION}")
-    source = _repo_root() / "examples" / "tick2.c"
-    prog = compile_c(source.read_text())
-    ks = compile_kernel(prog, loop_body(prog), "i")
-    params = Params()
-    # the kill train's shape is part of the netlist: campaigns record it since 2026-09-20;
-    # earlier ones (seeds 107, 108) were built with 3 x 0.75
-    pulses, strength = campaign.get("kill_train", (3, 0.75))
-    legacy = {**LEGACY_2026_09_20,
-              "request_clear_pulses": int(pulses), "kernel_kill_pulses": int(pulses)}
-    drive = replace(Drive.from_params(params),
-                    kill_strength=float(campaign.get("kill_strength", strength)))
-    pl = build_pipeline(
-        params,
-        prog.width,
-        ks.cells,
-        consts=ks.consts,
-        mems=ks.mems,
-        outputs=ks.outputs,
-        drive=drive,
-        datapath=campaign.get("datapath", "generic"),
-        relight_requests=campaign.get("relight_requests", True),
-        act_hops=campaign.get("act_hops", 11),
-        idle_hops=campaign.get("idle_hops", 20),
-        watchdog_hops=campaign.get("watchdog_hops", 170),
-        in_watchdog_hops=campaign.get("in_watchdog_hops"),
-        powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
-        commit_reignite=campaign.get("commit_reignite", False),
-        true_guards=campaign.get("true_guards", legacy["true_guards"]),  # recorded since 2026-09-23; older guards accepted dark pairs
-        retry_clear=campaign.get("retry_clear", False),
-        start_relight_hops=campaign.get("start_relight_hops", legacy["start_relight_hops"]),
-        relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
-        copy_requires_rail=campaign.get("copy_requires_rail", legacy["copy_requires_rail"]),
-        rate_robust=campaign.get("rate_robust", False),  # older captures used raw latch rates
-        request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
-        kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
-    )
+    if campaign.get("stage") == "D":
+        from .stage_d import PROGRAM, build, load_kernel
+
+        params = Params()
+        program = Path(campaign.get("program", PROGRAM))
+        k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
+        options = dict(campaign.get("build_options", {}))
+        for metadata in ("true_guard_version", "rate_robust_version"):
+            options.pop(metadata, None)
+        datapath = options.pop("datapath", campaign.get("datapath", "generic"))
+        rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
+        strength = options.pop("kill_strength", None)
+        if strength is not None:
+            options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
+        pl = build(k, params, datapath, rate_robust=rate_robust, **options)
+        ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
+        if campaign.get("state_cells", k.cells) != k.cells:
+            raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
+    else:
+        source = _repo_root() / "examples" / "tick2.c"
+        prog = compile_c(source.read_text())
+        ks = compile_kernel(prog, loop_body(prog), "i")
+        params = Params()
+        # the kill train's shape is part of the netlist: campaigns record it since 2026-09-20;
+        # earlier ones (seeds 107, 108) were built with 3 x 0.75
+        pulses, strength = campaign.get("kill_train", (3, 0.75))
+        legacy = {**LEGACY_2026_09_20,
+                  "request_clear_pulses": int(pulses), "kernel_kill_pulses": int(pulses)}
+        drive = replace(Drive.from_params(params),
+                        kill_strength=float(campaign.get("kill_strength", strength)))
+        pl = build_pipeline(
+            params,
+            prog.width,
+            ks.cells,
+            consts=ks.consts,
+            mems=ks.mems,
+            outputs=ks.outputs,
+            drive=drive,
+            datapath=campaign.get("datapath", "generic"),
+            relight_requests=campaign.get("relight_requests", True),
+            act_hops=campaign.get("act_hops", 11),
+            idle_hops=campaign.get("idle_hops", 20),
+            watchdog_hops=campaign.get("watchdog_hops", 170),
+            in_watchdog_hops=campaign.get("in_watchdog_hops"),
+            powerup_veto=campaign.get("powerup_veto", False),  # recorded since 2026-09-20; older builds had none
+            commit_reignite=campaign.get("commit_reignite", False),
+            true_guards=campaign.get("true_guards", legacy["true_guards"]),  # recorded since 2026-09-23; older guards accepted dark pairs
+            retry_clear=campaign.get("retry_clear", False),
+            start_relight_hops=campaign.get("start_relight_hops", legacy["start_relight_hops"]),
+            relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
+            copy_requires_rail=campaign.get("copy_requires_rail", legacy["copy_requires_rail"]),
+            rate_robust=campaign.get("rate_robust", False),  # older captures used raw latch rates
+            request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
+            kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
+        )
     recorded_rate_version = campaign.get("rate_robust_version")
     if (campaign.get("rate_robust", False) and
             recorded_rate_version != RATE_ROBUST_VERSION and
@@ -555,6 +578,20 @@ def _transaction_rows(info: dict[str, Any], events: dict[int, np.ndarray], gap: 
 
 
 def _campaign_counts(campaign: dict[str, Any], node: int) -> dict[str, Any]:
+    if campaign.get("stage") == "D":
+        tokens = int(campaign.get("ticks", len(campaign.get("tokens", []))))
+        outputs = list(campaign.get("state_cells", {}).values())
+        per_copy = campaign.get("per_copy", [])
+        copy = per_copy[node] if node < len(per_copy) else {}
+        raw = campaign.get("commit_events", [])
+        counts = [len(raw[node].get(cell, [])) for cell in outputs] if node < len(raw) else None
+        completed = sum(counts) if counts is not None else None
+        return {
+            "requested_transactions": tokens, "requested_outputs": tokens * len(outputs),
+            "completed_outputs": completed, "wrong": copy.get("wrong"),
+            "duplicates": copy.get("duplicates", 0), "campaign_refusals": copy.get("refusals"),
+            "unfinished": sum(max(0, tokens - count) for count in counts) if counts is not None else None,
+        }
     tokens = int(campaign.get("tokens", len(campaign.get("tokens_list", []))))
     outputs = list(campaign.get("output_cells", []))
     requested_outputs = tokens * len(outputs)
@@ -900,7 +937,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dump", help="one copy's .npz spike dump")
-    ap.add_argument("--campaign", required=True, help="kernel_campaign JSON for topology/options/accounting")
+    ap.add_argument("--campaign", required=True, help="kernel_campaign or Stage D JSON for topology/options/accounting")
     ap.add_argument("--node", type=int, required=True, help="copy index in the campaign")
     ap.add_argument("--out", default=None, help="write Markdown here (stdout when omitted)")
     return ap

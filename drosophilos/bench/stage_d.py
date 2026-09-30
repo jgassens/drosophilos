@@ -18,6 +18,7 @@ three comparison points, portable C <-> IR interpreter <-> neural execution.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import dataclasses
 import json
 import re
@@ -32,6 +33,7 @@ from ..compiler.kernel import KernelSpec, compile_kernel, kernel_outputs, loop_b
 from ..isa.ir import interpret
 from ..lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
 from ..sim.model import Params
+from .stall_diag import REPLAY_ROLE_FILTER
 
 PROGRAM = "examples/tick2.c"
 FORMAT = "stage-d-canonical-v1"
@@ -227,12 +229,71 @@ def three_point_check(k: Kernel, tokens: list[int], ref: list[dict], c_ticks: in
 
 # --- neural run -------------------------------------------------------------------------------
 
-def build(k: Kernel, params: Params, datapath: str = "generic", rate_robust: bool = False):
+def build(k: Kernel, params: Params, datapath: str = "generic", rate_robust: bool = False, **build_options):
     """The tick kernel's pipeline with every state cell decoded by the host: the kernel's own
     outputs (px, mx) plus health's carrier, so each tick commits one word per canonical field."""
     outputs = list(k.ks.outputs) + [k.cells[f] for f in k.fields if k.cells[f] not in k.ks.outputs]
     return build_pipeline(params, k.width, k.ks.cells, consts=k.ks.consts, mems=k.ks.mems,
-                          outputs=outputs, datapath=datapath, rate_robust=rate_robust)
+                          outputs=outputs, datapath=datapath, rate_robust=rate_robust, **build_options)
+
+
+@contextmanager
+def _capture_copies(sim, copies, ids):
+    """Extend the runner's single-copy capture without another simulation or full trace.
+
+    Use the same _attach_observer / Observer retention path as kernel_campaign. The
+    runner currently has no observer-factory argument, so this CLI-only hook is scoped
+    to this simulator and restored even if the run fails. No hook is installed normally.
+    """
+    from ..lib import kernel as runner
+    from ..sim.observe import Observer
+
+    attach = runner._attach_observer
+    captured = {}
+
+    def attach_captures(actual_sim, pl, B, **kwargs):
+        if actual_sim is not sim:
+            return attach(actual_sim, pl, B, **kwargs)
+        kwargs["capture"] = (copies[0], ids)
+        observer = attach(actual_sim, pl, B, **kwargs)
+        captured[copies[0]] = observer
+        # Extra observers receive the already-filtered host events, never step the
+        # simulator, and use Observer's existing bounded history and capture buffers.
+        extras = [Observer(ids, B, n_neurons=pl.net.n, retain_steps=1, capture=(b, ids))
+                  for b in copies[1:]]
+        captured.update(zip(copies[1:], extras))
+        append = observer._append_host
+
+        def append_captures(step, nodes, neurons):
+            append(step, nodes, neurons)
+            for extra in extras:
+                keep = nodes == extra.capture_node
+                if keep.any():
+                    extra._append_host(step, nodes[keep], neurons[keep])
+                extra.available_through = step
+                extra._trim()
+
+        observer._append_host = append_captures
+        return observer
+
+    runner._attach_observer = attach_captures
+    try:
+        yield captured
+    finally:
+        runner._attach_observer = attach
+
+
+def _write_dumps(pl, captures, prefix, primary_spikes=None):
+    """kernel_campaign's step/neuron/per-spike-role NPZ schema, one file per copy."""
+    paths = {}
+    for index, (b, observer) in enumerate(captures.items()):
+        steps, neurons = primary_spikes if index == 0 and primary_spikes is not None else observer.capture_spikes()
+        path = Path(f"{prefix}_copy{b}.npz")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        roles = np.asarray(pl.net.roles, dtype=str)[neurons]
+        np.savez(path, step=steps, neuron=neurons, role=roles)
+        paths[str(b)] = str(path)
+    return paths
 
 
 def make_sim(pl, params: Params, copies: int, backend: str, mix: str, seed: int, device: str, dtype, n_steps: int):
@@ -258,13 +319,17 @@ def make_sim(pl, params: Params, copies: int, backend: str, mix: str, seed: int,
 
 def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int = 1, backend: str = "torch",
                mix: str = "none", seed: int = 0, device: str = "cpu", dtype=None, max_ms: float = 60000,
-               stall_ms: float | None = None, progress=0, retry_refused: bool = True, rail_filter=None) -> dict:
+               stall_ms: float | None = None, progress=0, retry_refused: bool = True, rail_filter=None,
+               dump_copies=(), dump_roles: str = REPLAY_ROLE_FILTER.pattern, dump_out=None) -> dict:
     """Runs `copies` copies on the same tokens. Returns per copy the decoded state-cell lists
     (cell -> [(step, value)]), load events, refusals, the wall time of every output, and the
     run's stats. `stall_ms`: stop once every copy has finished or gone that long (neural)
     without an output (None: run to max_ms)."""
     n_steps = int(max_ms / params.dt) + 5000
     sim = make_sim(pl, params, copies, backend, mix, seed, device, dtype, n_steps)
+    dump_copies = tuple(dict.fromkeys(dump_copies))
+    if dump_copies and (dump_out is None or any(b < 0 or b >= copies for b in dump_copies)):
+        raise ValueError("dump copies must be in range and have a dump output prefix")
     n_out = len(pl.outputs)
     want = len(tokens) * n_out
     got = [0] * copies
@@ -289,20 +354,32 @@ def run_neural(k: Kernel, pl, params: Params, tokens: list[int], *, copies: int 
         return False
 
     t0 = time.perf_counter()
-    if backend == "ref":
-        _, sim, st = run_pipeline(pl, params, list(tokens), max_ms=max_ms, sim=sim, expect_outputs=want,
-                                  on_output=on_output, should_stop=should_stop, retry_refused=retry_refused,
-                                  rail_filter=rail_filter)
-        outs = [st.pop("outputs_by_cell")]  # run_pipeline's shapes -> run_pipeline_batched's (one node)
-        st["load_events"] = [st["load_events"]]
-        st["load_steps"] = [st["load_steps"]]
-        st.setdefault("neural_ms", sim.step_index * params.dt)
+
+    def execute(capture=None):
+        if backend == "ref":
+            _, final_sim, st = run_pipeline(pl, params, list(tokens), max_ms=max_ms, sim=sim, expect_outputs=want,
+                                           on_output=on_output, should_stop=should_stop, retry_refused=retry_refused,
+                                           rail_filter=rail_filter)
+            outs = [st.pop("outputs_by_cell")]  # one-node batched shape
+            st["load_events"] = [st["load_events"]]
+            st["load_steps"] = [st["load_steps"]]
+            st.setdefault("neural_ms", final_sim.step_index * params.dt)
+            return outs, final_sim, st
+        return run_pipeline_batched(pl, params, [list(tokens) for _ in range(copies)], max_ms=max_ms,
+                                    device=device, expect_outputs=[want] * copies, sim=sim, dtype=dtype,
+                                    backend=backend, progress=progress, on_output=on_output,
+                                    should_stop=should_stop, retry_refused=retry_refused,
+                                    rail_filter=rail_filter, capture_spikes=capture)
+
+    if dump_copies:
+        role_re = re.compile(dump_roles)
+        ids = [i for i, role in enumerate(pl.net.roles) if role_re.search(role)]
+        with _capture_copies(sim, dump_copies, ids) as captures:
+            outs, sim, st = execute((dump_copies[0], ids))
+            primary = st.pop("captured_spikes", None)  # kernel_campaign's capture result
+            st["spike_dumps"] = _write_dumps(pl, captures, dump_out, primary)
     else:
-        outs, sim, st = run_pipeline_batched(pl, params, [list(tokens) for _ in range(copies)], max_ms=max_ms,
-                                             device=device, expect_outputs=[want] * copies, sim=sim, dtype=dtype,
-                                             backend=backend, progress=progress, on_output=on_output,
-                                             should_stop=should_stop, retry_refused=retry_refused,
-                                             rail_filter=rail_filter)
+        outs, sim, st = execute()
     st["run_wall_s"] = time.perf_counter() - t0
     st["run_started_perf"] = t0
     st["stopped_on_stall"] = watch["stalled"]
@@ -413,6 +490,8 @@ def compare_copy(k: Kernel, ref: list[dict], tokens: list[int], outs: dict, *, t
             "retried_ticks_matched": all(t < matched for t in retried) if retried else None,
             "applied_twice": bool(duplicates) or (first is not None and first["class"] == "previous word applied twice"),
             "commit_counts_checkable": commit_counts_checkable, "last_commit_step": last_commit_step,
+            "last_commit_step_by_field": {f: commits[-1][0] if commits else None
+                                          for f, commits in zip(fields, lists)},
             "stopped_at_tick": stopped_at_tick, "tick_ms": tick_ms}
 
 
@@ -489,6 +568,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--c-ticks", type=int, default=100, help="ticks cross-checked against the portable C reference")
     ap.add_argument("--fp32", action="store_true")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--dump-copies", help="comma-separated copy indices whose spikes to retain (keep --copies unchanged)")
+    ap.add_argument("--dump-roles", default=REPLAY_ROLE_FILTER.pattern,
+                    help="neuron-role regex (default: stall_diag's replay filter)")
+    ap.add_argument("--dump-out", help="spike dump prefix; writes PREFIX_copyN.npz for each selected copy")
     ap.add_argument("--recheck", metavar="RECORD.json",
                     help="recompute a saved record's per-copy status and verdict; write it in place unless --out is given")
     return ap
@@ -573,6 +656,8 @@ def recheck_record(rec: dict) -> dict:
                              limit="max_ms" if rec.get("stop") == "max_ms" else None,
                              run_end_step=run_end_step, stall_ms=rec.get("stall_ms"))
             c["copy"] = b
+            if b < len(old_copies) and "stall_evidence" in old_copies[b]:
+                c["stall_evidence"] = old_copies[b]["stall_evidence"]
             per_copy.append(c)
     else:
         for b, old in enumerate(old_copies):
@@ -631,7 +716,24 @@ def calibrate(k: Kernel, pl, params, tokens, a, dtype) -> dict:
 
 
 def main(argv=None):
-    a = parser().parse_args(argv)
+    ap = parser()
+    a = ap.parse_args(argv)
+    dump_copies = ()
+    if a.dump_copies is not None or a.dump_out is not None:
+        if a.dump_copies is None or a.dump_out is None:
+            ap.error("--dump-copies and --dump-out must be supplied together")
+        try:
+            dump_copies = tuple(dict.fromkeys(int(b.strip()) for b in a.dump_copies.split(",")))
+        except ValueError:
+            ap.error("--dump-copies must be a comma-separated list of integers")
+        if any(b < 0 or b >= a.copies for b in dump_copies):
+            ap.error(f"--dump-copies entries must be in [0, {a.copies})")
+        try:
+            re.compile(a.dump_roles)
+        except re.error as exc:
+            ap.error(f"invalid --dump-roles expression: {exc}")
+        if a.recheck:
+            ap.error("spike dumping requires a neural run, not --recheck")
     if a.recheck:
         source = Path(a.recheck)
         rec = recheck_record(json.loads(source.read_text()))
@@ -663,7 +765,8 @@ def main(argv=None):
     stall_ms = a.stall_ticks * per_tick_est if a.stall_ticks > 0 else None
     t0 = time.time()
     r = run_neural(k, pl, P, tokens, copies=a.copies, backend=a.backend, mix=a.mix, seed=a.seed, device=a.device,
-                   dtype=dtype, max_ms=max_ms, stall_ms=stall_ms, progress=300)
+                   dtype=dtype, max_ms=max_ms, stall_ms=stall_ms, progress=300,
+                   dump_copies=dump_copies, dump_roles=a.dump_roles, dump_out=a.dump_out)
     st = r["stats"]
     limit = "stall" if st["stopped_on_stall"] else ("max_ms" if st.get("host_stalls") or st.get("truncated") else None)
     run_end_step = round(float(st["neural_ms"]) / P.dt)
@@ -676,6 +779,15 @@ def main(argv=None):
                          blocked=b in st.get("blocked_nodes", []), limit=limit, run_end_step=run_end_step,
                          stall_ms=stall_ms)
         c["copy"] = b
+        if c["status"] == "stalled":
+            c["stall_evidence"] = {
+                "stop_step": run_end_step,
+                "last_commit_step_by_field": c["last_commit_step_by_field"],
+                "blocked_node": b in st.get("blocked_nodes", []),
+                "fields_awaiting_commits": [f for f in k.fields if len(r["outs"][b].get(k.cells[f], [])) < a.ticks],
+                "pending_cells": None, "pending_requests": None,
+                "pending_scope": "runner exposes blocked_nodes, not internal cell/request state",
+            }
         per_copy.append(c)
     n_ticks = [c["tick_ms"] for c in per_copy if len(c["tick_ms"]) > 1]
     per_tick_neural = float(np.median([np.median(np.diff(x)) for x in n_ticks])) if n_ticks else None
@@ -688,8 +800,13 @@ def main(argv=None):
         "ticks": a.ticks, "seed": a.seed, "scripted_prefix": min(a.ticks, len(SCRIPTED_TOKENS)), "tokens": tokens,
         "backend": a.backend, "simulator": st["simulator"], "device": a.device, "dtype": str(dtype),
         "copies": a.copies, "mix": a.mix, "datapath": pl.datapath,
-        "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n,
+        "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n, "edges": pl.net.nnz,
         "build_options": dict(pl.build_options),
+        "spike_dumps": st.get("spike_dumps", {}),
+        "dump_roles": a.dump_roles if dump_copies else None,
+        "replay": {"seed": a.seed, "copies": a.copies, "rng_independent_of_time_budget": True,
+                   "calibration_rng": "separate nominal simulator" if calib else "skipped (--max-ms)",
+                   "stray_stream_scope": "same copies, netlist, backend, device and dtype required"},
         "max_ms": round(max_ms, 1), "max_ms_source": "calibrated" if calib else "given", "calibration": calib,
         "margin": a.margin, "stall_ms": stall_ms, "stop": limit or "complete", "dt_ms": P.dt,
         "run_end_step": run_end_step,

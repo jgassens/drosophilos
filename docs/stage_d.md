@@ -172,7 +172,85 @@ ratios from `docs/perf_final_comparison.md` gives about **1.75 h** wall for one 
 there would take ≈ 27 h; `--time=2-00:00:00` leaves margin. On the laptop, RefSim ran at ~5.4×
 wall/neural under heavy load (226 s for 6 ticks).
 
-## 7. What this does NOT cover
+## 7. Diagnosing a stalled copy
+
+The seed-108, 100-copy mix-B runs on `ad4046d` ended with four stalled base copies
+(18 after 1 completed tick, 34 after 31, 74 after 323, 17 after 728) and five stalled
+rate-robust copies (43 after 450, 28 after 535, 34 after 599, 24 after 654, 11 after 864).
+Both had zero wrong values and only one batch fault. A stall therefore needs its own
+request/commit evidence; a batch fault count cannot explain every stalled copy.
+
+After integrating and committing the dump support, replay base copies 18 and 34 on Juno
+from the beginning with 40 tokens. Keep **all 100 copies** in the simulator:
+
+```sh
+slurm/submit.sh --cluster juno --time=4:00:00 -- drosophilos.bench.stage_d \
+    --ticks 40 --seed 108 --backend torch-fast --device cuda --copies 100 --mix B \
+    --max-ms 450000 --dump-copies 18,34 \
+    --dump-out data/stage_d/mixB_s108_c100_replay40 \
+    --out data/stage_d/mixB_s108_c100_replay40.json
+```
+
+Use the integrated commit containing the same netlist as `ad4046d`; `--ref ad4046d` itself
+predates these dump flags. This is the base replay; retain `--rate-robust` when replaying
+the rate-robust record, and use enough ticks to reach its stalled copies.
+
+The command writes `mixB_s108_c100_replay40_copy18.npz` and
+`mixB_s108_c100_replay40_copy34.npz`. Each contains `step`, `neuron`, and one `role` string
+per spike, using the same observer capture path and NPZ schema as `kernel_campaign`.
+`--dump-roles REGEX` defaults to the filter documented by `stall_diag`:
+
+```text
+\.(req\.|relight|start$|actd\.|idle|creq|autocommit|commit|done|kill|Q\.comp|Q\.valid|fault|ready|go\.)
+```
+
+Fetch the replay record and both dumps (`<jobid>` is the submitted job ID), then diagnose:
+
+```sh
+slurm/fetch.sh <jobid> data/stage_d/mixB_s108_c100_replay40.json
+slurm/fetch.sh <jobid> data/stage_d/mixB_s108_c100_replay40_copy18.npz
+slurm/fetch.sh <jobid> data/stage_d/mixB_s108_c100_replay40_copy34.npz
+
+uv run python -m drosophilos.bench.stall_diag data/stage_d/mixB_s108_c100_replay40_copy18.npz \
+    --campaign data/stage_d/mixB_s108_c100_replay40.json --node 18 \
+    --out docs/stage_d_copy18_stall.md
+uv run python -m drosophilos.bench.stall_diag data/stage_d/mixB_s108_c100_replay40_copy34.npz \
+    --campaign data/stage_d/mixB_s108_c100_replay40.json --node 34 \
+    --out docs/stage_d_copy34_stall.md
+```
+
+`fault_diag` accepts the same Stage D record and dump with `--campaign` and `--node`.
+Both tools rebuild Stage D's `[c4_sel, c9_sel, c12_sel]` outputs from its program,
+`build_options`, `datapath`, and `rate_robust`, and verify the recorded neuron/role mapping.
+Existing `kernel_campaign` records still use their own output selection and legacy defaults.
+The original `mixB_s108_c100_rr_ad4046d.json` predates circuit-version recording, although
+`ad4046d` already contains the current v2 rate-reader reset wiring. Use the replay's new
+record for diagnosis: it records `build_options.rate_robust_version` and neuron/edge counts.
+An unmodified versionless rate-robust record without a circuit hash or both counts remains
+rejected by the existing identity guard; matching neuron roles alone cannot prove that its
+synapses match. For an archived record independently confirmed to come from `ad4046d`,
+a copy annotated with `build_options.rate_robust_version: 2` identifies that circuit.
+
+Replay invariants: `tokens_for(N, seed)` is a prefix of `tokens_for(1000, seed)`, including
+the random suffix after tick 52. Weight, threshold, bias, and stray-seed draws use a fresh
+NumPy generator for each main run. The perturbation builder ignores its historical
+`n_steps` argument; neither `max_ms` nor `stall_ms` affects draws. Calibration uses a
+separate nominal single-copy simulator. The explicit `--max-ms` above skips it, recorded as
+`calibration: null`, `max_ms_source: given`, and `replay.calibration_rng: skipped (--max-ms)`.
+The stray stream draws a `(copies, neurons)` mask on every simulated step: changing
+`--copies` to 2 to dump two copies changes that stream. Retain the seed, full batch size,
+netlist, backend, device, and dtype; CPU mask-prefix tests do not certify a CUDA replay
+across different Torch/CUDA versions. Time ceilings affect how much evidence is collected,
+so allow time after the last healthy tick for the stall watch.
+
+New records retain `last_commit_step_by_field` for every copy and `stall_evidence` for each
+stalled copy: stop step, per-field last commits, fields still awaiting commits, and whether
+the runner lists that copy in `blocked_nodes`. The runner does not currently expose its
+internal pending-cell/request state; those fields are explicitly `null`, rather than an
+empty list that would claim nothing was pending. Raw load and commit events remain available
+for rechecking, which preserves the saved stall evidence.
+
+## 8. What this does NOT cover
 
 - **TMR and the commit log**: the plan's Stage D puts `minidoom` `p_*` on control nodes with
   triple modular redundancy and a commit log. Neither exists; this is the resident-kernel form
