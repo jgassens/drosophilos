@@ -1126,3 +1126,45 @@ inside this worktree's sandbox: both the default uv cache and that TMPDIR were d
 writes. Validation used the same tests with
 `PYTHONPATH=. UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv TMPDIR="$PWD/.tmp" uv run --no-sync --no-cache pytest`,
 plus `-o addopts='' -q` for counts/timings. Work remains uncommitted for integration.
+
+## Stage D exit and replay status (2026-10-01)
+
+The Stage D scorer was corrected in `c9f5a83` (sol). It now orders each field by its
+commit and checks both output count and causal lower bounds. The previous six-tick failure
+was a scorer error: it treated host input loads as output boundaries in the pipelined kernel.
+Inputs are not paced. Campaign accounting keeps matched/completed ticks, wrong values,
+run-level faults, timeouts, and stalled copies separate.
+
+Nominal `tick2.c` completed the 1,000-tick Stage D run (Juno 425032). Mix B on the older
+build, 100 copies × 1,000 ticks (Juno 425033), had 91 copies match all ticks, 9 stalled and
+5 run-level faults; 0 values were wrong in 93,917 ticks. The specialized-datapath campaign,
+seeds 108--110 × 100 (Juno 424774/424775/424777), had 299/300 copies and 0 wrong values;
+the specialized build has 25,113 neurons versus 29,073 generic.
+
+The fast-latch/rate-mode gate work is opt-in as `rate_robust`: initial implementation
+`2ed4d74` (astra), review correction `71e78d5`, versioning `6b3f44d`,
+`RATE_ROBUST_VERSION=2`. Readouts now bound each latch contribution to rate-mode gates.
+Fast-latch false faults fell from 34/34 to 0/34 in probes. Review found a double-START
+regression (50/901), fixed to 0/5,406. Kernel campaigns with `rate_robust`, seeds 108--110
+(Juno 426319--426321, pre-review-fix circuit), returned 4,800/4,800 outputs, 0 wrong,
+0 faults and 0 timeouts. The cost is +1,268 tick neurons. Its anatomical lower bound is about
+49.9k output synapses on single reset-inhibitor neurons; the largest edge is 43,456 quanta.
+Connectome placement of the conditioned circuit remains open. The default remains off.
+
+The comparable Stage D mix-B campaign is seed 108, 100 copies × 1,000 ticks, `ad4046d`,
+with the same scorer:
+
+| build | result |
+|---|---|
+| default, Juno 426357 | 96 matched; 4 stalled: copy 18 at tick 1, 34 at 31, 74 at 323, 17 at 728 completed ticks; 97,083 matched ticks, 0 wrong, 1 run-level fault |
+| `rate_robust`, Juno 426358 | 95 matched; 5 stalled: copy 43 at tick 450, 28 at 535, 34 at 599, 24 at 654, 11 at 864; 98,102 matched ticks, 0 wrong, 1 run-level fault |
+
+`rate_robust` therefore does not reduce Stage D stalls. Most stalls have no fault, and the
+stall mechanism is not identified. The Stage D mix-B exit is not met.
+
+Diagnosis support now includes `stage_d --dump-copies` with exact-prefix replay (`5c49025`),
+and compact atomic dumps with a bounded window around each copy's last commit (`09f2a01`).
+`stall_diag` and `fault_diag` accept Stage D records. The first replay (Juno 428569) reproduced
+the stalls (98/100 done), but died while writing a per-spike-role dump after filling the home
+quota. The rerun (Juno 428908--428910) was lost to the Juno filesystem outage at about 16:20
+on 2026-09-30; all logs froze. Replays are queued on Juno 429332--429334 and G2 3979025.
