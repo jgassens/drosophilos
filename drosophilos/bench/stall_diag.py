@@ -672,6 +672,166 @@ def _campaign_counts(campaign: dict[str, Any], node: int) -> dict[str, Any]:
     }
 
 
+def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
+                  stop: int | None = None) -> dict[str, Any]:
+    """Trace a stage word back to its operand rails, with capture-aware spike evidence.
+
+    ``start`` is START; ``stop`` is the next START (exclusive), or capture end + 1.
+    Cones follow *both* excitatory and inhibitory edges, stopping at source registers,
+    constants, and this transaction's control/reset inputs. Neuron IDs, not role-name
+    lookup, disambiguate the repeated ``out.b*`` and ``alu.z*`` roles. ``signals`` and
+    ``edges`` retain the whole cone for inspecting intermediate gates/latches; the Markdown
+    view shows the bit indicators, operands and final drivers. Quanta are nominal wiring,
+    not the copy's perturbed weights. A stopped train or a fault spike is evidence, not by
+    itself proof of a kill or a double rail.
+    """
+    net = pl.net
+    cell = next(c for c in pl.cells if c.name == cell_name)
+    end = min(dump.end, stop - 1) if stop is not None else dump.end
+    capture_start = int(dump.window["start_step"]) if dump.window else (
+        int(dump.step[0]) if len(dump.step) else 0)
+    if start < capture_start or start > end:
+        raise ValueError("datapath START must be inside the captured window")
+    gap = 3 * pl.drive.loop_period_steps
+    stage = cell.stage
+    controls = {
+        "start": cell.start, "actd": _actd_id(net.roles, cell_name),
+        "completion": stage.completion.u, "commit": cell.commit_pulse,
+        "done": cell.reg.done_relay, "fault": stage.fault_latch.u,
+        "reset": stage.reset_trigger, "reset_inh": stage.reset_inh, "ready": stage.ready,
+    }
+    boundary = {x for x in (cell.start, controls["actd"], stage.reset_inh,
+                            *stage.fault_latch.members, *cell.act.members) if x is not None}
+    # A source master is a level at the datapath boundary. Do not follow its feedback
+    # through a different transaction, nor assume its contents from the reference program.
+    source_rails = [c.master.rails for c in pl.cells]
+    source_rails += [reg.master.rails for reg, _ in pl.inputs.values()]
+    source_rails += list(pl.consts.values())
+    boundary.update(x for word in source_rails for pair in word for rail in pair for x in rail.members)
+
+    def cone(roots):
+        seen, pending = set(), list(roots)
+        while pending:
+            neuron = pending.pop()
+            if neuron in seen:
+                continue
+            seen.add(neuron)
+            if neuron not in boundary:
+                pending.extend(net.src[e] for e in net.incoming[neuron] if net.quanta[e])
+        return sorted(seen)
+
+    bits = []
+    wanted = {x for x in controls.values() if x is not None}
+    for bit, pair in enumerate(stage.rails):
+        members = [list(rail.members) for rail in pair]
+        drivers = [[net.src[e] for e in net.incoming[rail.u]
+                    if net.quanta[e] > 0 and net.src[e] not in rail.members] for rail in pair]
+        ids = cone([*members[0], *members[1], stage.valid[bit].u, stage.fault[bit]])
+        valid_prefix = net.roles[stage.valid[bit].u].removesuffix(".L.u") + "."
+        valid_probes = [n for n in ids if net.roles[n].startswith(valid_prefix)]
+        wanted.update(ids)
+        label = f"R{bit}" if bit < pl.n else {pl.n: "C", pl.n + 1: "Z", pl.n + 2: "V"}.get(bit, f"b{bit}")
+        bits.append({"bit": bit, "label": label, "valid": stage.valid[bit].u,
+                     "rails": members, "drivers": drivers, "fault": stage.fault[bit],
+                     "valid_probes": valid_probes, "cone_ids": ids})
+    wanted.update(cone([stage.completion.u]))
+
+    operands = []
+    by_name = {c.name: c for c in pl.cells}
+    for port, source in (("A", cell.a), ("B", cell.b), ("condition", cell.c)):
+        if source is None:
+            continue
+        if isinstance(source, tuple) and source[0] == "const":
+            word = pl.consts[source[1]]
+        else:
+            key = source[1] if isinstance(source, tuple) and source[0] == "param" else source
+            stream = (next(iter(pl.inputs)) if key == "input" else
+                      key[6:] if isinstance(key, str) and key.startswith("input:") else None)
+            word = pl.inputs[stream][0].master.rails if stream is not None else by_name[key].master.rails
+        operand_bits = []
+        for bit in ([pl.n + 1] if port == "condition" else range(pl.n)):
+            rails = [list(rail.members) for rail in word[bit]]
+            wanted.update(x for pair in rails for x in pair)
+            operand_bits.append({"bit": bit, "rails": rails})
+        operands.append({"port": port, "source": source, "bits": operand_bits})
+
+    def outgoing(source, inhibitory_only=False):
+        return [e for e, (src, q) in enumerate(zip(net.src, net.quanta))
+                if src == source and (q < 0 if inhibitory_only else q != 0)]
+
+    reset_edges = outgoing(stage.reset_inh, True)
+    fault_edges = outgoing(stage.fault_latch.u)
+    wanted.update(net.dst[e] for e in reset_edges + fault_edges)
+    # Explicit probes include both fault members and the reset controller, even when its
+    # source is silent. Their absence must not be confused with an omitted role.
+    wanted.update(stage.fault_latch.members)
+    wanted.update(i for i, role in enumerate(net.roles) if role.startswith(cell_name + ".Q.reset"))
+    events = _extract_steps(dump, np.asarray(sorted(wanted), dtype=np.int64), net.n)
+    actd_steps = events.get(controls["actd"], np.empty(0, dtype=np.int64))
+    actd = _first_after(actd_steps.tolist(), start, end + 1)
+
+    def signal(neuron):
+        values = events.get(neuron, np.empty(0, dtype=np.int64))
+        lo, hi = np.searchsorted(values, [start, end + 1])
+        selected = values[lo:hi]
+        available = _observed(dump, net.roles, neuron)
+        # Observed events remain evidence even for a legacy dump without capture_ids.
+        available = available or neuron in dump.current_to_dump
+        trains = intervals(values[:hi], gap)
+        overlap = [(a, b, count) for a, b, count in trains if b >= start]
+        new_rises = [a for a, _, _ in overlap if a >= start]
+
+        def live_at(step):
+            if not available or step is None:
+                return None
+            index = int(np.searchsorted(values, step, side="right"))
+            return bool(index and step - int(values[index - 1]) <= gap)
+
+        isi = np.diff(selected)
+        isi = isi[isi <= gap]
+        return {
+            "neuron": dump.current_to_dump.get(neuron, neuron), "current_neuron": neuron,
+            "role": net.roles[neuron], "available": available,
+            "state": ("unavailable" if not available else "rose" if new_rises else
+                      "held" if len(selected) else "silent"),
+            "count": len(selected), "first_step": int(selected[0]) if len(selected) else None,
+            "last_step": int(selected[-1]) if len(selected) else None,
+            "last_before_start": int(values[lo - 1]) if lo else None,
+            "rises": new_rises, "trains": overlap,
+            "sample_steps": selected[:16].tolist(), "samples_truncated": len(selected) > 16,
+            "median_isi": float(np.median(isi)) if len(isi) else None,
+            "live_at_actd": live_at(actd), "live_at_end": live_at(end),
+        }
+
+    signals = {neuron: signal(neuron) for neuron in sorted(wanted)}
+    for bit in bits:
+        valid = signals[bit["valid"]]
+        bit["valid_state"] = valid["state"]
+    for operand in operands:
+        for bit in operand["bits"]:
+            live = [signals[pair[0]]["live_at_actd"] for pair in bit["rails"]]
+            bit["state_at_actd"] = ("unavailable" if None in live else
+                                     "both" if all(live) else "r0" if live[0] else
+                                     "r1" if live[1] else "dark")
+    edge_ids = {e for neuron in wanted if neuron not in boundary for e in net.incoming[neuron]
+                if net.src[e] in wanted and net.quanta[e]}
+    edge_ids.update(reset_edges + fault_edges)
+    edges = [{"source": net.src[e], "target": net.dst[e], "quanta": net.quanta[e],
+              "delay_steps": net.delay[e]} for e in sorted(edge_ids)]
+    return {
+        "cell": cell_name, "operation": cell.op, "start": start, "end": end, "actd": actd,
+        "gap_steps": gap, "controls": controls, "bits": bits, "operands": operands,
+        "signals": signals, "edges": edges,
+        "reset_targets": sorted({net.dst[e] for e in reset_edges}),
+        "fault_targets": sorted({net.dst[e] for e in fault_edges}),
+        "valid_bits_rose": [b["bit"] for b in bits if b["valid_state"] == "rose"],
+        "valid_bits_held": [b["bit"] for b in bits if b["valid_state"] == "held"],
+        "valid_bits_silent": [b["bit"] for b in bits if b["valid_state"] == "silent"],
+        "valid_bits_unavailable": [b["bit"] for b in bits if b["valid_state"] == "unavailable"],
+        "unavailable_ids": [n for n, s in signals.items() if not s["available"]],
+    }
+
+
 def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) -> dict[str, Any]:
     """Return structured evidence used by the Markdown renderer and regression test."""
     campaign_path = Path(campaign_path)
@@ -724,6 +884,12 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
         neighbours = sorted(set([*producers, cell_name, *consumers]), key=order.index)
         timelines = {name: _transaction_rows(layout[name], events, gap) for name in neighbours}
 
+    datapath = None
+    if anomaly["kind"] == "datapath":
+        starts = _event_list(events, layout[cell_name]["probes"]["start"], gap)
+        stop = _first_after(starts, anomaly["start"] + 1)
+        datapath = datapath_view(pl, dump, cell_name, anomaly["start"], stop)
+
     refusals = 0
     refusal_roles = []
     for neuron, role in enumerate(pl.net.roles):
@@ -751,6 +917,7 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
         "repair_neuron": repair_neuron, "repair_step": repair_step,
         "clear_step": clear_step, "clear_pulses": clear_pulses, "false_intervals": false_intervals,
         "neighbours": neighbours, "timelines": timelines,
+        "datapath": datapath,
         "roles": pl.net.roles, "layout": layout,
     }
 
@@ -773,6 +940,80 @@ def _steps(values: list[int]) -> str:
 
 def _request_text(requests: dict[str, int | None]) -> str:
     return "; ".join(f"{src} {_n(step)}" for src, step in requests.items()) or "—"
+
+
+def render_datapath(view: dict[str, Any]) -> str:
+    """Compact human view; ``datapath_view`` also exposes every cone signal and edge."""
+    signals = view["signals"]
+
+    def event(neuron):
+        if neuron is None:
+            return "unavailable"
+        s = signals[neuron]
+        if not s["available"]:
+            return "unavailable"
+        if not s["count"]:
+            return "silent"
+        if s["count"] <= 16:
+            return _steps(s["sample_steps"])
+        return f"{_n(s['first_step'])}–{_n(s['last_step'])} ({s['count']:,} spikes)"
+
+    def labelled(neuron):
+        s = signals[neuron]
+        return f"{s['neuron']} `{s['role']}`: {event(neuron)}"
+
+    lines = [
+        "## Bit-level datapath evidence", "",
+        f"`{view['cell']}` ({view['operation']}), steps {view['start']:,}–{view['end']:,}, inclusive. "
+        "Valid latches are OR indicators: they establish neither the bit value nor exclusive "
+        "dual-rail validity. A fault-gate spike does not by itself prove a double rail. "
+        "Unavailable means omitted from the capture, not silent.", "",
+        "| Bit | Valid u: neuron, first–last spike | Rail 0 u / v: neurons, spikes | Rail 1 u / v: neurons, spikes | Fault gate |",
+        "|---|---|---|---|---|",
+    ]
+    for bit in view["bits"]:
+        valid = bit["valid"]
+        rails = ["; ".join(f"{signals[n]['neuron']}: {event(n)}" for n in pair) for pair in bit["rails"]]
+        fault = bit["fault"]
+        lines.append(f"| {bit['bit']} ({bit['label']}) | {signals[valid]['neuron']}: {event(valid)} | "
+                     f"{rails[0]} | {rails[1]} | {signals[fault]['neuron']}: {event(fault)} |")
+    lines += ["", "### Control and reset probes", "",
+              "| Signal | Neuron / role | Spikes |", "|---|---|---|"]
+    for key, neuron in view["controls"].items():
+        if neuron is not None:
+            s = signals[neuron]
+            lines.append(f"| {key} | {s['neuron']} `{s['role']}` | {event(neuron)} |")
+    lines += ["", "Reset targets and fault targets are recorded from the rebuilt wiring in "
+              "`report['datapath']`; missing reset spikes prevent attributing a stopped latch "
+              "to a particular train.", "", "### Operand rails at ACT^d", "",
+              "Activity uses the last spike within the train-gap threshold; it is not a voltage measurement.", "",
+              "| Port / source | Bit | Rail 0 u / rail 1 u | Activity at ACT^d |",
+              "|---|---:|---|---|"]
+    for operand in view["operands"]:
+        for bit in operand["bits"]:
+            ids = " / ".join(str(signals[pair[0]]["neuron"]) for pair in bit["rails"])
+            lines.append(f"| {operand['port']} / `{operand['source']}` | {bit['bit']} | "
+                         f"{ids} | {bit['state_at_actd']} |")
+    suspect_bits = [b for b in view["bits"] if b["valid_state"] != "rose" or
+                    signals[b["valid"]]["live_at_end"] is False or signals[b["fault"]]["count"]]
+    lines += ["", "### Validity circuitry for missing, stopped or faulted bits", "",
+              "| Bit | Neuron / role | Spikes |", "|---|---|---|"]
+    for bit in suspect_bits:
+        for neuron in bit["valid_probes"]:
+            s = signals[neuron]
+            lines.append(f"| {bit['bit']} ({bit['label']}) | {s['neuron']} `{s['role']}` | {event(neuron)} |")
+    lines += ["", "### Final rail drivers for missing, stopped or faulted bits", "",
+              "These are excitatory inputs to each stage latch excluding its loop partner. "
+              "The structured view retains both signs of every upstream edge, intermediate "
+              "gate/latch trains, ISIs, and unavailable neuron IDs.", "",
+              "| Bit / rail | Driver neuron, role and spikes |", "|---|---|"]
+    for bit in suspect_bits:
+        for rail, drivers in enumerate(bit["drivers"]):
+            lines.append(f"| {bit['bit']} ({bit['label']}) / {rail} | "
+                         + ("; ".join(labelled(n) for n in drivers) or "no non-loop driver") + " |")
+    lines += ["", f"Unavailable probes: {len(view['unavailable_ids']):,} of {len(signals):,}. "
+              "No kill mechanism is inferred from filtered-out rails, relays or reset trains.", ""]
+    return "\n".join(lines)
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -964,6 +1205,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                     f"{anomaly['source']} dark since {_n(anomaly['dark_since'])} | "
                     "**—** | — | — | — | — |"
                 )
+
+    if report.get("datapath") is not None:
+        lines += ["", render_datapath(report["datapath"])]
 
     counts = report["counts"]
     lines += [
