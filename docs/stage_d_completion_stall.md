@@ -687,3 +687,170 @@ Commands run:
 ```text
 TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_completion_stall.py
 ```
+
+## Register reset qualification and opt-in (2026-10-04)
+
+The committed reconstruction was rerun in float64 **RefSim**. Recording now keeps
+only the observed neurons, coalesces same-step integer external events, and slices
+each node once before classifying it. Integration, delivery, static draws and RNG
+streams are unchanged; a regression compares the optimized observation with the
+ordinary RefSim trace. The thirteen non-slow completion tests finish in about
+12 seconds on this worker, including the original 2,000-reset result **8 / 0 / 0**.
+The full **1,600 seeds per copy and setting** are now explicitly slow-marked.
+
+| Repeated full isolated path | Stalls / 1,600 | Old-rail survivors / 1,600 |
+|---|---:|---:|
+| base 74, original reset | 24 | 50 |
+| base 17, original reset | 4 | 4 |
+| RR 24, original reset | 1 | 1 |
+| RR 11, original reset | 0 | 0 |
+| base 74, selected robust stage/master resets, identical seeds | 0 | 0 |
+
+These reruns use the committed numeric words. In particular, copy 74's literals
+are **197 → 187**, with C/Z/V all zero; the earlier table's “C” annotation does
+not match those literals. The reproduced rates refer to the code's words, not a
+new reconstruction with C set. They remain conditional isolated experiments,
+not a replay of the missing CUDA stream or a full Stage D campaign. The nominal
+1,600-seed settings and compact settings for the other copies remain available in
+the slow suite; the table above lists the full-path settings rerun for this change.
+
+### Choice and rejected candidates
+
+`robust_register_reset=False` remains the default. Enabling it selects **four
+taps, zero-delay links between taps, and 1.75 × loop inhibition** for the input
+stage/master and each cell's Q/master domains. The final **four** links of their
+existing fifteen-hop READY chains use **100-step delays instead of 18**. Thus each
+READY is delayed exactly **328 steps / 32.8 ms** from the same reset trigger.
+There is no change to the control machine, producer resets or kernel/request kills.
+
+The request clear's 1.1 strength was insufficient for the wider independent
+register corners. These are 256 reset phases per setting, with four closely
+spaced initial ignitions and a later 300-q kick. Storage is +30% loop, −1.2 mV
+threshold, with independently **12% weak clear edges**. The slow controller has
+12% weak positive edges and +0.6 mV thresholds, and emits only **three** spikes.
+
+| Compact strength | Survivors, nominal controller / 256 | Survivors, slow controller / 256 | Slow-storage recovery from first arrival, fast READY | Margin with selected READY delay |
+|---:|---:|---:|---:|---:|
+| 1.1 | 76 | 256 | 825 steps | 120 steps |
+| 1.25 | 0 | 256 | 850 | 95 |
+| 1.35 | 0 | 208 | 875 | 70 |
+| 1.5 | 0 | 0 | 900 | 45 |
+| **1.75 (selected)** | **0** | **0** | **925** | **20** |
+
+The noisy extension rejected 1.5 despite its clean phase sweep: **59 / 40,000**
+survivors at fast storage / weak clear / slow controller. Strength 1.75 gives
+**0 / 40,000** on the identical stream. This is why the selected strength is higher
+than either the request clear or the deterministic minimum.
+
+The unextended nominal READY budget is only 777 steps from the first inhibition,
+and a fast READY chain reduces it to 617. Even 1.1 misses the slow-storage margin
+without extending READY. Merely adding taps or counting configured taps as arrivals
+would not qualify either the kill or recovery. The original reset also leaves
+52/256 copy-74 and 2/256 copy-24 survivors in the deterministic phase regression.
+
+### Survivor and recovery evaluation
+
+The reduced primitive is the real `add_latch` plus `add_reset`, optionally with
+the real fifteen-hop READY chain. For copies 74/17/24 and stage copy 18, every
+included edge, threshold and bias is role-mapped from seed 108, B=100, at the
+original topology. Copy 18 is **c3_xor.Q.b9r0**. Its four initial ignition offsets
+match the captured burst (0/1/4/13 steps, nominal ignition quanta); the subsequent
+strays are newly sampled, not captured. The known master draws retain their own
+controllers and independently drawn fan-outs, rescaled to the candidate strength.
+
+Each slow survivor setting applies **40,000 resets**, batched at 1,000, with reset
+times uniform in [3,000, 4,500), four initial ignitions, a later kick alternating
+members, and **5-Hz × 150-q strays on every primitive neuron** through step 6,200.
+Survival means either member still fires 1,500 steps after reset. This also
+challenges late re-ignition. The deterministic 256-phase cases are fast regressions.
+The selected strength produced **0 survivors in all thirteen 40,000-reset
+settings: 520,000 resets total**, including all four reconstructed draw sets.
+
+Reload uses eleven reset phases and a conservative 25-step grid, tests sustained
+firing 1,500 steps after the ignition, and additionally tests **exactly at READY**.
+Slow corners independently weaken the loop and ignition by 8/12%, raise latch
+thresholds by 0.4/0.6 mV, and strengthen clear edges by 8/12%. Fast corners use
++20/+30% loops, −0.8/−1.2 mV thresholds and 12% weak clears. Asymmetric and mirrored
+corners mix +30/−12% loop directions, −1.2/+0.6 mV thresholds and −12/+12% clears.
+The first and last arrivals are measured from **all actual inhibitor spikes**.
+
+| Storage / controller | Survivors / 40,000 | Actual arrivals from first (steps) | Recovery from first | READY from first | Margin |
+|---|---:|---|---:|---:|---:|
+| master 74, its draws | 0 | 0/45/84/144 | 650 | 1,098 | 448 |
+| master 17, its draws | 0 | 0/42/82/148 | 625 | 1,069 | 444 |
+| master 24, its draws | 0 | 0/48/89/149 | 700 | 1,101 | 401 |
+| stage Z0 18, its draws | 0 | 0/41/78/141 | 700 | 1,103 | 403 |
+| nominal | 0 | 0/43/81/138 | 675 | 1,105 | 430 |
+| slow 8% | 0 | 0/43/81/138 | 825 | 1,105 | 280 |
+| slow 12% | 0 | 0/43/81/138 | 925 | 1,105 | 180 |
+| fast 20%, weak clear | 0 | 0/43/81/138 | 525 | 1,105 | 580 |
+| fast 30%, weak clear | 0 | 0/43/81/138 | 500 | 1,105 | 605 |
+| asymmetric | 0 | 0/43/81/138 | 675 | 1,105 | 430 |
+| mirrored asymmetric | 0 | 0/43/81/138 | 875 | 1,105 | 230 |
+| fast 30% / fast controller (kill); slow 12% / fast controller (reload) | 0 | 0/34/66/111 | 900 | 955 | 55 |
+| fast 30% / slow controller (kill); slow 12% / slow controller (reload) | 0 | 0/60/115 | 850 | 1,360 | 510 |
+| slow 12% / independently fast READY | phase regression | 0/43/81/138 | 925 | 945 | **20** |
+
+Fast/slow controllers perturb all their positive input edges by ±12% and their
+thresholds by ∓0.6 mV; independently fast READY perturbs only READY-chain neurons.
+The separate kill/reload storage settings in the last rows are intentional: fast
+storage with weak clears stresses killing; slow storage with strong clears stresses
+recovery. These are bounded conditional corners, not a universal noise guarantee.
+
+### Complete reset domains, legitimate reloads and cost
+
+`compact_register_resets` is a **final build pass**, after staged-commit wiring,
+`extend_reset`, Z generation and rate-reader wiring. It rescales every inhibitory
+edge from the selected controllers, including scaled/mirrored edges. Applying it
+only inside the initial `add_register` construction would miss later targets.
+
+| Reached state | Qualification |
+|---|---|
+| Q/M rails, validity and completion | Phase/noisy survivor sweeps; actual weak COPY ignition into slow master rails; a second stage word at the first exact Q READY; both resulting words decode correctly, no faults, base and RR |
+| ALU internal latches/gates, ACT, COMMIT, grant and COPY | Two real ADD transactions; every target of the extended Q reset is silent from READY−100 onward after the final word; multi-cell ADD→XOR wraps and reloads correctly |
+| FAULT | An injected double rail raises FAULT and discards Q; FAULT is dark before READY; a clean word loaded exactly at READY commits once, base and RR |
+| `zero_once` OR/relay/inhibitors | Included in the same fan-out and quiet-at-READY assertion; multi-cell runs with the option on and off |
+| RR v2 readers/qualifiers | All mirrored edges included; exact 16× reader-reset gain checked for every source; RR next-COPY, stage reload, fault discard and two-transaction domain tests |
+| Master power-up veto; input TIMEOUT | Their reset edges are included by source, not by target-name filtering; state-cell veto coverage is asserted; default watchdog paths remain present |
+
+The multi-cell regression covers all four combinations of `zero_once` and
+`robust_request_clear`, each with base and rate-robust readers, using generic and
+specialized datapaths. A further two-cell RefSim run uses seed-108 static mix-B
+noise and geometric inter-arrival sampling of 5-Hz × 150-q strays; outputs are
+correct with no faults, timeouts, refusals or bad outputs. This does not replace
+a noisy, long-running whole Stage D campaign.
+
+**Costs:** zero added neurons and zero added logical synapse edges. A tick build
+still has **29,375 / 52,808**, or **30,643 / 55,936** with RR. Its 28 selected
+controllers change 84 tap delays and 112 READY delays; 6,322 inhibitory edge
+weights change in base mode, 7,776 with RR. Their quanta scale by 6,337/2,716
+(total absolute quanta increases by 22,891,962 / 92,813,472 respectively, including mirrors).
+READY gains **32.8 ms per reset**; a stage/master sequence contains two such
+delays, so both must be budgeted when comparing transaction latency. This is not
+a claim of zero placement-weight cost. Ordered default fingerprints, including
+both control-machine hashes, remain unchanged with the option off.
+
+The flag is recorded in `Pipeline.build_options`, exposed as
+`--robust-register-reset` by `stage_d` and `kernel_campaign`, and honored by
+`stall_diag` and Stage D `--recheck` (including nested build records). Old records
+default false. Recheck now forwards the recorded timing/drive policy as well,
+so an unqualified combination cannot silently rebuild using default timings.
+Qualified builds use default physics/drive, standard control/timing, four ordinary
+kernel/request taps, no retry-clear, selected-rail COPY, one unpaced input stream,
+and 1/2/4/8-bit MOV/ADD/SUB/AND/OR/XOR/SEL/ROM LOAD cells. RAM, multipliers, pacing,
+other widths/streams and changed timing/control policies are explicitly rejected.
+
+The requested command is blocked before collection by sandbox denial of uv's
+default cache, `~/.cache/uv/sdists-v9/.git`:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_robust_reset.py tests/test_completion_stall.py tests/test_build_options.py -m 'not slow'
+```
+
+Validation uses the same files and selection through `uv run --no-sync`, the
+existing repository virtualenv, a writable task-local `UV_CACHE_DIR`/pytest
+basetemp, and this worktree on `PYTHONPATH`: **131 non-slow tests passed**.
+The final noisy-kernel event-batching optimization also passes its focused
+regression (3.45 s). The 520,000-reset surveys and the five full-path rows above
+were run separately; `git diff --check` passes.
+No commit is attempted; integration and committing belong to the orchestrator.

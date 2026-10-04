@@ -25,11 +25,12 @@ from drosophilos.bench.stage_d import PROGRAM, build, load_kernel
 from drosophilos.lib.kernel import _NoProducer, _fault_latch
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.lib.staged import add_staged_commit
-from drosophilos.protocol.handshake import add_register
+from drosophilos.protocol.handshake import add_register, compact_register_resets
 from drosophilos.protocol.latch import add_latch, add_reset
 from drosophilos.protocol.token import rails_for
 from drosophilos.sim.model import Params, Topology
 from drosophilos.sim.ref64 import RefSim
+from drosophilos.sim.trace import SpikeTrace
 
 
 PARAMS = Params()
@@ -62,9 +63,9 @@ def _kernel(rate_robust):
     return pl.net.roles, topo, q, vth, bias
 
 
-def _map(copy, net):
+def _map(copy, net, *, rate_robust=None):
     """Copy `copy`'s draws for every edge/neuron of `net`, matched by role and delay."""
-    roles, kt, kq, kvth, kbias = _kernel(FAILS[copy][0])
+    roles, kt, kq, kvth, kbias = _kernel(FAILS[copy][0] if rate_robust is None else rate_robust)
     index = {r: i for i, r in enumerate(roles)}
     gid = np.array([index[r] for r in net.roles])
     members = np.zeros(len(roles), bool)
@@ -83,7 +84,7 @@ def _map(copy, net):
     return q, kvth[copy, gid], kbias[copy, gid], gid
 
 
-def _cell(copy, nominal=False):
+def _cell(copy, nominal=False, compact=False):
     rate_robust, name, state, old, new = FAILS[copy]
     drive = replace(DRIVE, kill_pulses=4, rate_robust=rate_robust)
     net = Netlist(PARAMS)
@@ -100,8 +101,42 @@ def _cell(copy, nominal=False):
     q, vth, bias, gid = _map(copy, net)
     if nominal:
         q, vth, bias = net.topology().quanta.astype(np.int64), np.full(net.n, PARAMS.V_th), np.asarray(net.bias)
+    if compact:
+        before = net.topology()
+        compact_register_resets(net, drive, [Q, reg.master])
+        after = net.topology()
+        assert np.array_equal(before.src, after.src) and np.array_equal(before.dst, after.dst)
+        q = np.rint(q * after.quanta / before.quanta).astype(np.int64)
     return dict(net=net, Q=Q, reg=reg, M=reg.master, q=q, vth=vth, bias=bias, old=old, new=new,
                 name=name, gid=gid)
+
+
+def _observed_run(sim, steps, neurons):
+    """Keep only observed spikes, without changing RefSim's integration/delivery.
+
+    RefSim appends in (step, node, neuron) order already. Avoid sorting millions
+    of irrelevant spikes and bound retained recording memory during the survey.
+    """
+    wanted = np.zeros(sim.n, bool)
+    wanted[list(neurons)] = True
+    # add_events stores one tuple per node/step. Deliver the same integer events
+    # together, so a batched noisy run does not dispatch thousands of tiny arrays.
+    for step, groups in sim._events.items():
+        if len(groups) > 1:
+            sim._events[step] = [tuple(np.concatenate(column) for column in zip(*groups))]
+    columns = [[], [], []]
+    for start in range(0, steps, 256):
+        sim.run(min(256, steps - start))
+        if sim._spk_step:
+            s, b, n = map(np.concatenate, (sim._spk_step, sim._spk_node, sim._spk_neuron))
+            keep = wanted[n]
+            for out, values in zip(columns, (s, b, n)):
+                out.append(values[keep])
+        sim._spk_step.clear(); sim._spk_node.clear(); sim._spk_neuron.clear()
+    if not columns[0]:
+        return SpikeTrace.empty()
+    return SpikeTrace(np.rec.fromarrays([np.concatenate(c) for c in columns],
+                                        names="step,node,neuron"))
 
 
 def _run(c, seeds, *, strays=True, quanta=None, steps=COMMIT + 7100):
@@ -124,12 +159,15 @@ def _run(c, seeds, *, strays=True, quanta=None, steps=COMMIT + 7100):
             st += s_.tolist(); ne += n_.tolist(); qu += [150] * len(s_)
         sim.add_events(b, st, ne, qu)
         commits.append(tc)
-    sim.run(steps)
-    return sim.trace, commits
+    watched = [M.ready, c["reg"].done_relay, *M.fault, *(v.u for v in M.valid)]
+    watched += [l.u for pair in M.rails for l in pair]
+    return _observed_run(sim, steps, watched), commits
 
 
 def _outcome(c, trace, node, tc):
     """DONE after the rewrite, old rails still firing at master READY, fault-gate spikes."""
+    # Slice once: scanning every other node for every bit made the survey quadratic.
+    trace, node = trace.node(node), 0
     M, old = c["M"], dict(rails_for(c["old"], WIDTH))
     ready = trace.neuron_steps(M.ready, node)
     ready = int(ready[ready > tc][0])
@@ -190,9 +228,10 @@ def _strayed_survival(copy, bit, n, **kw):
         s_, n_ = np.nonzero(rng.random((6800, topo.n)) < 5.0 * PARAMS.dt / 1000)
         sim.add_events(b, [10, int(t)] + s_.tolist(), [latch.u, trigger] + n_.tolist(),
                        [DRIVE.ignite, DRIVE.relay_in] + [150] * len(s_))
-    sim.run(6800)
-    trace = sim.trace  # rebuilt on every access
-    return sum(bool(np.any(trace.neuron_steps(latch.u, b) > t + 1500)) for b, t in enumerate(resets))
+    trace = _observed_run(sim, 6800, [latch.u])
+    events = trace.events
+    live = (events["neuron"] == latch.u) & (events["step"] > resets[events["node"]] + 1500)
+    return len(np.unique(events["node"][live]))
 
 
 # ---- tests ---------------------------------------------------------------------------------
@@ -277,19 +316,25 @@ def test_copy74_rail_survives_the_real_reset_only_at_its_draws():
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("copy", [74, 17])
-def test_strayed_cell_stalls_only_through_a_surviving_old_rail(copy):
-    """400 seeded realizations of the whole isolated path. Every stall has exactly one
-    surviving old rail with its valid latch dark; nominal draws never stall."""
-    seeds = list(range(400))
-    for nominal in (False, True):
-        c = _cell(copy, nominal=nominal)
-        stalls = 0
-        for lo in range(0, 400, 100):
-            trace, commits = _run(c, seeds[lo:lo + 100])
-            for b, tc in enumerate(commits):
-                out = _outcome(c, trace, b, tc)
-                if not out["done"]:
-                    stalls += 1
-                    assert len(out["survivors"]) == 1 and out["valid_dark"] == out["survivors"]
-        assert (stalls == 0) if nominal else (stalls > 0)
+@pytest.mark.parametrize("copy,expected,surviving", [(74, 24, 50), (17, 4, 4), (24, 1, 1), (11, 0, 0)])
+@pytest.mark.parametrize("setting", ["draws", "nominal", "compact"])
+def test_1600_seed_completion_survey(copy, expected, surviving, setting):
+    """Exact committed survey, including healthy double-railed copy-74 outcomes.
+
+    Static draws and each node's RNG stream are unchanged by batching or compacting.
+    This is a conditional RefSim experiment, not a replay of the CUDA stray stream.
+    """
+    c = _cell(copy, nominal=setting == "nominal", compact=setting == "compact")
+    stalls = survivors = 0
+    for lo in range(0, 1600, 100):
+        trace, commits = _run(c, range(lo, lo + 100))
+        for b, tc in enumerate(commits):
+            out = _outcome(c, trace, b, tc)
+            survivors += bool(out["survivors"])
+            if not out["done"]:
+                stalls += 1
+                assert len(out["survivors"]) == 1 and out["valid_dark"] == out["survivors"]
+        print(dict(copy=copy, setting=setting, seeds=lo + 100, stalls=stalls,
+                   survivors=survivors), flush=True)
+    assert stalls == (expected if setting == "draws" else 0)
+    assert survivors == (surviving if setting == "draws" else 0)

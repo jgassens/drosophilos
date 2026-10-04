@@ -679,6 +679,8 @@ def parser() -> argparse.ArgumentParser:
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
+    ap.add_argument("--robust-register-reset", action="store_true",
+                    help="use compact clears for stage/master register reset domains")
     ap.add_argument("--robust-request-clear", action="store_true",
                     help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--max-ms", type=float, default=None,
@@ -754,13 +756,25 @@ def recheck_record(rec: dict) -> dict:
     # Rebuild even though recheck only rejudges saved observations: this confirms the saved
     # configuration remains constructible and keeps the rate-conditioning choice attached to
     # the record.  Old records predate the opt-in and therefore mean the legacy false value.
-    rate_robust = bool(rec.get("rate_robust", False))
+    rate_robust = bool(rec.get("rate_robust", rec.get("build_options", {}).get("rate_robust", False)))
     zero_once = bool(rec.get("zero_once", rec.get("build_options", {}).get("zero_once", False)))
     robust_request_clear = bool(rec.get("robust_request_clear",
                                        rec.get("build_options", {}).get("robust_request_clear", False)))
+    robust_register_reset = bool(rec.get("robust_register_reset",
+                                        rec.get("build_options", {}).get("robust_register_reset", False)))
+    options = dict(rec.get("build_options", {}))
+    for key in ("datapath", "rate_robust", "zero_once", "robust_request_clear",
+                "robust_register_reset", "true_guard_version", "rate_robust_version"):
+        options.pop(key, None)
+    strength = options.pop("kill_strength", None)
+    if strength is not None:
+        from dataclasses import replace
+        from ..lib.netlist import Drive
+        options["drive"] = replace(Drive.from_params(Params()), kill_strength=float(strength))
     k_for_build = load_kernel(rec.get("program", PROGRAM))
-    build(k_for_build, Params(), rec.get("datapath", "generic"),
-          rate_robust=rate_robust, zero_once=zero_once, robust_request_clear=robust_request_clear)
+    build(k_for_build, Params(), rec.get("datapath", rec.get("build_options", {}).get("datapath", "generic")),
+          rate_robust=rate_robust, zero_once=zero_once, robust_request_clear=robust_request_clear,
+          robust_register_reset=robust_register_reset, **options)
     raw = rec.get("commit_events")
     loads = rec.get("load_events")
     checkable = (isinstance(raw, list) and isinstance(loads, list) and len(raw) == len(loads) and
@@ -887,7 +901,7 @@ def main(argv=None):
     if not check["ir_equal"] or check.get("c_equal") is False:
         raise SystemExit("the references disagree; not running the neural comparison")
     pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once,
-               robust_request_clear=a.robust_request_clear)
+               robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -938,6 +952,7 @@ def main(argv=None):
         "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n, "edges": pl.net.nnz,
         "zero_once": pl.build_options["zero_once"],
         "robust_request_clear": pl.build_options["robust_request_clear"],
+        "robust_register_reset": pl.build_options["robust_register_reset"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),
