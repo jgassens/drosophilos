@@ -581,14 +581,16 @@ train only after the phase/reload regression below. Do not globally strengthen t
 machine's three-pulse clears or shorten READY based on this copy.
 
 `lib/alu.py:add_zero_flag` also supplies a concrete source of extra drive: eight
-independent relays can ignite Z0 repeatedly. A shared, once-per-word Z0 ignition is a
-useful structural candidate before increasing inhibition everywhere. For example, an
-OR of the eight data-1 taps feeding one common ignition/hold circuit into the existing
-Z0 latch needs **4 neurons / 15 synapses including OR reset**, replacing **16 / 32**
-for the eight present relays: **-12 neurons / -17 synapses** in base mode per 8-bit
-Z generator. It adds the OR's rate-integration latency (order tens of ms for one active
-input; measure the actual completion impact). Reset the OR in Q's domain and verify
-one-shot behavior even for simultaneous inputs. This removes the observed multiple
+independent relays can ignite Z0 repeatedly. The implemented optional `zero_once`
+circuit in `lib/alu.py:add_zero_flag` uses an OR of the eight data-1 taps feeding one
+common ignition/hold circuit into the existing Z0 latch. It needs **4 neurons /
+19 synapses**, replacing **16 / 32** for the eight legacy relays: **-12 neurons /
+-13 synapses** in base mode per 8-bit Z generator. The nineteen include the OR reset,
+three resets for the relay and its two inhibitors, and the hold-inhibitor quench of
+the OR needed for re-arming at READY. It adds the OR's rate-integration latency
+(order tens of ms for one active input). `tests/test_zero_flag_once.py` measures
+latency and checks simultaneous inputs, Q-domain reset and reload at READY.
+This removes the observed multiple
 ignition paths, but **does not by itself prove the fast-latch clear margin**. A local
 calculation with base18's static latch draws and captured ignition times runs at 37
 steps after the burst versus 45 after just the first pulse; without the unrecorded
@@ -654,5 +656,6 @@ It is **blocked by the sandbox's denial of uv's default cache** at
 `~/.cache/uv/sdists-v9/.git`. The same tests **pass: 30 tests**, using the existing repository
 virtualenv, `uv run --no-sync`, a writable task-local `UV_CACHE_DIR` and pytest
 `--basetemp`, `PYTHONPATH` pointing at this worktree, and the required `TMPDIR`.
-`git diff --check` also passes. No netlist-building file is changed. Integration and committing remain with the
+`git diff --check` also passes. The original diagnostic commit changed no netlist-building
+file; the subsequent optional `zero_once` implementation is described above. Integration and committing remain with the
 orchestrator; no commit is attempted.

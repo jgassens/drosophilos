@@ -145,10 +145,12 @@ and the busy `idle[0]` latch continue in uninterrupted trains through capture en
 `creq[0]` holds and `creq[1]` remains dark after the listed tail spikes. Every
 target-cell Q fault gate and its fault latch is silent throughout the capture.
 
-The configured four-hop kill controller produces **five observed inhibitor spikes**
-on these particular copies; pulse count is a circuit setting, not an assertion
-that noise leaves exactly four output spikes. Their recorded `commit.kill.inh`
-trains are:
+The configured four-tap kill controller produces **five inhibitor spikes nominally**,
+including a trailing spike from residual charge. `add_kill_train(pulses=4)` and
+`add_reset(pulses=4)` both do this in noise-free RefSim; the fifth spike is not a
+noise-induced extra. Perturbations can suppress it (as in the request copy-28
+clear), so tap count does not guarantee output spike count. These copies' recorded
+`commit.kill.inh` trains are:
 
 | Copy / inhibitor ID | Spike steps |
 |---|---|

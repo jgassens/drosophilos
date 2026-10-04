@@ -27,6 +27,7 @@ CASES = [
     (0x01, [100] * WIDTH),
     (0x00, [100] * WIDTH),
 ]
+RELOAD_WORDS = (0xFF, 0x01, 0x00)
 
 
 def _circuit(zero_once, rate_robust):
@@ -58,34 +59,39 @@ def _period(trace, neuron, node):
     return float(np.median(np.diff(steady)))
 
 
+def _clear_and_reload(sim, drive, q, words):
+    for node in range(len(words)):
+        sim.add_events(node, [STOP], [q.reset_trigger], [drive.ignite])
+    ready = {}
+    while len(ready) < len(words) and sim.step_index < STOP + 1500:
+        before = len(sim._spk_step)
+        sim.step()
+        for k in range(before, len(sim._spk_step)):
+            for node, neuron in zip(sim._spk_node[k], sim._spk_neuron[k]):
+                if neuron == q.ready and int(node) not in ready:
+                    ready[int(node)] = int(sim._spk_step[k][0])
+                    _load(sim, drive, q, int(node), words[int(node)], [sim.step_index] * WIDTH)
+    assert len(ready) == len(words), ready
+    sim.run(4500)
+    return dict(reloaded=sim.trace, ready=ready, reload_words=words)
+
+
 @pytest.fixture(scope="module", params=[False, True], ids=["base", "rate_robust"])
 def captures(request):
     result = {}
     for once in (False, True):
         net, drive, q, drivers = _circuit(once, request.param)
-        sim = RefSim(net.topology(), PARAMS, n_nodes=len(CASES))
-        for node, (word, times) in enumerate(CASES):
+        words = [word for word in RELOAD_WORDS for _ in CASES]
+        sim = RefSim(net.topology(), PARAMS, n_nodes=len(words))
+        for node, (word, times) in enumerate(CASES * len(RELOAD_WORDS)):
             _load(sim, drive, q, node, word, times)
         sim.run(STOP)
         result[once] = dict(net=net, drive=drive, q=q, drivers=drivers, trace=sim.trace)
         if not once:
             continue
-        # Exercise the real four-pulse stage controller and reload at READY, not
+        # Exercise the real four-tap stage controller and reload at READY, not
         # after an arbitrary long recovery interval or a simulator state reset.
-        for node in range(len(CASES)):
-            sim.add_events(node, [STOP], [q.reset_trigger], [drive.ignite])
-        ready = {}
-        while len(ready) < len(CASES) and sim.step_index < STOP + 1500:
-            before = len(sim._spk_step)
-            sim.step()
-            for k in range(before, len(sim._spk_step)):
-                for node, neuron in zip(sim._spk_node[k], sim._spk_neuron[k]):
-                    if neuron == q.ready and int(node) not in ready:
-                        ready[int(node)] = int(sim._spk_step[k][0])
-                        _load(sim, drive, q, int(node), 0xFF, [sim.step_index] * WIDTH)
-        assert len(ready) == len(CASES), ready
-        sim.run(4500)
-        result[once].update(reloaded=sim.trace, ready=ready)
+        result[once].update(_clear_and_reload(sim, drive, q, words))
     return result
 
 
@@ -129,10 +135,12 @@ def test_stage_clear_leaves_both_z_members_dark_and_rearms_at_ready(captures):
             for member in rail.members:
                 steps = trace.neuron_steps(member, node)
                 assert not np.any((steps >= ready - 100) & (steps <= ready)), steps
-        assert len(_ignitions(trace, fixed["drivers"], node, ready, 12000)) == 1
-        for member in q.rails[Z_BIT][0].members:
+        word = fixed["reload_words"][node]
+        assert len(_ignitions(trace, fixed["drivers"], node, ready, 12000)) == int(word != 0)
+        expected_z = int(word == 0)
+        for member in q.rails[Z_BIT][expected_z].members:
             assert len(trace.neuron_steps(member, node)[trace.neuron_steps(member, node) > ready]) > 20
-        for member in q.rails[Z_BIT][1].members:
+        for member in q.rails[Z_BIT][1 - expected_z].members:
             assert not np.any(trace.neuron_steps(member, node) > ready)
 
 
@@ -149,8 +157,53 @@ def test_z_valid_and_completion_rise_for_both_words_without_faults(captures):
 
 
 @pytest.mark.parametrize("rate_robust", [False, True])
+def test_mix_b_style_reload_at_ready(rate_robust):
+    """Small seeded smoke: independent static draws and strays on every neuron.
+
+    This uses mix B's laws, not copy 18's draws or the CUDA stray stream, and
+    checks 24 two-word transfers per build rather than campaign reliability.
+    """
+    net, drive, q, drivers = _circuit(True, rate_robust)
+    topo = net.topology()
+    words = list(RELOAD_WORDS) * 8
+    rng = np.random.default_rng(108)
+    quanta = np.rint(topo.quanta[None, :] * np.exp(rng.normal(0, 0.04, (len(words), topo.nnz)))).astype(np.int32)
+    vth = PARAMS.V_th + rng.normal(0, 0.2, (len(words), topo.n))
+    bias = topo.sim_bias() + rng.normal(0, 0.2, (len(words), topo.n))
+    sim = RefSim(topo, PARAMS, n_nodes=len(words), quanta=quanta, V_th=vth, bias=bias)
+    # Geometric gaps implement the same per-step Bernoulli 5-Hz law; schedule
+    # background input before the probe so it continues across clear and reload.
+    for node in range(len(words)):
+        steps, neurons = [], []
+        for neuron in range(topo.n):
+            times = np.cumsum(rng.geometric(5 * PARAMS.dt / 1000, 32)) - 1
+            assert times[-1] >= 12000  # this seed's samples cover the whole run
+            times = times[times < 12000]
+            steps.extend(times); neurons.extend([neuron] * len(times))
+        sim.add_events(node, steps, neurons, [150] * len(steps))
+        _load(sim, drive, q, node, 0xD1, CASES[1][1])
+    sim.run(STOP)
+    initial = sim.trace
+    result = _clear_and_reload(sim, drive, q, words)
+    trace = result["reloaded"]
+    for node, ready in result["ready"].items():
+        assert len(_ignitions(initial, drivers, node)) == 1
+        assert len(_ignitions(trace, drivers, node, ready, sim.step_index)) == int(words[node] != 0)
+        for rail, latch in enumerate(q.rails[Z_BIT]):
+            for member in latch.members:
+                count = np.count_nonzero(trace.neuron_steps(member, node) > ready + 2000)
+                assert (count > 20) == (rail == int(words[node] == 0)), (node, words[node], rail, count)
+        assert np.any(trace.neuron_steps(q.valid[Z_BIT].u, node) > ready)
+        assert np.any(trace.neuron_steps(q.completion.u, node) > ready)
+        assert all(not len(trace.neuron_steps(fault, node)) for fault in q.fault)
+
+
+@pytest.mark.parametrize("rate_robust", [False, True])
 def test_shared_or_and_relay_are_in_the_stage_reset_domain(rate_robust):
     net, drive, q, _ = _circuit(True, rate_robust)
+    gate = net.roles.index("alu.z0.or")
+    hold = net.roles.index("alu.z0.ign.hold_inh")
+    assert any(net.src[k] == hold and net.quanta[k] < 0 for k in net.incoming[gate])
     for i, role in enumerate(net.roles):
         if role == "alu.z0.or" or role.startswith("alu.z0.ign."):
             assert any(net.src[k] == q.reset_inh and net.quanta[k] < 0 for k in net.incoming[i]), role

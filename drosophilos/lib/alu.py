@@ -18,7 +18,8 @@ one result latch. An unselected unit's outputs therefore never reach the result 
 The whole datapath is veto relays (protocol/celement.py::add_veto_relay) whose input order
 is fixed by delay chains: B is delayed before bx = SUB xor B, A enters through an operand
 gate ~70 ms after the load, and each carry is delayed before the next stage reads it. No
-rate-mode gate remains between the operands and the result (see add_alu_logic).
+rate-mode gate remains between the operands and the result (see add_alu_logic);
+the optional zero_once flag generator uses a shared rate-mode OR downstream.
 
 ISA mapping (isa/semantics.md): ADD = ADD.WRAP, SUB = SUB.WRAP with OVF = V; the ISA's
 compare results derive from SUB's flags (unsigned: lt = not C, eq = Z; signed: lt = Z==0
@@ -211,7 +212,7 @@ def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", ho
         # Once Z0 holds, also quiet the OR. An eight-input OR otherwise runs near
         # the refractory limit, accumulating enough source inhibition on the edge
         # to lose its next head-start race when a word arrives exactly at Q READY.
-        hold_inh = net.n - 1  # add_edge_relay's hold_from interneuron
+        hold_inh = net.roles.index(f"{name}0.ign.hold_inh", first_relay)
         net.synapse(hold_inh, gate, -int(round(2.2 * drive.loop)))
         # Include the relay and both inhibitors, not just the OR: no queued ignition
         # may escape the stage clear. The normal Q READY delay permits re-arming.
