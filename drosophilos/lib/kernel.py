@@ -283,7 +283,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    retry_clear: bool = False, start_relight_hops: int = 5,
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
                    true_guards: bool = True, relight_repair_delay: bool = True,
-                   copy_requires_rail: bool = True, rate_robust: bool = False) -> Pipeline:
+                   copy_requires_rail: bool = True, rate_robust: bool = False,
+                   zero_once: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -312,7 +313,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `rate_robust=True` gives rate-mode readers shared refractory-limited input taps and
     larger signal-to-background margin. It is opt-in: faster fault detection changes
     historical in-flight-fault timing, and campaign rollout is a separate experiment. Pass
-    `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place."""
+    `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place.
+    `zero_once=True` replaces per-bit Z0 ignition with a shared OR/one-shot in each
+    stage's reset domain, keeping nonzero results at the latch's nominal rate."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -645,7 +648,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             V = Rail2(G.latch(f"{name}.v0"), G.latch(f"{name}.v1"))
             G.veto(f"{name}.c0.g", act_d, [], C.r0)
             G.veto(f"{name}.v0.g", act_d, [], V.r0)
-            wire_alu(net, drive, R, C, V, Sc)  # acc' -> bits 0..n-1, C, Z, V
+            wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)  # acc' -> bits 0..n-1, C, Z, V
             wire_outputs(net, drive, Ad + Bd, Sc, list(range(n + 3, 3 * n + 3)))  # A, B carried along (delayed tokens)
             extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
             built.add(c.name)
@@ -779,7 +782,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             else:
                 U = _unit_rails(net, drive, f"{name}.u", c.op, G)
                 R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
-        wire_alu(net, drive, R, C, V, Sc)
+        wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)
         extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
         built.add(c.name)
 
@@ -880,6 +883,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "relight_repair_delay": relight_repair_delay,
         "copy_requires_rail": copy_requires_rail,
         "rate_robust": drive.rate_robust,
+        "zero_once": zero_once,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

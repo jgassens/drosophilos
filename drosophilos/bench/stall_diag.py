@@ -156,10 +156,11 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
+        zero_once = options.pop("zero_once", campaign.get("zero_once", False))
         strength = options.pop("kill_strength", None)
         if strength is not None:
             options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
-        pl = build(k, params, datapath, rate_robust=rate_robust, **options)
+        pl = build(k, params, datapath, rate_robust=rate_robust, zero_once=zero_once, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -197,6 +198,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
             copy_requires_rail=campaign.get("copy_requires_rail", legacy["copy_requires_rail"]),
             rate_robust=campaign.get("rate_robust", False),  # older captures used raw latch rates
+            zero_once=campaign.get("zero_once", False),  # older captures used per-bit Z0 edges
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )
