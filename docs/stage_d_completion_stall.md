@@ -1,5 +1,12 @@
 # Stage D completion stalls: seed 108, base 17/74 and rate-robust 11/24
 
+**2026-10-04 update:** an isolated reconstruction from each copy's static draws
+names the failing primitive for base 74, base 17 and RR 24: an old master rail
+survives the four-tap master reset, entrained like copy 28's request latch. It
+then blocks its valid latch's re-ignition. RR 11 is not reproduced. See
+"Isolated reconstruction from static draws" below; the text before that section
+is the original capture-only analysis.
+
 All four copies issue a **commit command**, clear their pending commit request, and
 produce master READY, but never produce DONE for that transaction. Their captured
 DONE inhibitors stop firing during the master rewrite and never resume. This points
@@ -385,3 +392,298 @@ The required nonempty-file check passed. A separate read-only assertion script
 also checks the sustained stage/COMMIT/busy trains, cleared pending requests,
 silent post-START DONE/READY/IDLE delay chains, master fault gates' absent control
 outputs, and both recapture regexes' counts and coverage of all missing domains.
+
+## Isolated reconstruction from static draws (2026-10-04)
+
+**Mechanism established for base 74, base 17 and RR 24; RR 11 is not reproduced.**
+In each of the three, one old **master rail latch survives the master's own reset**
+(`add_reset`, four taps × 0.75, inside `add_register`). It is the copy-28 failure
+class, now in the master. Each surviving latch is fast at that copy's draws. Strays
+throw it into a coincident 34–35-step mode, and that copy's reset controller drops
+its residual fifth inhibitor spike. The four arrivals then land just after both
+members fire, so the latch is **entrained, not killed**.
+
+The survivor keeps its master valid OR running. The reset kills the valid latch,
+and its one-shot ignition relay has not recovered by the time the OR restarts. That
+valid latch, the completion tree above it and W_M stay dark, and DONE never fires.
+
+Copy 74's survivor is `b3r0`, on a bit that flips 0→1. COPY then writes `b3r1`
+beside it, which reproduces the captured fault3 train. Copies 17 and 24 survive on
+unchanged bits, so their master fault gates stay silent, as captured. The device
+stray stream is not replayed. This shows the copies' static draws make the
+mechanism reproducible. It does not prove it was the event at the captured step.
+
+### Method
+
+The Stage D netlists were rebuilt from the repository with the records' build options:
+base 29,375 / 52,808, and RR v2 30,643 / 55,936. `make_perturbed_sim`'s host draws
+were regenerated with `default_rng(108)` and B = 100, in its order: weights `(100, nnz)`
+in topology edge order, then V_th, then bias. As an independent check, copy 28's
+request latch comes out at exactly the values pinned in
+`tests/test_request_clear_entrainment.py`: V_th −44.89665616330281 mV and `u→v` 4,050 q.
+
+Each failing cell was rebuilt from the real primitives:
+- `add_register` (11-bit stage),
+- `kernel._fault_latch`,
+- `add_staged_commit` with `ordered_grant=True` and `copy_requires_rail=True`,
+- for the state cell `c4_sel`, the power-up veto latch.
+
+That is 522 / 1,082 neurons/edges for `c4_sel`, 520 / 1,077 for `c5_sub` and
+604 / 1,267 for the RR cells. Draws are mapped by (source role, target role,
+delay). Every primitive edge has its kernel edge with identical nominal quanta,
+and the kernel has no other edge among these neurons. Outside inputs reach only
+the stage rails (ALU/Z output relays) and `commit_in`. **M, grant, COPY, its arms
+and DONE have no input from outside this path.**
+
+The words are the reference values (`kernel_outputs`) at the failing tick, located
+from the output cells' commit counts. Bits 8/9/10 are C/Z/V.
+
+| Copy / cell | Tick | Old master | New stage word | Bits that change |
+|---|---:|---|---|---|
+| base 17 `c4_sel` | 728 | 0 (Z) | 48 | 4, 5, 9 |
+| base 74 `c5_sub` | 323 | 197, C | 187, C | 1, 2, 3, 4, 5, 6 |
+| RR 11 `c10_xor` | 864 | 6 | 59 | 0, 2, 3, 4, 5 |
+| RR 24 `c2_sel` | 654 | 0 (Z) | 48 | 4, 5, 9 |
+
+Stimulus, in steps:
+- step 10: ignite the old master word (its power-up DONE clears the empty stage);
+- step 6,000 + U[0, 100] per rail: ignite the new stage word;
+- step 10,300 + U[0, 599]: one ignition event into `commit_in`;
+- run to step 17,400.
+
+Strays follow the mix-B law: Bernoulli 5 Hz × 150 q on every neuron. Noise-free,
+the path keeps the captured schedule. Commit → master READY is 1,593 steps for
+copy 17 (captured 1,597). READY → DONE is 2,538 steps (prior healthy capture 2,501),
+and 2,690 for copy 74 (captured 2,652).
+
+### Failure rates of the isolated path
+
+Each node replays its own `default_rng(seed)`, seeds 0–1,599: commit phase, load
+offsets and strays. A stall means no DONE in the ≥ 6,500 steps after commit;
+a healthy commit → DONE takes about 4,100–4,300 steps.
+
+| Copy | Own draws: stalls | Old-rail survivors (stalled / completed) | Nominal draws | Compact master reset, same seeds |
+|---|---:|---|---:|---:|
+| base 74 | **24 / 1,600** | 50 × `b3r0` (24 / 26) | 0 / 1,600 | **0 / 1,600** (no survivors) |
+| base 17 | **4 / 1,600** | 4 × `b8r0` (4 / 0) | 0 / 1,600 | 0 / 400 * |
+| RR 24 | **1 / 1,600** | 1 × `b6r0` (1 / 0) | 0 / 1,600 | 0 / 400 * |
+| RR 11 | 0 / 1,600 | none | 0 / 800 | — |
+
+\* A separate 400-realization set in which the shipped reset gave 6 (74), 1 (17)
+and 1 (24) stalls.
+
+Every stall shows the same pattern:
+- exactly one old rail is still firing at master READY;
+- that bit's valid latch is dark, along with the tree branch above it and W_M;
+- every selected copy arm fires and no opposite arm fires;
+- master fault activity appears only on copy 74's bit 3.
+
+In none of the realizations, at any setting, did COPY fail, an arm fail, a valid or
+tree latch survive, or master READY go missing.
+
+The 26 non-stalling copy-74 survivals commit with bit 3 **double-railed**: DONE
+fires while `b3r0` and `b3r1` both hold. The master fault gate has no control
+output, and the downstream effect is not modelled here.
+
+### The first break: reset survival
+
+Noise-free, the master reset inhibitor arrives at these offsets (steps after the
+first arrival):
+
+| Draws | Arrivals |
+|---|---|
+| nominal | 0/45/89/136/215 |
+| copy 17 | 0/49/96/140 |
+| copy 74 | 0/48/94/141 |
+| copy 24 | 0/49/98/147 |
+| copy 11 | 0/47/90/138/241 |
+
+As with copy 28's request clear, the tap count is not the arrival count.
+
+The three surviving latches. Nominal loop weight is 3,621 q, V_th −45 mV.
+
+| Latch | `u→v` | `v→u` | V_th u / v (mV) | Fast-mode share of strayed u intervals (≤ 38 steps) |
+|---|---:|---:|---|---:|
+| 74 `b3r0` | 3,833 (+5.9 %) | 4,083 (+12.8 %) | −45.46 / −44.78 | 16.8 % |
+| 17 `b8r0` | 4,105 (+13.4 %) | 3,811 (+5.2 %) | −44.70 / −45.38 | 1.7 % |
+| 24 `b6r0` | 3,644 (+0.6 %) | 4,153 (+14.7 %) | −45.35 / −44.77 | 42.9 % (coincident even noise-free) |
+| nominal | 3,621 | 3,621 | −45 / −45 | 0 % |
+
+In the survivor traces both members fire 2–6 steps apart at a 34–37-step period
+before the reset. Each arrival comes within 0–14 steps of a member spike, mostly
+just after both have fired, while they are refractory (22 steps). It therefore
+delays the pair instead of stopping it: copy 28's entrainment.
+
+**Reduced primitive.** The model is one `add_latch` plus the real `add_reset`, with
+role-mapped draws on all seven neurons. Strays hit every neuron, the reset comes at a
+random step in 3,000–4,999, and survival means the latch is still firing 150 ms after
+the reset. Results:
+- 74 `b3r0`: **221 / 40,000** (another 46 / 8,000).
+- 17 `b8r0`: **9 / 40,000** (another 29 / 40,000).
+- 24 `b6r0`: **42 / 40,000** (another 5 / 8,000).
+- Every other old rail of these words: 0 / 4,000.
+
+Swapping one parameter group to nominal (8,000 resets each):
+
+| Variant | 74 `b3r0` | 24 `b6r0` |
+|---|---:|---:|
+| copy draws | 46 | 5 |
+| nominal reset controller (five spikes) | 3 | 0 |
+| nominal fan-out weights | 30 | 23 |
+| nominal loop weights | 0 | 0 |
+| nominal latch V_th / bias | 0 | 0 |
+| all nominal | 0 | 0 |
+| compact master reset, copy draws | **0** | **0** |
+
+**The fragile parameters are the latch's loop weights together with its
+thresholds, which create the coincident fast mode. The controller draws that
+suppress the fifth inhibitor spike are also needed.** Neither alone suffices at
+these copies. Fan-out draws matter little.
+
+### Why a survivor blocks completion
+
+The master valid latch is re-ignited through `celement._ignite_from`. That edge
+relay fires once per OR activation, and each OR spike's edge inhibitor delivers
+2.2 × loop to it. The reset inhibits the OR gate, but a surviving rail restarts it.
+
+At copy 74's draws, with the old rail kept alive, the OR falls silent from +19 to
++574 steps after the trigger, a 555-step gap, and the relay never fires again. At
+nominal draws (five-spike reset) the gap runs from −61 to +674, 735 steps. The relay
+fires at +730, and the word completes.
+
+To test survivors directly, the reset's fan-out onto a single old rail was removed.
+The resulting forced survivor blocks completion on:
+- 4 / 11 bits for copy 17,
+- 6 / 11 for copy 74,
+- 5 / 11 for copy 11,
+- 10 / 11 for copy 24,
+- 0 / 11 at nominal draws (base words, and RR copy 11's word).
+
+The race depends on the draws. Base copies 17 and 74 block on no bit if their
+reset controller alone is made nominal. They also block on none if everything except
+their four-spike controller is made nominal. RR copy 11 blocks with five spikes. RR
+nominal draws with copy 24's four-spike controller block all 11 bits.
+
+Under strays the outcome varies: 26 of copy 74's 50 survivals re-lit valid3.
+Forced `b3r0` survival at copy 74's draws fires fault3 first at **master READY + 526**,
+then every **380–385** steps. The capture shows +528, then 382/383/385 steps.
+
+In copy 11's forced screen, surviving valid latches and internal tree latches never
+block. A surviving root would keep DONE's inhibitor firing, which the captures exclude.
+No valid- or tree-latch survivor appeared in any strayed realization.
+
+### RR copy 11: not established
+
+The forced-survivor screen shows which bits of copy 11's word could block. Flipping-bit
+survivors (`b2r1`, `b5r0`) would fire their conditioned RR fault gates, every 175–237
+steps, but the capture's master fault gates are silent. That leaves the unchanged bits
+`b7r0`, `b8r0` and `b9r0`. Each survives **0 / 40,000** reduced resets; the 95 % upper
+bound is 7.5 × 10⁻⁵ per reset.
+
+The whole path stalls in 0 / 1,600 realizations. Copy 11's controller keeps its
+fifth spike, even though `b7r0` spends 10.7 % of its strayed intervals in the fast
+mode. Either the same mechanism acts at a rate below these samples, or something
+outside the isolated path is responsible. The Juno recapture command above is
+still the way to settle copy 11.
+
+### Fix recommendation
+
+**Depth:** the staged master's reset train. Its kill margin is the first break.
+Do not "repair" the blocking half: re-arming the valid relay under a surviving
+old rail would convert these fail-stops into completions with a stale or
+double-railed master, which 26 / 1,600 copy-74 realizations already show.
+
+**Candidate:** an opt-in compact master reset that uses the
+`control.add_request_clear` form inside `add_register`, for staged masters only:
+- the trigger → relay1 → relay2 → relay3 links go from 18 to **0 steps** of delay;
+- inhibition onto every master **latch member** rises from 0.75 to **1.1 × loop**;
+- inhibition onto gates stays at 0.75.
+
+Isolated results:
+- full path: 0 / 1,600 stalls and 0 survivors for copy 74, on the seeds that gave 24 stalls;
+- reduced resets: 0 / 40,000 for each fragile latch (copy draws, compact reset);
+- inhibitor arrivals stay at four: nominal 0/43/81/138, copy 74 0/45/84/144, copy 24 0/48/89/149.
+
+**Reload:** COPY's rail ignitions arrive **976–992 steps after the trigger spike** at
+nominal and copy draws. All-phase reload bounds are on a 25-step grid with a nominal
+controller. They are measured from the trigger's input event, which precedes its
+spike, so the margins below are conservative:
+
+| Latch corner | Shipped reset | Compact reset |
+|---|---:|---:|
+| nominal | 675 | 650 |
+| loop −8 % / V_th +0.4 mV | 800 | 800 |
+| loop −12 % / V_th +0.6 mV | 925 | 900 |
+
+At the slow corner that leaves margins of **≥ +51** (shipped) and **≥ +76**
+(compact) steps. Noise-free master READY → DONE moves by at most ±45 steps.
+
+**Costs:**
+- **+0 neurons and +0 synapses.**
+- Per `tick2.c` build: 14 staged masters, 42 tap links set to 0 delay, and 1,214
+  latch-member fan-out edges strengthened from −2,716 to about −3,983 q.
+- The 288 gate edges are unchanged.
+- RR has 576 mirrored readout edges, and `mirror_inhibition` would scale them with
+  the fan-out (16 × gain). The evaluated candidate left them at shipped strength, so
+  that part is untested.
+- No added hops: master READY is the fixed 15-hop chain from the trigger.
+- Pinned netlist hashes move, and campaigns must be compared by per-seed totals.
+
+**Existing opt-ins:**
+- `zero_once` changes only Z0 ignition.
+- `robust_request_clear` changes only DONE-side request k1 trains; the master reset is untouched.
+- `rate_robust` does not cover it: copies 11 and 24 are RR builds, and RR leaves latches and resets unchanged.
+
+Only a compact or stronger master clear addresses the break. A plain ordinary
+4 × 1.0 master train was not evaluated here; the request analysis found that form
+loses slow-corner reload.
+
+**Qualification still needed:**
+- the noisy kernel campaign on Juno (seeds 108–110, both builds);
+- stage and other register resets, which are untouched;
+- `test_machine.py`, `test_mul_diag.py` and the build-option hash tests.
+
+### Regression test
+
+`tests/test_completion_stall.py` rebuilds both netlists in about a second; no external
+data is needed. The fast tests take about 17 s:
+- **Path match:** for all four copies, the role-mapped primitive path exactly matches
+  the kernel's subgraph and its only outside inputs.
+- **Inhibitor spike counts:** four for copies 17, 74 and 24; five for copy 11 and nominal.
+- **Noise-free commit:** copy 74's path commits on the captured schedule.
+- **Forced survivor:** at copy 74's draws, a forced `b3r0` survivor blocks DONE, leaves
+  valid3 dark and fires fault3 with the captured timing. At nominal draws the same
+  survivor completes.
+- **Replay:** seed 23 stalls through `b3r0` at copy 74's draws; the identical stimulus
+  and strays at nominal draws commit.
+- **Reduced reset:** 2,000 strayed resets give 8 survivors at copy 74's draws, 0 at
+  nominal, and 0 with the compact candidate.
+
+A slow test (`-m slow`) repeats 400 full-path realizations for copies 74 and 17.
+At their own draws, every stall must have exactly one surviving old rail and that
+bit's valid latch dark. Nominal draws must give no stalls.
+
+### What the isolated model cannot establish
+
+- **Not a replay of the stall itself.** The CUDA stray stream, the captured reset
+  phase and the master trains at the stall are not replayed; the master rails are
+  unrecorded. The only direct link to a capture is copy 74's fault3 onset and period.
+- **Rates.** Rates are for the failing word pair only; other words light other rails.
+  They are not calibrated against the campaign's per-transaction frequency. Suppose
+  each copy's full-path rate applied to every earlier transaction. The chance of
+  reaching the failing tick without a stall would then be about 0.8 % (copy 74,
+  tick 323), 16 % (copy 17, tick 728) and 66 % (copy 24, tick 654). Copy 74's
+  average rate over other words must be lower; that is not measured.
+- **Stage word.** The stage word is ignited ideally. Arm qualification never failed
+  here, but the ALU relays' real timing is not modelled.
+- **Copy 11.** Its stall remains unexplained.
+- **The compact master reset.** It is evaluated only on this path and a single-latch
+  reload probe. Kernel-wide noise, the RR readout clears at scale, and its interaction
+  with the stage reset and readers are unqualified.
+- **Double-railed commits.** Their downstream consequence is not modelled.
+
+Commands run:
+
+```text
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_completion_stall.py
+```
