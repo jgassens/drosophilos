@@ -9,7 +9,9 @@ candidate/reload tables and the 40,000-clear strayed qualification per corner.
 import numpy as np
 import pytest
 
-from drosophilos.lib.kernel import build_pipeline, run_pipeline
+from drosophilos.bench.a2_campaigns import MIXES
+from drosophilos.lib.campaign import make_perturbed_sim
+from drosophilos.lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
 from drosophilos.lib.control import add_kill_train
 from drosophilos.protocol.celement import add_delay_chain
 from drosophilos.sim.ref64 import RefSim
@@ -187,6 +189,53 @@ def test_small_kernel_computes_and_reloads_with_robust_requests(rate_robust):
     assert [value for _, value in outputs] == [1, 2, 0]
     assert stats["faults"] == stats["timeouts"] == stats["bad_outputs"] == 0
     assert not stats["refusals"]
+
+
+@pytest.mark.parametrize("options, requirement", [
+    ({"start_relight_hops": 0}, "start_relight_hops=5"),
+    ({"start_relight_hops": 4}, "start_relight_hops=5"),
+    ({"start_relight_hops": 6}, "start_relight_hops=5"),
+    ({"relight_repair_delay": False}, "relight_repair_delay=True"),
+    ({"true_guards": False}, "true_guards=True"),
+])
+def test_robust_clear_rejects_unqualified_relight_settings(options, requirement):
+    with pytest.raises(ValueError, match=f"robust_request_clear requires.*{requirement}"):
+        build_pipeline(PARAMS, 1,
+                       [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}],
+                       consts={"zero": 0}, robust_request_clear=True, **options)
+
+
+@pytest.mark.parametrize("zero_once", [False, True])
+@pytest.mark.parametrize("noisy", [False, True], ids=["nominal", "mix_B"])
+def test_fanout_join_kernel_computes_and_reloads_with_robust_requests(zero_once, noisy):
+    """Four cells exercise inter-cell requests, fanout, join and zero/nonzero reloads.
+
+    The noisy case uses three independent mix-B copies (weight, threshold, bias
+    and seeded 5 Hz strays), rather than qualifying a full Stage D campaign.
+    """
+    spec = [{"name": "c1", "op": "ADD", "a": "input", "b": ("const", "one")},
+            {"name": "c2", "op": "AND", "a": "c1", "b": ("const", "mask")},
+            {"name": "c3", "op": "XOR", "a": "c1", "b": ("const", "flip")},
+            {"name": "c4", "op": "ADD", "a": "c2", "b": "c3"}]
+    pl = build_pipeline(PARAMS, 4, spec, consts={"one": 1, "mask": 5, "flip": 3},
+                        outputs=[cell["name"] for cell in spec], rate_robust=True,
+                        robust_request_clear=True, zero_once=zero_once)
+    tokens = [0, 2, 15]  # c1 wraps to zero; c3 also transitions through zero
+    expected = {"c1": [1, 3, 0], "c2": [1, 1, 0], "c3": [2, 0, 3], "c4": [3, 1, 3]}
+    copies, max_ms = (3 if noisy else 1), 12000
+    if noisy:
+        sim = make_perturbed_sim(pl.net.topology(), PARAMS, copies, MIXES["B"],
+                                 np.random.default_rng(108), int(max_ms / PARAMS.dt),
+                                 device="cpu", backend="torch-fast")
+    else:
+        sim = RefSim(pl.net.topology(), PARAMS)
+    outputs, _, stats = run_pipeline_batched(
+        pl, PARAMS, [tokens.copy() for _ in range(copies)], sim=sim, max_ms=max_ms,
+        expect_outputs=[len(tokens) * len(spec)] * copies, progress=0)
+    for node in outputs:
+        assert {name: [value for _, value in events] for name, events in node.items()} == expected, stats
+    assert stats["faults"] == stats["timeouts"] == stats["bad_outputs"] == stats["refusals"] == 0
+    assert not stats["blocked_nodes"] and not stats["host_stalls"] and not stats["truncated"]
 
 
 @pytest.mark.slow

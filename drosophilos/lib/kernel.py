@@ -318,7 +318,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     stage's reset domain, keeping nonzero results at the latch's nominal rate.
     `robust_request_clear=True` uses the compact four-tap request-only clear:
     1.1-loop inhibition and zero-delay tap links. It requires the standard
-    request-priority policy, four configured taps, 0.75 base kill strength and
+    request-priority policy, four configured taps, 0.75 base kill strength,
+    start_relight_hops=5, relight_repair_delay=True, true_guards=True and
     no retry_clear; the other kill trains and handshake delays are unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
@@ -328,9 +329,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                     rate_robust=rate_robust)
     request_clear_pulses = drive.kill_pulses if request_clear_pulses is None else request_clear_pulses
     if robust_request_clear and (not relight_requests or retry_clear or
-                                 request_clear_pulses != 4 or drive.kill_strength != 0.75):
+                                 request_clear_pulses != 4 or drive.kill_strength != 0.75 or
+                                 start_relight_hops != 5 or not relight_repair_delay or not true_guards):
         raise ValueError("robust_request_clear requires relight_requests, four request taps, "
-                         "kill_strength=0.75 and retry_clear=False")
+                         "kill_strength=0.75, start_relight_hops=5, relight_repair_delay=True, "
+                         "true_guards=True and retry_clear=False")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
