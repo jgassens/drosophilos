@@ -334,3 +334,325 @@ stage, but neither failed transaction reaches commit; disabling it would not rep
 observed path. `rate_robust` changes fault/completion readers and their reset coupling
 and must be tested as a different netlist; its existence is not evidence for a fast-rail
 trigger here. Preserve these protections while collecting the missing evidence.
+
+## Recapture (2026-10-04)
+
+This section supersedes the unresolved base-copy mechanisms and deferred fix decision
+above. **Base 18 retains Z0 through its preceding stage clear; base 34 falsely faults
+on a fast, single-railed Z0.** The two rate-robust datapath stalls are on different
+bits and need further capture; neither establishes a Z failure.
+
+### Artifacts and scope
+
+Read-only inputs are under
+`/Users/jeremiahgassensmith/programming/drosophilos/data/stage_d/`. Each NPZ was loaded
+with `stall_diag.load_dump` against the pipeline rebuilt from its JSON. All four have
+**zero role/ID drift**. The base rebuild is 29,375 neurons / 52,808 synapses, matching
+09f2a01/ad4046d; the rate-robust v2 rebuild is 30,643 / 55,936. Both retain true guards
+v2, `copy_requires_rail`, and the recorded four-pulse, 0.75-strength kernel policy.
+
+| JSON / NPZ prefix (`mixB_s108_c100_…`) | Copy | Inclusive steps | Spikes | Selected IDs |
+|---|---:|---|---:|---:|
+| `dp18` / `dp18_copy18.npz` | 18 | 0–299,999 | 9,606,850 | 8,854 |
+| `dp34` / `dp34_copy34.npz` | 34 | 1,611,372–2,049,999 | 11,676,009 | 9,003 |
+| `rr_replay870` / `rr_replay870_copy34.npz` | 34 | 33,780,223–35,904,403 | 36,339,748 | 6,037 |
+| `rr_replay870` / `rr_replay870_copy43.npz` | 43 | 25,302,390–27,426,543 | 43,670,231 | 6,037 |
+
+The base files occupy **77,991,713 / 94,561,641 bytes**, including role tables. Their
+shorter budgets end at `max_ms`, before the stall watch freezes them. The START, ACT^d,
+fault and preceding-clear times agree with the original replay. This is a truncated
+capture of an independently localized persistent blockage, not a stall inferred from
+the time limit. The rr windows did freeze, 100,000 steps after detection. All steps
+below are 0.1 ms. Synaptic weights below are **nominal quanta** unless explicitly
+identified as reconstructed static draws; every listed synaptic delay is **18 steps**.
+
+### Base 18: Z0 survives clear; the returning OR cannot re-arm its ignition
+
+The first c3 result is nonzero. Four independent Z0 drivers fire at **48,207 (14517,
+R6), 48,208 (14505, R0), 48,211 (14519, R7), and 48,220 (14513, R4)**. Each has a
+`+4655` edge into Z0 u **2555**. This is four ignition pulses into one latch, although
+each individual driver's edge relay fires only once. Z0 first fires at **48,233**,
+then **48,262**; its partner **2556** first fires at **48,283**. Before clear, both
+members reach a **35-step period**, against the nominal 47.
+
+| Event | Captured evidence |
+|---|---|
+| DONE / stage reset trigger | **3055: 55,558** → `+4655` → **2700: 55,600** |
+| Stage reset inhibitor | **2701: 55,661; 55,718; 55,772; 55,834** |
+| Inhibition delivered to Z0 u/v | `-2716` on each member, at **55,679; 55,736; 55,790; 55,852** |
+| Z0 u through and after clear | **55,615; 55,650; 55,690; 55,731; 55,782; 55,852; 55,961; 56,032; 56,090; 56,142** |
+| Z0 v through and after clear | **55,612; 55,647; 55,685; 55,727; 55,780; 55,890; 55,996; 56,062; 56,118; 56,169** |
+| Z-valid latch really stops | **2627** last **55,705**; **2628** last **55,669** |
+| Z-valid OR / source inhibitor return | **2626: 55,608 → 56,316**; **2630: 55,652 → 56,363** |
+| READY | **2721: 56,432**, while Z0 is still live |
+
+The Z0 members have single train intervals **48,233–299,961 (5,762 spikes)** and
+**48,283–299,986 (5,758 spikes)**. Their largest gaps across clear are **109 / 110
+steps**, followed by recovery to roughly 45-step periods. The spike at 55,852 precedes
+that step's synaptic delivery in the simulator; the later spikes prove survival beyond
+the final pulse. Neither Z1 member **2557/2558** fires. All eight Z0 ignition edges are
+silent between the initial burst and transaction 2's result; the next is **14509 at
+103,403**. Thus no captured Z driver re-lights a cleared latch. The latch continues
+through the clear, supported by the reciprocal `2555 ↔ 2556` **+3621** loop. Background
+input is not recorded, so this does not exclude its contribution to the survival margin.
+
+The reset clears the validity latch and temporarily suppresses its OR, while leaving
+the OR's Z0 input alive. That distinction explains the later ignition failure:
+
+```text
+surviving Z0 2555 -- +766 --> OR 2626 -- +4655 --> ignition 2629 -- +4655 --> valid u 2627
+                                |
+                                +-- +3621 --> inhibitor 2630 -- -7966 --> 2629
+valid u 2627 -- +3621 --> hold inhibitor 2631 -------------------  -905 --> 2629
+reset 2701 -- -2716 --> OR 2626 and valid members 2627/2628
+```
+
+**2629 is not a direct reset target.** It retains inhibition accumulated during the
+old gate train. At the first returning OR spike, the source inhibitor has been quiet
+for only 664 steps (66.4 ms), and the hold inhibitor for 537 steps (53.7 ms). Its last
+hold-inhibitor spike is **55,779**. The returning excitation arrives at **56,334**;
+fresh source inhibition arrives at **56,381**, before ignition succeeds. Thereafter
+the surviving Z0 keeps the OR and source inhibitor firing, so the missed first edge
+does not get a fresh recovery interval. The hold inhibitor remains silent.
+
+A small receiving-neuron calculation checks this explanation without claiming a CUDA
+replay. Reconstructing `make_perturbed_sim`'s static draws with seed 108, **B=100** and
+the full base topology gives 2629 input quanta **+4490 / -8027 / -915**, threshold
+**-45.102508 mV**, bias **-0.108463 mV**. Prescribe its captured input spikes, including
+the 18-step delays, to RefSim from step 47,000, omitting target strays. It reproduces
+the initial ignition at **48,420** and none after clear. At 56,316 its modeled voltage
+is **-57.548 mV**; just before the new inhibition takes effect it reaches only
+**-45.750 mV**, below threshold. Remove the preceding input history while keeping the
+same returning OR/inhibitor spikes, and it fires at **56,359**. These voltages are
+model calculations, not recorded measurements; the captured absence of 2629 and the
+inhibitory spike arrivals are the direct evidence.
+
+At transaction-2 ACT^d **102,170**, the captured operand rails encode **30 and 200**
+exclusively. The data rails subsequently encode **214**, C=V=0; Z0 is still the old
+survivor. Z-valid never returns, the C/Z completion join stays dark, and no commit,
+DONE or fault follows. The root problem is **failed stage clear followed by one-shot
+re-arm failure**, not a missing Z computation at transaction 2 or a request-clear train
+targeting Z. Increasing the validity relay's drive alone would conceal surviving state.
+
+### Base 34: a false Z fault discards a correctly forming SUB
+
+The captured source masters at ACT^d **1,909,917** encode A=**64**, B=**66**,
+exclusively. The partial result agrees with `64 - 66 = 254`. Z0 u/v **3709/3710**
+start at **1,911,587 / 1,911,641**; **both Z1 members 3711/3712 and its sole driver
+16880 are silent throughout the failed transaction**. The data completion subtree
+has not completed, so there is no valid zero-result ignition waiting behind it.
+
+The Z0 driver path is the same eight-way fan-in as c3's, now fed by a ripple:
+
+| Data-1 rail u | Rail first spike | Z0 driver | Driver spike → arrival at 3709 |
+|---|---:|---:|---|
+| R2, **3683** | 1,911,507 | **16887** | **1,911,549 → 1,911,567** |
+| R1, **3679** | 1,911,607 | **16885** | **1,911,652 → 1,911,670** |
+| R3, **3687** | 1,911,853 | **16889** | **1,911,892 → 1,911,910** |
+| R4, **3691** | 1,912,200 | **16891** | **1,912,239 → 1,912,257** |
+
+Each rail drives its edge at **+4655**, its source inhibitor at **+3621**, and that
+inhibitor returns **-7966** to the edge. Each edge supplies **+4655** to 3709, in
+addition to the **+3621** reciprocal Z0 loop. Thus later result bits deliver extra
+ignitions to an already-live Z0. Its u spikes before the fault include:
+
+```text
+1,912,000  036  072  108  144  180  216  252  283  315
+          (same 1,912, prefix; final intervals 31 and 32 steps)
+```
+
+Fault gate **3786** receives **+211** from each of **3709 and 3711**, with no other
+netlist inputs. Only 3709 supplies spikes. The fault at **1,912,340** occurs seven
+integration steps after its **1,912,315 → 1,912,333** arrival. This is a **false
+rate-mode AND fault on a single rail**, not a real double rail. At 32-step periods a
+single nominal 0.55-rate input contributes roughly `0.55 × 47/32 = 0.81` of the
+nominal sustained threshold need, reducing its background-input margin.
+
+The dump does **not** locate a particular stray pulse. A calculation using the static
+copy-34 draws (Z0→fault **206 q**, Vth **-45.415768 mV**, bias **+0.646589 mV**) and
+captured rail inputs without background reaches only about **-46.540 mV** before
+the fault. The fast rail alone is therefore not a demonstrated sufficient trigger.
+The regression explicitly adds *synthetic* background arrivals to demonstrate this
+false-fault class, rather than inventing observed stray times or a transient Z1 rail.
+
+The discard is now directly captured:
+
+| Path/event | Wiring and step evidence |
+|---|---|
+| Fault → FAULT | **3786 → 3894**, +4655; FAULT u **1,912,381; 1,912,460**, v **1,912,434** |
+| FAULT → stage reset | **3894 → 3854**, +4655; trigger **1,912,422**; **3894 → 3856**, +3621, supplies its edge inhibitor |
+| Reset train | **3855: 1,912,476; 1,912,522; 1,912,568; 1,912,614; 1,912,717** |
+| First inhibition reaches reset targets | **1,912,494**, -2716 into both stage-rail/valid-latch members and resettable ALU state |
+| R4 validity attempt | edge **3748: 1,912,502**, +4655 arrives at **1,912,520** amid the clear; valid members **3746/3747** stay silent |
+| R5 result attempt | edge **16859: 1,912,483**, +4655 arrives at **1,912,501**, after the first clear; rail members **3695/3696** stay silent |
+| Stage READY | **3875: 1,913,270** |
+
+The reset controller has four wired taps (trigger and three relays, each **+3621**
+into 3855); it emits **five observed inhibitor spikes**, so the table reports actual
+events rather than imposing the nominal pulse count. R4's data rail did fire before
+the fault; its missing validity is not evidence of a missing R4 computation. The
+reset's 453 inhibitory targets include the partial ripple, ACT, FAULT and staged
+commit state. FAULT also directly suppresses completion and grant at **-5432**.
+No commit was in flight, no master COPY occurred, and no new START follows. This is
+an internal-cell discard with no retry, distinct from the old empty-stage COPY race.
+
+### Rate-robust 34 and 43: different observed bit failures; initiators unresolved
+
+| Copy / cell | Established from the default-role dump | What it does not establish |
+|---|---|---|
+| rr34 / `c10_xor`, tx5 | START **8134: 34,029,813**; ACT^d **24651: 34,030,394**. **R3 fault 7553** fires **34,031,982**; FAULT **7737/7738** rises **34,032,023 / 34,032,073**. All eleven validity indicators rise then stop; READY **7718: 34,032,896** follows. Z-valid **7600** fires **34,031,979; 34,032,068; 34,032,135**; Z fault **7607** is silent. | The R3 data rails, rate readouts and reset spikes are omitted. A true double rail, erroneous reader activity and a false conditioned fault remain distinguishable only by recapture. |
+| rr43 / `c8_sub`, tx5 | START **6812: 25,583,794**; ACT^d **22180: 25,584,355**. Only **R1** fails validity. OR **6205**, valid **6206/6207**, ignition **6210**, source inhibitor **6211**, hold inhibitor **6212** are all silent after START. All fault gates and FAULT **6415/6416** are silent. Z-valid **6278** holds **25,586,337–27,426,517**. | Both R1 rails, their output relays, rate readers and upstream computation are omitted. Silence of the OR cannot locate the failure in the arithmetic, output ignition, rail storage or readout. |
+
+For rr34, the relevant inputs are **R3 r0 7486/7487** and **r1 7488/7489**,
+driven by output edges **26456/26458**. Their rate taps **7548/7549** each receive
+**+28968** from the respective u rail and **-43456** from stage reset **7698**.
+These taps, not the raw rails, drive fault **7553** at **+264** each and valid OR
+**7545** at **+814** each. Both gates have nominal bias **-7 mV** (the doubled-gap
+reader). R3's OR accelerates to 52-step intervals while neighbouring ORs are roughly
+90–116 steps apart: useful evidence of excess drive, **not proof of two data rails**.
+FAULT → reset **7697** is +4655; reset-inhibitor **7698** feeds the stage reset
+domain, including the already-present v2 reader-clear mirrors.
+
+For rr43, the analogous chain is mux u **23709/23726** → output edge **23977/23979**
+→ R1 u **6156/6158**, with **+4655** on each link. Rail partners are **6157/6159**.
+Rate taps **6208/6209** receive +28968 from the rails and -43456 from reset **6376**;
+they drive OR **6205** at +814 and fault **6213** at +264. The OR-to-ignition path
+has the same +4655 / -7966 / -905 structure as base18, but here **the OR and both
+inhibitors are silent**, unlike base18's live OR/source inhibitor. The failure is
+upstream of a usable R1 validity signal; it is not evidence for that Z-valid re-arm
+mechanism. No primitive fix is recommended for either rr initiator yet. rr34 shares
+base34's *fault/discard sequence*, not an established cause of the fault.
+
+### Exact rr recaptures and expected sizes
+
+Use the recorded **rate-robust v2 netlist**, torch-fast/CUDA/float64 and **100 copies**.
+These budgets retain the preceding transaction and the failed computation while
+shortening the blocked tail. They leave the default 30 s pre-commit / 10 s post-stall
+window settings intact; `max_ms` will arrive before the inferred stall watch plus
+post-window, so an unfrozen, resource-truncated record is expected. Do not switch to a
+single-copy run or compare neuron IDs with the base build.
+
+```sh
+python -m drosophilos.bench.stage_d --ticks 610 --seed 108 \
+  --backend torch-fast --device cuda --copies 100 --mix B --rate-robust \
+  --max-ms 3430000 --dump-copies 34 \
+  --dump-roles '\.(req\.|relight|start$|actd\.|idle|creq|autocommit|commit|done|kill|Q\.comp|Q\.valid|fault|ready|go\.)|^(?:c10_xor\.|(?:c9_sel|c4_sel)\.M\.|out\.|alu\.z)' \
+  --dump-out data/stage_d/mixB_s108_c100_rr_dp34 \
+  --out data/stage_d/mixB_s108_c100_rr_dp34.json
+
+python -m drosophilos.bench.stage_d --ticks 460 --seed 108 \
+  --backend torch-fast --device cuda --copies 100 --mix B --rate-robust \
+  --max-ms 2580000 --dump-copies 43 \
+  --dump-roles '\.(req\.|relight|start$|actd\.|idle|creq|autocommit|commit|done|kill|Q\.comp|Q\.valid|fault|ready|go\.)|^(?:c8_sub\.|c9_sel\.M\.|K\.k2\.|out\.|alu\.z)' \
+  --dump-out data/stage_d/mixB_s108_c100_rr_dp43 \
+  --out data/stage_d/mixB_s108_c100_rr_dp43.json
+```
+
+The regexes include **every signal in the respective 2,179-neuron datapath view**,
+including raw rails and `.rate` readouts. Repeated `out.*` and `alu.z*` roles remain
+disambiguated by their incoming edges. Expected **uncompressed** planning sizes are
+roughly **0.1–0.4 GB per copy**; reserve at least **0.5 GB each**, with extra memory
+for the writer's array copies. The following estimate assumes *every* added ordinary
+neuron fires once per 47 steps and every added rate tap once per 25 steps:
+
+| Copy | Selected / added IDs (added rate taps) | Expected retained steps | Measured existing-filter payload in that interval | Added-payload estimate | Total estimate |
+|---|---|---|---:|---:|---:|
+| rr34 | 9,514 / 3,477 (148) | 33,780,223–34,299,999 | 75.98 MB | 319.14 MB | ~0.40 GB |
+| rr43 | 9,326 / 3,289 (106) | 25,302,390–25,799,999 | 79.75 MB | 286.48 MB | ~0.37 GB |
+
+Many opposite rails and inactive ALU arms will be silent. These are estimates, not hard
+bounds on fast/noisy firing; int32 steps plus neuron IDs cost eight bytes per spike.
+The commands have not been run here. No additional spike-role recapture is needed to
+distinguish survival versus re-lighting in base18 or single versus double rail in base34.
+
+### Fix recommendations supported by these captures
+
+**Base18 needs a storage-clear margin fix, not a control-guard or validity-OR repair.**
+The responsible primitive is `protocol/latch.py:add_reset`, used by the staged register
+in `protocol/handshake.py:add_register`. It already defaults to four taps independently
+of `Drive.kill_pulses`: merely changing `kernel_kill_pulses` would not fix this reset.
+Qualify the stage clear against the observed 35-step, multiply-ignited Z0 state and
+weak/independent clear edges. A **stage-only trailing fifth tap** is a concrete first
+candidate: **+1 neuron / +2 synapses per affected reset controller**, using the same
+inhibitor fan-out, and about **one pulse-hop (~5.3 ms)** more clear time. If reload
+recovery requires one extra READY hop, that adds **+1 neuron / +1 synapse** and ~5.3 ms
+to READY. These are design costs, **not evidence that five pulses suffice**; select the
+train only after the phase/reload regression below. Do not globally strengthen the
+machine's three-pulse clears or shorten READY based on this copy.
+
+`lib/alu.py:add_zero_flag` also supplies a concrete source of extra drive: eight
+independent relays can ignite Z0 repeatedly. A shared, once-per-word Z0 ignition is a
+useful structural candidate before increasing inhibition everywhere. For example, an
+OR of the eight data-1 taps feeding one common ignition/hold circuit into the existing
+Z0 latch needs **4 neurons / 15 synapses including OR reset**, replacing **16 / 32**
+for the eight present relays: **-12 neurons / -17 synapses** in base mode per 8-bit
+Z generator. It adds the OR's rate-integration latency (order tens of ms for one active
+input; measure the actual completion impact). Reset the OR in Q's domain and verify
+one-shot behavior even for simultaneous inputs. This removes the observed multiple
+ignition paths, but **does not by itself prove the fast-latch clear margin**. A local
+calculation with base18's static latch draws and captured ignition times runs at 37
+steps after the burst versus 45 after just the first pulse; without the unrecorded
+background it clears successfully in both cases, so it is not a replay of the survivor.
+
+**Base34 supports fixing the rate reader at `protocol/celement.py:add_and_gate` /
+`protocol/rate.py`, preserving true-double-rail detection.** The existing v2
+`rate_robust` design is the concrete candidate: refractory-limited, reset-coupled taps
+prevent one fast latch from counting as an extra logical input. For an isolated Z
+fault/valid reader pair with two previously unconditioned rails and one reset source,
+this costs **+2 neurons / +4 synapses** (two source→tap and two mirrored resets;
+existing gate-input edges are rewired), plus an extra 18-step synaptic hop and tap
+charging time. End-to-end gate latency changes with integration and must be measured.
+Enabling the existing whole Stage-D option costs **+1,268 neurons / +3,128 synapses**;
+it is not a claim that the same noisy copy will then pass or that every false fault
+is eliminated. rr34 is a reason to inspect the conditioned circuit, not evidence that
+its fault had the same fast-single-rail trigger.
+
+These proposals preserve true-rail guards, **4 × 0.75 kernel/request kill trains**,
+**3 × 0.75 machine trains**, and `copy_requires_rail`. The optional fifth stage-reset
+tap is a separate, explicitly scoped experiment. START/ACT^d succeeded in every case;
+the relevant START kills target IDLE/request state. `copy_requires_rail` protects a
+later COPY but cannot restore a stage discarded before commit. With `rate_robust`,
+additional stage clear pulses must also reach the existing mirrored reader resets;
+readout conditioning does not change the underlying storage loop or guarantee its
+clear. Any shared Z0 OR must likewise be conditioned/reset consistently in that mode;
+the base-mode reduction cost above excludes newly needed rate taps.
+
+### Regression and validation
+
+No diagnostic extension is needed: `datapath_view` already exposes both rail members,
+all signed inputs, reset targets, availability and train intervals. Use the preceding
+START as its lower bound when inspecting a clear; a view beginning at the failed
+START alone cannot explain the old Z survivor.
+
+Two small RefSim regressions were added to `tests/test_datapath_stall.py`:
+
+- Feed the recorded 55,000–57,000 OR/source-inhibitor/hold-inhibitor arrivals into the
+  base18 ignition neuron with its reconstructed static parameters. It stays silent;
+  the same returning inputs without prior history produce an ignition. This tests
+  residual inhibition independently of the missing full-copy background stream.
+- Feed only base34's recorded fast Z0 train into its fault neuron. Three **synthetic**
+  150-q arrivals at 1,912,225/235/245 make it fire. Removing those arrivals, or using
+  a 47-step rail with the same arrivals, leaves it silent. This demonstrates the lost
+  single-rail margin; those stray times are not claimed as captured evidence.
+
+A future fix regression must additionally build the actual Z/valid/reset primitives,
+exercise the four near-simultaneous c3 ignition pulses and the staggered c5 ripple
+pulses, sweep clear phase and independent loop/clear noise, and require **both Z
+members dark before READY**, successful validity/completion after reload, and no
+false fault. Test one fast rail plus background **and** two slow opposite rails;
+silencing the fault detector is not a fix. Retain the true-guard, COPY, machine
+three-pulse and kernel four-pulse suites. Full seed-108 verification still requires
+the 100-copy CUDA run; a small RefSim corner cannot reproduce its device stray stream.
+
+The required command was attempted:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_stall_diag.py tests/test_datapath_stall.py
+```
+
+It is **blocked by the sandbox's denial of uv's default cache** at
+`~/.cache/uv/sdists-v9/.git`. The same tests **pass: 30 tests**, using the existing repository
+virtualenv, `uv run --no-sync`, a writable task-local `UV_CACHE_DIR` and pytest
+`--basetemp`, `PYTHONPATH` pointing at this worktree, and the required `TMPDIR`.
+`git diff --check` also passes. No netlist-building file is changed. Integration and committing remain with the
+orchestrator; no commit is attempted.

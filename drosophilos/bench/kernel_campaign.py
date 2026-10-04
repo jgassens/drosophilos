@@ -30,7 +30,8 @@ def _upper95(errors: int, n: int) -> float:
     return float(beta.ppf(0.95, errors + 1, n - errors)) if n else float("nan")
 
 
-def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: bool = False):
+def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: bool = False,
+          zero_once: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -56,7 +57,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
         raise SystemExit(name)
     width = prog.width if prog is not None else ks.width
     pl = build_pipeline(params, width, ks.cells, consts=ks.consts, mems=ks.mems,
-                        outputs=ks.outputs, datapath=datapath, rate_robust=rate_robust)
+                        outputs=ks.outputs, datapath=datapath, rate_robust=rate_robust,
+                        zero_once=zero_once)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -76,6 +78,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--zero-once", action="store_true",
+                    help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--out", default=None)
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
@@ -88,7 +92,8 @@ def main(argv=None):
     ap = parser()
     a = ap.parse_args(argv)
     P = Params()
-    ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust)
+    ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust,
+                              zero_once=a.zero_once)
     B = a.copies
     dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
     if any(dump_given) and not all(dump_given):

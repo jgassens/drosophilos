@@ -38,6 +38,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "relight_repair_delay": True,
     "copy_requires_rail": True,
     "rate_robust": False,
+    "zero_once": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -138,6 +139,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "relight_repair_delay": False,
         "copy_requires_rail": False,
         "rate_robust": False,
+        "zero_once": True,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -170,6 +172,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "commit_reignite": False,
         "retry_clear": False,
         **LEGACY_2026_09_20,
+        "zero_once": False,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -209,6 +212,104 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
     recorded.pop("rate_robust")
     _, _, rebuilt_legacy = build_tick_pipeline(recorded)
     assert _pipeline_fingerprint(legacy) == _pipeline_fingerprint(rebuilt_legacy)
+
+
+@pytest.mark.parametrize("rate_robust", [False, True])
+@pytest.mark.parametrize("datapath", ["generic", "specialized"])
+def test_zero_once_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath):
+    _, pl, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
+                                       datapath=datapath, zero_once=True)
+    assert pl.build_options["zero_once"] is True
+    _, _, rebuilt = build_tick_pipeline({"block": "tick", **pl.build_options})
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
+    # Removing only the new option recovers the exact old build in both modes.
+    record = {"block": "tick", **pl.build_options}
+    record.pop("zero_once")
+    _, _, old = build_tick_pipeline(record)
+    _, expected, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
+                                             datapath=datapath, zero_once=False)
+    assert old.build_options["zero_once"] is False
+    assert _pipeline_fingerprint(old) == _pipeline_fingerprint(expected)
+    if rate_robust:
+        _assert_conditioned_train_inputs(pl.net, pl.drive)
+
+
+def test_kernel_campaign_zero_once_cli_builds_and_records_the_option(tmp_path, monkeypatch):
+    real_block = kernel_campaign.block
+    seen = {}
+
+    def recording_block(*args, **kwargs):
+        result = real_block(*args, **kwargs)
+        seen["build"] = result
+        seen["zero_once"] = kwargs["zero_once"]
+        return result
+
+    def fake_run(pl, params, schedules, **kwargs):
+        ks, _, _, reference = seen["build"]
+        outputs = [{name: [(i, row[j]) for i, row in enumerate(reference)]
+                    for j, name in enumerate(ks.outputs)} for _ in schedules]
+        return outputs, None, {"simulator": "Fake", "faults": 0, "timeouts": 0,
+                               "bad_outputs": 0, "neural_ms": 1.0}
+
+    monkeypatch.setattr(kernel_campaign, "block", recording_block)
+    monkeypatch.setattr(kernel_campaign, "make_perturbed_sim", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kernel_campaign, "run_pipeline_batched", fake_run)
+    out = tmp_path / "campaign.json"
+    kernel_campaign.main(["tick", "--copies", "1", "--max-ms", "1",
+                          "--zero-once", "--out", str(out)])
+    record = json.loads(out.read_text())
+    assert seen["zero_once"] is seen["build"][1].build_options["zero_once"] is True
+    assert record["zero_once"] is True
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
+
+
+def test_stage_d_zero_once_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch):
+    from drosophilos.bench import stage_d
+
+    seen = []
+    real_build = stage_d.build
+
+    def recording_build(*args, **kwargs):
+        result = real_build(*args, **kwargs)
+        seen.append(result)
+        return result
+
+    def fake_run(k, pl, params, tokens, *, copies=1, **kwargs):
+        reference = stage_d.reference_states(k, tokens)
+        outputs = [{k.cells[field]: [(1000 + 100 * i, row[field])
+                                    for i, row in enumerate(reference)] for field in k.fields}
+                   for _ in range(copies)]
+        stats = {"load_steps": [[100]] * copies, "load_events": [[] for _ in range(copies)],
+                 "refused": [[] for _ in range(copies)], "faults": 0, "timeouts": 0,
+                 "bad_outputs": 0, "blocked_nodes": [], "host_stalls": False,
+                 "truncated": False, "stopped_on_stall": False, "simulator": "Fake",
+                 "neural_ms": 1000.0, "run_started_perf": 0.0}
+        return {"outs": outputs, "stats": stats,
+                "wall": [[(cell, step, 1.0) for cell, events in node.items()
+                          for step, _ in events] for node in outputs]}
+
+    monkeypatch.setattr(stage_d, "build", recording_build)
+    monkeypatch.setattr(stage_d, "run_neural", fake_run)
+    # Avoid C compilation: this test verifies the build and record wiring.
+    monkeypatch.setattr(stage_d, "three_point_check", lambda *args: {"ir_equal": True})
+    out = tmp_path / "stage_d.json"
+    record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--zero-once",
+                           "--rate-robust", "--out", str(out)])
+    original = seen[-1]
+    assert record["zero_once"] is record["build_options"]["zero_once"] is True
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(original) == _pipeline_fingerprint(rebuilt)
+    stage_d.main(["--recheck", str(out)])
+    assert seen[-1].build_options["zero_once"] is True
+    assert _pipeline_fingerprint(original) == _pipeline_fingerprint(seen[-1])
+    # Nested Stage-D records also retain the option; genuinely old records default false.
+    record.pop("zero_once")
+    stage_d.recheck_record(record)
+    assert seen[-1].build_options["zero_once"] is True
+    record["build_options"].pop("zero_once")
+    stage_d.recheck_record(record)
+    assert seen[-1].build_options["zero_once"] is False
 
 
 def test_stall_diag_rejects_unidentified_or_obsolete_rate_circuits():

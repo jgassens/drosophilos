@@ -31,6 +31,7 @@ from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault
 from ..protocol.celement import add_delay_chain, add_veto_relay
 from ..protocol.latch import Latch
 from ..protocol.latch import add_edge_relay, connect_trigger
+from ..protocol.rate import condition_rate_gate
 from ..sim.model import Params
 from .adder import extend_reset
 from .gates import Gates, Rail2
@@ -169,7 +170,8 @@ def add_alu_logic(G: Gates, name: str, A: list[Rail2], B: list[Rail2], U: list[R
     return R, C, V
 
 
-def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", hops: int = 3) -> None:
+def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", hops: int = 3,
+                  *, zero_once: bool = False) -> None:
     """Z on the consumer. No single result bit is reliably the last to arrive (in a ripple
     adder a lower sum can wait on a long propagate chain while the top carry was decided
     early by a kill), so "every result bit is valid" must come from a completion, not a
@@ -179,7 +181,10 @@ def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", ho
     into Q's Z rail 1 unless any R rail 1 is live; Z rail 0 is an OR of the R rail-1 latches
     (one relay each, no ordering needed). Latency: Z rises ~20 ms after that node, and the
     word completes one tree level later; the register's fault gate on the Z bit covers a
-    double rail."""
+    double rail. With `zero_once`, the data-1 taps instead feed one OR and one shared
+    edge relay held by Z0, so simultaneous or later ripple bits cannot re-ignite it.
+    The OR and relay clear with Q; rate-robust builds condition the OR's train inputs
+    with the usual shared, reset-mirrored readouts."""
     assert n & (n - 1) == 0, "the first n bits must form a complete subtree of the completion tree"
     roles = net.roles
     prefix = roles[Q.completion.u].split(".comp.")[0]  # the register's name (may contain dots)
@@ -192,8 +197,29 @@ def add_zero_flag(net: Netlist, drive: Drive, Q, n: int, name: str = "alu.z", ho
     d = add_delay_chain(net, drive, f"{name}d", node.u, hops)
     z0, z1 = Q.rails[n + 1][0], Q.rails[n + 1][1]
     add_veto_relay(net, drive, f"{name}1", d, [Q.rails[i][1].u for i in range(n)], z1)  # zero: no rail 1 anywhere
-    for i in range(n):  # not zero: any rail 1 (an OR needs no ordering)
-        add_veto_relay(net, drive, f"{name}0.r{i}", Q.rails[i][1].u, [], z0)
+    if zero_once:
+        gate = net.neuron(f"{name}0.or")
+        for i in range(n):
+            net.synapse(Q.rails[i][1].u, gate, drive.or_in)
+        condition_rate_gate(net, drive, gate)
+        # An all-ones word can make the OR fire near the refractory limit. Use the
+        # fast source inhibitor to block a second edge before the Z0 hold arrives.
+        first_relay = net.n
+        relay = add_edge_relay(net, drive, f"{name}0.ign", gate,
+                               hold_from=[z0.u], fast_inhibitor=True)
+        net.synapse(relay, z0.u, drive.ignite)
+        # Once Z0 holds, also quiet the OR. An eight-input OR otherwise runs near
+        # the refractory limit, accumulating enough source inhibition on the edge
+        # to lose its next head-start race when a word arrives exactly at Q READY.
+        hold_inh = net.n - 1  # add_edge_relay's hold_from interneuron
+        net.synapse(hold_inh, gate, -int(round(2.2 * drive.loop)))
+        # Include the relay and both inhibitors, not just the OR: no queued ignition
+        # may escape the stage clear. The normal Q READY delay permits re-arming.
+        for neuron in [gate, *range(first_relay, net.n)]:
+            net.synapse(Q.reset_inh, neuron, -int(round(0.75 * drive.loop)))
+    else:
+        for i in range(n):  # legacy: independent bit edges, preserving ordered bytes
+            add_veto_relay(net, drive, f"{name}0.r{i}", Q.rails[i][1].u, [], z0)
 
 
 def wire_outputs(net: Netlist, drive: Drive, outputs: list[Rail2], Q, bits: list[int] | None = None) -> None:
@@ -206,11 +232,11 @@ def wire_outputs(net: Netlist, drive: Drive, outputs: list[Rail2], Q, bits: list
             net.synapse(relay, Q.rails[i][r].u, drive.ignite)
 
 
-def wire_alu(net: Netlist, drive: Drive, R, C, V, Q) -> None:
+def wire_alu(net: Netlist, drive: Drive, R, C, V, Q, *, zero_once: bool = False) -> None:
     """R -> bits [0, n), C -> n, V -> n+2 through edge relays; Z (bit n+1) from add_zero_flag."""
     n = len(R)
     wire_outputs(net, drive, R + [C, V], Q, list(range(n)) + [n, n + 2])
-    add_zero_flag(net, drive, Q, n)
+    add_zero_flag(net, drive, Q, n, zero_once=zero_once)
 
 
 def build_alu_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
