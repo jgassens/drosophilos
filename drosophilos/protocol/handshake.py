@@ -17,7 +17,7 @@ from ..lib.netlist import Drive, Netlist
 from ..sim.model import Params
 from .celement import add_and_gate, add_completion_tree, add_or_latched, add_state, rail_of, set_input
 from .flipflop import FlipFlop, connect_clear, power_on_events
-from .latch import Latch, add_edge_relay, add_latch, add_ready, add_reset, connect_trigger
+from .latch import Latch, add_edge_relay, add_latch, add_ready, add_reset, compact_reset_domains, connect_trigger
 from .watchdog import StaleMonitor, Watchdog, add_stale_monitor, add_watchdog
 
 
@@ -103,6 +103,17 @@ def add_register(net: Netlist, drive: Drive, name: str, width: int, with_complet
     reg.ready_chain = [x for x, r in enumerate(net.roles) if r.startswith(f"{name}.ready_delay")]
     net.group(f"{name}.rail_taps", [t for pair in reg.rail_taps for t in pair])
     return reg
+
+
+def compact_register_resets(net: Netlist, drive: Drive, registers: list[Register]) -> None:
+    """Finalize selected, fully wired latch registers with the compact reset policy.
+
+    This belongs after extend_reset and staged-commit wiring: strengthening only
+    add_register's original fan-out would leave their later reset targets weak.
+    """
+    if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
+        raise ValueError("compact register reset is qualified only for latch storage")
+    compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in registers])
 
 
 @dataclass

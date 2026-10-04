@@ -659,3 +659,31 @@ virtualenv, `uv run --no-sync`, a writable task-local `UV_CACHE_DIR` and pytest
 `git diff --check` also passes. The original diagnostic commit changed no netlist-building
 file; the subsequent optional `zero_once` implementation is described above. Integration and committing remain with the
 orchestrator; no commit is attempted.
+
+## Qualified compact register reset (2026-10-04)
+
+The optional `robust_register_reset` now covers the entire Q reset domain as well
+as the input/cell masters. The qualification and evaluation tables are in
+[the completion-stall report](stage_d_completion_stall.md#register-reset-qualification-and-opt-in-2026-10-04).
+The selected controller has four taps with zero-delay links and **1.75 × loop**
+inhibition. Its existing READY chain's final four delays become 100 steps:
+**+32.8 ms per reset, no added neurons or logical synapse edges**. The request
+clear's 1.1 strength failed the independent fast-loop/weak-clear/controller corner.
+
+The stage **c3_xor.Q.b9r0** primitive uses copy 18's reconstructed seed-108 static
+draws, the four captured ignition offsets and additional synthetic kicks/strays.
+It has **0 survivors in 40,000 resets**. The actual capture's background stream is
+not replayed; even the original controller need not fail at every reduced phase.
+The slow-storage/independently-fast-READY corner retains a **20-step / 2.0-ms**
+reload margin using actual emitted pulses. The slow controller emits only three
+spikes and has a separate positive margin. Real weak COPY pulses and stage words
+loaded exactly at READY also succeed in base and RR staged cells.
+
+Finalizing after all wiring includes `extend_reset` ALU state, FAULT, ACT,
+COMMIT/grant/COPY, `zero_once`'s OR/relay/inhibitors, and RR mirrored readers.
+Two-word, fault-discard/reload, whole-Q-domain silence, multi-cell arithmetic and
+small noisy RefSim checks exercise these effects. `zero_once` still prevents
+multiple Z0 ignition; it is independently selectable and is not required by this
+reset option. Neither change establishes a fix for the RR34/RR43 captures or all
+false-fault mechanisms. The control machine and default-off netlist fingerprints
+are unchanged; unqualified timing, storage/kernel policies are rejected.
