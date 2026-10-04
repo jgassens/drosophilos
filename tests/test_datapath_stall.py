@@ -1,7 +1,8 @@
-"""Synthetic spike evidence: distinguish a missing rail from an unrecorded one.
+"""Capture-aware evidence and small, prescribed-input mechanism regressions.
 
-These traces test the diagnostic, not a proposed neural failure mechanism. No external
-campaign artifacts or GPU replay are needed.
+The diagnostic fixtures distinguish a missing rail from an unrecorded one. The recapture
+probes at the end isolate receiving neurons; they are not whole-copy CUDA replays. No
+external campaign artifacts are needed.
 """
 
 import json
@@ -12,7 +13,8 @@ import pytest
 
 from drosophilos.bench import stall_diag as diag
 from drosophilos.lib.kernel import build_pipeline
-from drosophilos.sim.model import Params
+from drosophilos.sim.model import Params, Topology
+from drosophilos.sim.ref64 import RefSim
 
 
 @pytest.fixture
@@ -207,3 +209,69 @@ def test_specialized_and_conditioned_topologies_remain_traceable(tmp_path, rate_
     assert cell.stage.rails[0][0].u in view["bits"][0]["cone_ids"]
     assert pl.input_reg.master.rails[0][0].u in view["bits"][0]["cone_ids"]
     assert view["unavailable_ids"] == []
+
+
+def test_copy18_returning_or_loses_ignition_to_residual_inhibition():
+    """The same resumed OR ignites a cold relay, but cannot re-arm the old relay.
+
+    Prescribe the captured inputs to 2629 over steps 55,000–57,000. Quanta, Vth and
+    bias are the static seed-108/copy-18 draws reconstructed with the full base
+    topology and B=100 (lib.campaign.make_perturbed_sim's NumPy draw order).
+    Incoming spikes include their recorded noise effects; target strays are omitted.
+    """
+    inputs = [
+        (4490, [55041, 55154, 55265, 55377, 55494, 55608,
+                56316, 56469, 56623, 56773, 56922]),  # valid9.or 2626
+        (-8027, [55062, 55163, 55224, 55301, 55401, 55513, 55599, 55652,
+                 56363, 56499, 56647, 56795, 56943]),  # edge_inh 2630
+        (-915, [55043, 55091, 55139, 55187, 55235, 55283, 55331, 55379,
+                55427, 55475, 55523, 55571, 55619, 55667, 55723, 55779]),
+    ]
+    params = Params()
+    # Copy 0 retains the preceding transaction's inhibition; copy 1 receives only
+    # the returning gate/inhibitor train. Both receive exactly the same new drive.
+    sim = RefSim(Topology.empty(1), params, n_nodes=2,
+                 V_th=-45.10250839632811, bias=-0.10846311733372432,
+                 record=[(0, 0)])
+    for node in range(2):
+        for quanta, steps in inputs:
+            steps = np.asarray(steps)
+            if node == 1:
+                steps = steps[steps >= 56316]
+            sim.add_events(node, steps + params.default_delay_steps - 55000,
+                           np.zeros(len(steps), dtype=int), np.full(len(steps), quanta))
+    sim.run(2001)
+    assert not len(sim.trace.neuron_steps(0, node=0))
+    assert (sim.trace.neuron_steps(0, node=1) + 55000).tolist() == [56359]
+    voltage, _ = sim.recorded()
+    # Fresh inhibition arrives at 56,381. Even the best voltage before then is
+    # below threshold; the hold inhibitor has emitted nothing since 55,779.
+    assert voltage[1316:1382, 0].max() < sim.V_th[0, 0] - 0.5
+
+
+def test_copy34_fast_single_z_rail_can_trip_fault_with_background_input():
+    """A constructed false fault, not a claim to recover the unrecorded CUDA strays.
+
+    Only Z0 supplies rail input. Its spike times precede the captured fault at
+    1,912,340; the gate's static draws are reconstructed as in the copy-18 probe.
+    Three explicitly synthetic 150-q background pulses expose the lost margin.
+    Controls remove those pulses, or restore the nominal 47-step rail period.
+    """
+    params = Params()
+    fast = np.array([1911587, 1911664, 1911701, 1911736, 1911773, 1911812,
+                     1911854, 1911897, 1911930, 1911965, 1912000, 1912036,
+                     1912072, 1912108, 1912144, 1912180, 1912216, 1912252,
+                     1912283, 1912315])
+    sim = RefSim(Topology.empty(1), params, n_nodes=3,
+                 V_th=-45.41576783246501, bias=0.6465885280394998)
+    for node in range(3):
+        steps = fast if node < 2 else np.arange(fast[0], 1912340, 47)
+        sim.add_events(node, steps + params.default_delay_steps - 1911000,
+                       np.zeros(len(steps), dtype=int), np.full(len(steps), 206))
+        if node:
+            sim.add_events(node, np.array([1912225, 1912235, 1912245]) - 1911000,
+                           [0, 0, 0], [150, 150, 150])
+    sim.run(1500)
+    assert not len(sim.trace.neuron_steps(0, node=0))  # fast rail alone
+    assert len(sim.trace.neuron_steps(0, node=1)) > 0  # fast rail + background
+    assert not len(sim.trace.neuron_steps(0, node=2))  # ordinary rate + same background
