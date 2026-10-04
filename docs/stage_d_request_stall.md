@@ -505,11 +505,9 @@ at each corner; these are nine fixed latch/controller settings, not 360,000
 independently drawn controllers. The per-setting zero-failure 95% upper bound
 is about 7.5 × 10⁻⁵ per clear.
 
-Phase sweeps alone were insufficient: a compact 1.0 train with 4-step tap
-links passed all 1,500 phases but left **206 / 4,000** strayed fast-30% latches
-alive. Shorter links and 1.1 strength were therefore qualified with the larger
-stray sweep. The final nominal-controller phase sweeps cover the same seven
-corners as well.
+The selected zero-delay links and 1.1 strength were qualified with the larger
+stray sweep as well as phase sweeps. The final nominal-controller phase sweeps
+cover the same seven corners as well.
 
 The earlier 4 × 1.5 / 3 × 1.5 changes increased prolonged inhibition in other
 control domains and lost reloads. Here the control machine is untouched, and
@@ -528,10 +526,13 @@ hazard; it does not establish safety of a noisy full Stage D campaign.
 `--robust-request-clear`; records, `stall_diag` rebuilds and Stage D `--recheck`
 honour it, including old records' missing-option fallback to false. The option
 requires request-priority storage, four configured request taps, base kill
-strength 0.75, and `retry_clear=False`; unsupported combinations raise rather
-than silently building an unqualified circuit. It changes only DONE-side
-request `k1` edges. START clears, re-light delays, repair, the other kernel
-trains, and machine trains retain their existing circuits.
+strength 0.75, `start_relight_hops=5`, `relight_repair_delay=True`,
+`true_guards=True`, and `retry_clear=False`; unsupported combinations raise
+rather than silently building an unqualified circuit. The reload budget and
+repair fallback were qualified only with those relight and guard settings.
+It changes only DONE-side request `k1` edges. START clears, re-light delays,
+repair, the other kernel trains, and machine trains retain their existing
+circuits.
 
 - **Cost per request and per kernel:** **+0 neurons, +0 synapses**. There are
   three shorter tap-link delays and stronger inhibitor fan-out weights per
@@ -547,24 +548,27 @@ trains, and machine trains retain their existing circuits.
 - **Fast tests:** zero survivors for kicked phase sweeps; real nominal and
   reconstructed pulse counts; positive reload margins, including the slow
   corner with copy 28's controller; a 2-bit ADD kernel streams 0/1/3 → 1/2/0
-  in RefSim with both rate-reader settings; CLI/record/rebuild/recheck coverage;
+  in RefSim with both rate-reader settings; a 4-bit, four-cell ADD/AND/XOR/ADD
+  fanout/join streams 0/2/15 with all four cells' values checked, nominally in
+  RefSim and with three seed-108 mix-B copies in FastSim CPU, both with and
+  without `zero_once`; CLI/record/rebuild/recheck coverage;
   and unchanged pre-existing ordered-netlist SHA-256 assertions, including
   both machine sizes. The original entrainment regressions remain intact.
-- **Scope:** no CUDA stray-stream replay or new full-kernel noise campaign is
-  claimed. This remains opt-in pending campaign qualification.
+- **Scope:** the small noisy regression covers mix-B weight, threshold and
+  bias draws plus 5 Hz strays. No CUDA stray-stream replay or full tick/Stage D
+  noise campaign is claimed. This remains opt-in pending campaign qualification.
 
 Validation completed: the requested three-file `pytest -m 'not slow'` suite,
 the expanded `test_robust_clear.py` fast suite, all nine 40,000-clear settings,
-and the candidate table. Additional CPU probes at the copy-28 failing phase
-and the fast-30% corner gave identical full traces in RefSim, TorchSim and
-FastSim, including the zero-delay links.
+and the candidate table. The committed
+[zero-delay equivalence test](../tests/test_zero_delay_equivalence.py) checks
+identical full traces in RefSim, TorchSim and FastSim on nominal and fast-30%
+request latches, including zero-delay tap links, clear and same-rail reload.
+It pins next-step integration and covers FastSim scatter, sparse and
+`graph_steps=50` delivery on CPU; CUDA cases run when available.
 
-The literal requested `uv` invocation initially failed because the sandbox
-denied its default cache. It passed after setting `UV_CACHE_DIR` and pytest's
-`--basetemp` to the writable task temporary directory, `UV_PROJECT_ENVIRONMENT`
-to the existing repository environment, `UV_NO_SYNC=1`, and `PYTHONPATH=.` to
-import this worktree. The test command itself remained:
+Run the fast request-clear, simulator-equivalence and build-option regressions:
 
 ```sh
-TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_robust_clear.py tests/test_request_clear_entrainment.py tests/test_build_options.py -m 'not slow'
+uv run pytest -q tests/test_robust_clear.py tests/test_zero_delay_equivalence.py tests/test_build_options.py -m 'not slow'
 ```
