@@ -679,6 +679,8 @@ def parser() -> argparse.ArgumentParser:
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
+    ap.add_argument("--robust-request-clear", action="store_true",
+                    help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--max-ms", type=float, default=None,
                     help="neural-time ceiling; default: calibrated from a short nominal run x --margin")
     ap.add_argument("--calibrate-ticks", type=int, default=4)
@@ -754,9 +756,11 @@ def recheck_record(rec: dict) -> dict:
     # the record.  Old records predate the opt-in and therefore mean the legacy false value.
     rate_robust = bool(rec.get("rate_robust", False))
     zero_once = bool(rec.get("zero_once", rec.get("build_options", {}).get("zero_once", False)))
+    robust_request_clear = bool(rec.get("robust_request_clear",
+                                       rec.get("build_options", {}).get("robust_request_clear", False)))
     k_for_build = load_kernel(rec.get("program", PROGRAM))
     build(k_for_build, Params(), rec.get("datapath", "generic"),
-          rate_robust=rate_robust, zero_once=zero_once)
+          rate_robust=rate_robust, zero_once=zero_once, robust_request_clear=robust_request_clear)
     raw = rec.get("commit_events")
     loads = rec.get("load_events")
     checkable = (isinstance(raw, list) and isinstance(loads, list) and len(raw) == len(loads) and
@@ -882,7 +886,8 @@ def main(argv=None):
     print("three-point check:", json.dumps({x: y for x, y in check.items()}), flush=True)
     if not check["ir_equal"] or check.get("c_equal") is False:
         raise SystemExit("the references disagree; not running the neural comparison")
-    pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once)
+    pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once,
+               robust_request_clear=a.robust_request_clear)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -932,6 +937,7 @@ def main(argv=None):
         "copies": a.copies, "mix": a.mix, "datapath": pl.datapath,
         "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n, "edges": pl.net.nnz,
         "zero_once": pl.build_options["zero_once"],
+        "robust_request_clear": pl.build_options["robust_request_clear"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),

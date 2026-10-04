@@ -214,17 +214,18 @@ def add_kill_pair(net: Netlist, drive: Drive, name: str, pulses: int | None = No
 # 2026-09-20: 3 x 1.5 kills down to 33 steps at every phase in isolation, but in the 100-copy
 # mix-B tick campaign it stalled 85 of 100 copies (Juno 413672) — the extra
 # after-hyperpolarisation makes the rails' relights, ~190 ms after a kill, fail under noise —
-# and 4 x 1.5 stops the control machine outright. The train is unchanged; a kill that beats a
-# fast latch without slowing the relight is a separate experiment (tests/test_kill_margin.py
-# keeps the measurement). Campaign records carry the train as `kill_train`. The policy lives
+# and 4 x 1.5 stops the control machine outright. The default train is unchanged;
+# add_request_clear below is the separately qualified kernel opt-in. Campaign records
+# carry the base train as `kill_train`. The policy lives
 # on Drive: machine drives retain 3 x 0.75, while build_pipeline derives a four-pulse drive.
 
 
 def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: list[Latch], pulses: int | None = None,
-                   strength: float | None = None) -> int:
-    """`source`'s rise (one relay) starts a short train of `pulses` inhibitory pulses on every
-    member of `latches` (like a reset train, without an edge detector: the source is a relay
-    pulse or a fresh latch's rise). Defaults come from `drive`."""
+                   strength: float | None = None, *, tap_delay_steps: int | None = None) -> int:
+    """`source`'s rise, through a fast-inhibited edge relay, starts a short inhibitory
+    train on every member of `latches`. Defaults come from `drive`. `tap_delay_steps`
+    changes only the links between taps, not the inhibitor's fan-out. Tap counts
+    are not spike counts: four default taps emit five nominal inhibitor spikes."""
     pulses = drive.kill_pulses if pulses is None else pulses
     strength = drive.kill_strength if strength is None else strength
     relay = add_edge_relay(net, drive, f"{name}.start", source, fast_inhibitor=True)
@@ -233,7 +234,7 @@ def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: 
     net.synapse(prev, inh, drive.pulse)
     for k in range(1, pulses):
         h = net.neuron(f"{name}.h{k}")
-        net.synapse(prev, h, drive.pulse)
+        net.synapse(prev, h, drive.pulse, delay_steps=tap_delay_steps)
         net.synapse(h, inh, drive.pulse)
         prev = h
     q = -int(round(strength * drive.loop))
@@ -241,6 +242,21 @@ def add_kill_train(net: Netlist, drive: Drive, name: str, source: int, latches: 
         for x in l.members:
             net.synapse(inh, x, q)
     return inh
+
+
+def add_request_clear(net: Netlist, drive: Drive, name: str, source: int, latch: Latch) -> int:
+    """Opt-in compact request clear: four taps, 1.1-loop inhibition, zero-delay tap links.
+
+    RefSim emits four nominal spikes at offsets 0/43/81/138, versus the ordinary
+    four-tap train's five at 0/45/89/136/215. The earlier finish pays for the
+    stronger pulses: the reviewed slow corner reloads at first-arrival +838
+    against an 862-step budget. Copy 28's reconstructed controller emits four
+    at 0/47/88/151. Only DONE's false request rail uses this primitive; START,
+    datapath resets and control-machine trains retain their existing policies.
+    Zero-delay edges still integrate on the following simulation step.
+    """
+    return add_kill_train(net, drive, name, source, [latch], pulses=4,
+                          strength=1.1, tap_delay_steps=0)
 
 
 # ------------------------------------------------------------------------------ machine

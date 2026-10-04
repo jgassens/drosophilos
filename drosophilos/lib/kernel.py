@@ -55,7 +55,7 @@ from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
 from .adder import extend_reset
-from .control import add_kill_pair, add_kill_train
+from .control import add_kill_pair, add_kill_train, add_request_clear
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
@@ -284,7 +284,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
                    true_guards: bool = True, relight_repair_delay: bool = True,
                    copy_requires_rail: bool = True, rate_robust: bool = False,
-                   zero_once: bool = False) -> Pipeline:
+                   zero_once: bool = False, robust_request_clear: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -315,7 +315,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     historical in-flight-fault timing, and campaign rollout is a separate experiment. Pass
     `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place.
     `zero_once=True` replaces per-bit Z0 ignition with a shared OR/one-shot in each
-    stage's reset domain, keeping nonzero results at the latch's nominal rate."""
+    stage's reset domain, keeping nonzero results at the latch's nominal rate.
+    `robust_request_clear=True` uses the compact four-tap request-only clear:
+    1.1-loop inhibition and zero-delay tap links. It requires the standard
+    request-priority policy, four configured taps, 0.75 base kill strength and
+    no retry_clear; the other kill trains and handshake delays are unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -323,6 +327,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     drive = replace(drive or Drive.from_params(params), kill_pulses=kernel_kill_pulses,
                     rate_robust=rate_robust)
     request_clear_pulses = drive.kill_pulses if request_clear_pulses is None else request_clear_pulses
+    if robust_request_clear and (not relight_requests or retry_clear or
+                                 request_clear_pulses != 4 or drive.kill_strength != 0.75):
+        raise ValueError("robust_request_clear requires relight_requests, four request taps, "
+                         "kill_strength=0.75 and retry_clear=False")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
@@ -477,8 +485,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 # seed-110 copy 73); the fourth is safe here because START's re-light of the same
                 # rail now waits for the train to end (below). A fourth everywhere lost the control machine's 45 ms
                 # interrupt reload (tests/test_machine.py).
-                add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]],
-                               pulses=request_clear_pulses)
+                if robust_request_clear:
+                    add_request_clear(net, drive, f"{req_name}.k1", received, pair[0])
+                else:
+                    add_kill_train(net, drive, f"{req_name}.k1", received, [pair[0]],
+                                   pulses=request_clear_pulses)
                 if retry_clear:
                     # Conditional second clear (2026-09-20) — OFF by default: in the 100-copy
                     # mix-B tick campaign it produced silent wrong values (seed 108: 3 wrong in 2
@@ -884,6 +895,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "copy_requires_rail": copy_requires_rail,
         "rate_robust": drive.rate_robust,
         "zero_once": zero_once,
+        "robust_request_clear": robust_request_clear,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

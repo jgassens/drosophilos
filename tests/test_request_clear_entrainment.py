@@ -11,7 +11,7 @@ These isolated tests do not validate kernel ordering or a new clear policy.
 import numpy as np
 import pytest
 
-from drosophilos.lib.control import add_kill_train
+from drosophilos.lib.control import add_kill_train, add_request_clear
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.protocol.latch import add_latch, add_reset
 from drosophilos.sim.model import Params
@@ -45,15 +45,22 @@ COPY28_EDGES = {
 }
 
 
-def _circuit(pulses, *, copy_controller=True, corner="copy28"):
+def _circuit(pulses, *, copy_controller=True, corner="copy28", robust=False):
     net = Netlist(PARAMS)
     latch = add_latch(net, DRIVE, "L")
     source = net.neuron("received")
-    inh = add_kill_train(net, DRIVE, "kill", source, [latch], pulses=pulses, strength=0.75)
+    if robust:
+        assert pulses == 4
+        inh = add_request_clear(net, DRIVE, "kill", source, latch)
+    else:
+        inh = add_kill_train(net, DRIVE, "kill", source, [latch], pulses=pulses, strength=0.75)
     for e, (s, d) in enumerate(zip(net.src, net.dst)):
         roles = net.roles[s], net.roles[d]
         if roles in COPY28_EDGES and (copy_controller or roles in (("L.u", "L.v"), ("L.v", "L.u"))):
             net.quanta[e] = COPY28_EDGES[roles]
+            if robust and s == inh and d in latch.members:
+                # Reuse the captured fan-out draws at the candidate's strength.
+                net.quanta[e] = round(net.quanta[e] * 1.1 / 0.75)
     vth = np.full(net.n, PARAMS.V_th)
     bias = np.zeros(net.n)
     for i, role in enumerate(net.roles):
