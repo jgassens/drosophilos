@@ -1,5 +1,10 @@
 # Stage D: the request/clear stall of seed 108, `rate_robust` copy 28
 
+**2026-10-04 update:** `robust_request_clear=True` is now an opt-in compact
+request-only clear. The candidate evaluation and qualification are below under
+"Compact request clear". Defaults and the control machine retain their exact
+netlists. The fifth-tap proposal is rejected on its slow-corner reload margin.
+
 **Mechanism established.** The false ("consumed") rail of `c4_sel`'s request from
 `c2_sel` (latch 15701/15702) survived the four-pulse DONE clear at step 30,423,365. It was
 not re-lit afterwards. This copy's noise draws make the latch asymmetric: its `u → v`
@@ -22,7 +27,7 @@ shipped 4 × 0.75 train. Reconstructing copy 28's own draws reproduces it with
 `add_latch`, the real `add_kill_train` and RefSim: a kicked orbit survives
 **5 / 1,500** clear phases at four taps, versus **0 / 1,500** with an added fifth tap.
 
-**A fifth request-clear tap remains a candidate, not a shipping recommendation.**
+**A fifth request-clear tap is rejected as the standalone fix.**
 Four configured taps nominally emit **five inhibitor spikes**, and five taps emit
 **six**: the final spike is residual charge, not noise. Copy 28's failing controller
 emits only four. The earlier 0.15 % survival estimate is conditional on four
@@ -401,3 +406,165 @@ Implemented in `tests/test_request_clear_entrainment.py`, in RefSim with no kern
 These regressions reproduce entrainment and the reload constraint from static draws.
 They do not replay the device stray stream, survey the full noisy kernel, or establish
 that the delayed repair makes a fifth-tap policy safe. No new campaign is claimed here.
+
+## Compact request clear (2026-10-04)
+
+**Choice:** opt-in `robust_request_clear=True`, implemented by
+`control.add_request_clear`. Keep the real four-tap `add_kill_train`, shorten only
+the three links into `h1/h2/h3` from 18 to **0 synaptic-delay steps**, and use
+**1.1 × loop** inhibition on the false request latch. Zero-delay delivery still
+integrates on the following step in RefSim; these are ordinary supported
+synapses, not injected inhibition or simulator state edits. All other controller
+edges retain their original delay and drive. Both latch members receive the same
+train, and the existing inhibition mirrors cover rate readouts and guard inputs.
+
+The compact controller emits **four actual spikes**, with nominal arrival
+offsets **0/43/81/138**; copy 28's reconstructed controller emits four at
+**0/47/88/151**. Its excitation overlaps sooner, avoiding the ordinary
+controller's late fifth spike. Stronger inhibition then stops fast loops without
+paying for the ordinary train's late charge. This is a measured bounded-corner
+result, not a proof for arbitrarily fast or arbitrarily perturbed latches.
+
+### Candidate evaluation with real primitives
+
+`tests/test_robust_clear.py::test_candidate_evaluation_table` reproduces the
+tables. All candidates use `add_latch`, `add_kill_train`, the actual edge detector,
+and RefSim. The candidates are concrete circuits:
+
+- **Phase:** retain 0.75 strength; set successive tap-link delays to 0/36/18
+  steps. Nominal inhibitor offsets become 0/57/105/147 (four spikes).
+- **Verify:** retain the ordinary train, then use a 12-hop delay from `received`,
+  a coincidence neuron taking 0.5 single-pulse need from that tap and 0.35
+  rate need from **each** latch member, and a real one-tap 0.75 clear. The
+  detector fires on the failing orbit: at source event 5,540 its delayed tap,
+  detector and extra inhibitor fire at 6,200 / 6,258 / 6,353. The survivor
+  withstands that extra spike too. Healthy nominal clears produce no extra
+  spike. This rejects this single-extra-pulse detector, not every possible
+  closed-loop design; the older multi-pulse `retry_clear` remains a separate,
+  previously unsafe experiment.
+- **Stagger:** ordinary train and strength; delay inhibition of `v` by another
+  22 steps (one refractory period), leaving `u` unchanged.
+- **Stronger:** ordinary four-tap timing, 1.0 strength; five nominal spikes.
+- **Compact:** the selected zero-delay tap links and 1.1 strength, four spikes.
+
+For the survival screen, apply copy 28's reconstructed controller draws and its
+fan-out multipliers to the candidate's strength. Ignite at step 10, kick at
+5,020, and sweep all 1,500 source-event steps 5,000–6,499. The mirror corner
+exchanges the latch's loop weights, thresholds and biases, and kicks `u`
+instead of `v`; ignition and controller draws are otherwise unchanged. The
+symmetric fast corners are +20% / −0.8 mV (~38-step steady period) and
++30% / −1.2 mV (~33 steps), including the extra-kick excursion. Slow corners
+are those in the reviewed reload table. Entries are **survivors / 1,500**:
+
+| candidate | copy 28 | mirrored 28 | nominal | −8% / +0.4 | −12% / +0.6 | +20% / −0.8 | +30% / −1.2 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ordinary 4 × 0.75 | 5 | 1 | 0 | 0 | 0 | 276 | 1,500 |
+| phase | 0 | 0 | 0 | 0 | 0 | 432 | 1,500 |
+| verify | 5 | 1 | 0 | 0 | 0 | 276 | 1,500 |
+| stagger | 0 | 0 | 0 | 0 | 0 | 468 | 1,500 |
+| stronger 1.0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| **compact 1.1** | **0** | **0** | **0** | **0** | **0** | **0** | **0** |
+
+Reload uses **nominal controller draws**, all actual inhibitor spikes, a
+4,655-q ignition, 11 phases, and 50-step offsets after the last arrival, as in
+the reviewed table. No-reload controls must go dark at all 11 phases before a
+recovery threshold is credited. A successful reload must sustain firing 150 ms
+later, at every phase and every later grid offset. Margins below are
+**862 − (last arrival from first + recovery offset)** in steps; `—` means the
+nominal controller did not clear the no-reload control, so survival cannot be
+credited as re-ignition.
+
+| latch | ordinary | phase | verify | stagger | stronger 1.0 | compact 1.1 |
+|---|---:|---:|---:|---:|---:|---:|
+| copy 28 | +397 | +465 | +397 | +375 | +247 | **+374** |
+| mirrored 28 | +297 | +365 | +297 | +225 | +197 | **+274** |
+| nominal | +297 | +365 | +297 | +225 | +197 | **+274** |
+| loop −8% / V_th +0.4 mV | +147 | +215 | +147 | +125 | +47 | **+124** |
+| loop −12% / V_th +0.6 mV | +47 | +115 | +47 | +25 | **−53** | **+24** |
+| loop +20% / V_th −0.8 mV | +497 | — | +497 | — | +347 | **+424** |
+| loop +30% / V_th −1.2 mV | — | — | — | — | +447 | **+524** |
+
+The compact clear's all-phase recovery bounds after the last / first arrival
+are respectively **350/488, 450/588, 450/588, 600/738, 700/838, 300/438,
+200/338** steps in that table's order. The slow corner also reloads at the
+actual earliest budget, first arrival +862, at every phase. With **copy 28's
+controller and fan-out draws** as well as the slow latch corner, the bound is
+700 after last / 851 after first: still **+11 steps**, including its real
+four-spike train. These are conservative grid bounds, not exact thresholds.
+
+### Stray qualification and why 1.1
+
+The selected real primitive produced **0 / 40,000 survivors at each of the seven
+corners above: 0 / 280,000 with copy 28's controller**. Additional nominal-controller
+runs gave **0 / 40,000** each for the copy-28 and fast-30% latches, for
+**0 / 360,000 total**. These runs reuse the reviewed RNG protocol:
+seed 108, batches of 1,000, random clear events at steps 3,000–4,999, and
+5 Hz × 150-q strays on both members through step 6,800. Either member firing
+150 ms after its clear counts as survival. The same random schedules are used
+at each corner; these are nine fixed latch/controller settings, not 360,000
+independently drawn controllers. The per-setting zero-failure 95% upper bound
+is about 7.5 × 10⁻⁵ per clear.
+
+Phase sweeps alone were insufficient: a compact 1.0 train with 4-step tap
+links passed all 1,500 phases but left **206 / 4,000** strayed fast-30% latches
+alive. Shorter links and 1.1 strength were therefore qualified with the larger
+stray sweep. The final nominal-controller phase sweeps cover the same seven
+corners as well.
+
+The earlier 4 × 1.5 / 3 × 1.5 changes increased prolonged inhibition in other
+control domains and lost reloads. Here the control machine is untouched, and
+the selected train's total nominal inhibitory charge per member is **4.4 loop**
+(four actual spikes × 1.1), versus **3.75 loop** for the ordinary five-spike
+0.75 train, or **5 loop** for the rejected ordinary 1.0 train. The compact
+train finishes 77 steps earlier than the ordinary nominal train. The measured
+slow-corner reload stays inside the budget; the ordinary 1.0 train and the
+ordinary fifth-tap proposal both fail it. This addresses the measured reload
+hazard; it does not establish safety of a noisy full Stage D campaign.
+
+### Build option, costs and validation
+
+`build_pipeline(..., robust_request_clear=False)` records the effective flag in
+`Pipeline.build_options`. `stage_d` and `kernel_campaign` expose
+`--robust-request-clear`; records, `stall_diag` rebuilds and Stage D `--recheck`
+honour it, including old records' missing-option fallback to false. The option
+requires request-priority storage, four configured request taps, base kill
+strength 0.75, and `retry_clear=False`; unsupported combinations raise rather
+than silently building an unqualified circuit. It changes only DONE-side
+request `k1` edges. START clears, re-light delays, repair, the other kernel
+trains, and machine trains retain their existing circuits.
+
+- **Cost per request and per kernel:** **+0 neurons, +0 synapses**. There are
+  three shorter tap-link delays and stronger inhibitor fan-out weights per
+  request (including existing mirrors). Tick remains **29,375 / 52,808**,
+  or **30,643 / 55,936** with `rate_robust`.
+  FastSim now has two delay groups (0 and 18), adding one sparse delivery
+  product per step; its campaign wall-time cost has not been measured.
+- **Clear-to-READY path:** **0 added hops / 0 added delay**; nothing waits for
+  the train to finish. The nominal first-to-last span falls 215 → 138 steps
+  (−7.7 ms); copy 28's span changes 145 → 151 (+0.6 ms). The slow-corner
+  conservative clear-to-reload bound changes 815 → 838 steps (+2.3 ms),
+  retaining the +24-step nominal margin.
+- **Fast tests:** zero survivors for kicked phase sweeps; real nominal and
+  reconstructed pulse counts; positive reload margins, including the slow
+  corner with copy 28's controller; a 2-bit ADD kernel streams 0/1/3 → 1/2/0
+  in RefSim with both rate-reader settings; CLI/record/rebuild/recheck coverage;
+  and unchanged pre-existing ordered-netlist SHA-256 assertions, including
+  both machine sizes. The original entrainment regressions remain intact.
+- **Scope:** no CUDA stray-stream replay or new full-kernel noise campaign is
+  claimed. This remains opt-in pending campaign qualification.
+
+Validation completed: the requested three-file `pytest -m 'not slow'` suite,
+the expanded `test_robust_clear.py` fast suite, all nine 40,000-clear settings,
+and the candidate table. Additional CPU probes at the copy-28 failing phase
+and the fast-30% corner gave identical full traces in RefSim, TorchSim and
+FastSim, including the zero-delay links.
+
+The literal requested `uv` invocation initially failed because the sandbox
+denied its default cache. It passed after setting `UV_CACHE_DIR` and pytest's
+`--basetemp` to the writable task temporary directory, `UV_PROJECT_ENVIRONMENT`
+to the existing repository environment, `UV_NO_SYNC=1`, and `PYTHONPATH=.` to
+import this worktree. The test command itself remained:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_robust_clear.py tests/test_request_clear_entrainment.py tests/test_build_options.py -m 'not slow'
+```

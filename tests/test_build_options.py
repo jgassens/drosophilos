@@ -39,6 +39,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "copy_requires_rail": True,
     "rate_robust": False,
     "zero_once": False,
+    "robust_request_clear": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -140,6 +141,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "copy_requires_rail": False,
         "rate_robust": False,
         "zero_once": True,
+        "robust_request_clear": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -173,6 +175,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "retry_clear": False,
         **LEGACY_2026_09_20,
         "zero_once": False,
+        "robust_request_clear": False,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -185,6 +188,42 @@ def test_true_guards_require_request_relight_repair():
             [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}],
             consts={"zero": 0}, relight_requests=False, true_guards=True,
         )
+
+
+@pytest.mark.parametrize("rate_robust", [False, True])
+def test_robust_request_clear_changes_only_request_k1_edges(rate_robust):
+    _, old, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust)
+    _, new, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
+                                       robust_request_clear=True)
+    assert (old.net.n, old.net.nnz) == (new.net.n, new.net.nnz)
+    assert (old.net.roles, old.net.src, old.net.dst, old.net.bias) == (
+        new.net.roles, new.net.src, new.net.dst, new.net.bias)
+    changed_delays = changed_weights = 0
+    for src, dst, q0, q1, d0, d1 in zip(old.net.src, old.net.dst, old.net.quanta,
+                                       new.net.quanta, old.net.delay, new.net.delay):
+        source, target = old.net.roles[src], old.net.roles[dst]
+        if q0 != q1:
+            assert ".req." in source and source.endswith(".k1.inh"), (source, target)
+            assert q0 < 0 and q1 < q0
+            changed_weights += 1
+        if d0 != d1:
+            assert ".req." in target and target.endswith((".k1.h1", ".k1.h2", ".k1.h3"))
+            assert d0 == PARAMS.default_delay_steps and d1 == 0
+            changed_delays += 1
+    assert changed_delays == 25 * 3
+    assert changed_weights >= 25 * 2  # readouts/require neurons mirror the new inhibition too
+
+
+@pytest.mark.parametrize("options", [
+    {"request_clear_pulses": 5}, {"retry_clear": True},
+    {"relight_requests": False, "true_guards": False},
+    {"drive": replace(Drive.from_params(PARAMS), kill_strength=1.0)},
+])
+def test_robust_request_clear_rejects_unqualified_policy_combinations(options):
+    with pytest.raises(ValueError, match="robust_request_clear requires"):
+        build_pipeline(PARAMS, 1,
+                       [{"name": "out", "op": "MOV", "a": "input", "b": ("const", "zero")}],
+                       consts={"zero": 0}, robust_request_clear=True, **options)
 
 
 def test_conditioned_rates_are_recorded_rebuilt_and_shared():
@@ -216,32 +255,34 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
 
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
-def test_zero_once_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath):
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath, option):
     _, pl, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
-                                       datapath=datapath, zero_once=True)
-    assert pl.build_options["zero_once"] is True
+                                       datapath=datapath, **{option: True})
+    assert pl.build_options[option] is True
     _, _, rebuilt = build_tick_pipeline({"block": "tick", **pl.build_options})
     assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
     # Removing only the new option recovers the exact old build in both modes.
     record = {"block": "tick", **pl.build_options}
-    record.pop("zero_once")
+    record.pop(option)
     _, _, old = build_tick_pipeline(record)
     _, expected, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
-                                             datapath=datapath, zero_once=False)
-    assert old.build_options["zero_once"] is False
+                                             datapath=datapath, **{option: False})
+    assert old.build_options[option] is False
     assert _pipeline_fingerprint(old) == _pipeline_fingerprint(expected)
     if rate_robust:
         _assert_conditioned_train_inputs(pl.net, pl.drive)
 
 
-def test_kernel_campaign_zero_once_cli_builds_and_records_the_option(tmp_path, monkeypatch):
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch, option):
     real_block = kernel_campaign.block
     seen = {}
 
     def recording_block(*args, **kwargs):
         result = real_block(*args, **kwargs)
         seen["build"] = result
-        seen["zero_once"] = kwargs["zero_once"]
+        seen[option] = kwargs[option]
         return result
 
     def fake_run(pl, params, schedules, **kwargs):
@@ -256,15 +297,16 @@ def test_kernel_campaign_zero_once_cli_builds_and_records_the_option(tmp_path, m
     monkeypatch.setattr(kernel_campaign, "run_pipeline_batched", fake_run)
     out = tmp_path / "campaign.json"
     kernel_campaign.main(["tick", "--copies", "1", "--max-ms", "1",
-                          "--zero-once", "--out", str(out)])
+                          "--" + option.replace("_", "-"), "--out", str(out)])
     record = json.loads(out.read_text())
-    assert seen["zero_once"] is seen["build"][1].build_options["zero_once"] is True
-    assert record["zero_once"] is True
+    assert seen[option] is seen["build"][1].build_options[option] is True
+    assert record[option] is True
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-def test_stage_d_zero_once_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch):
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 
     seen = []
@@ -294,22 +336,22 @@ def test_stage_d_zero_once_cli_record_recheck_and_diagnostic_rebuild(tmp_path, m
     # Avoid C compilation: this test verifies the build and record wiring.
     monkeypatch.setattr(stage_d, "three_point_check", lambda *args: {"ir_equal": True})
     out = tmp_path / "stage_d.json"
-    record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--zero-once",
+    record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--" + option.replace("_", "-"),
                            "--rate-robust", "--out", str(out)])
     original = seen[-1]
-    assert record["zero_once"] is record["build_options"]["zero_once"] is True
+    assert record[option] is record["build_options"][option] is True
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(original) == _pipeline_fingerprint(rebuilt)
     stage_d.main(["--recheck", str(out)])
-    assert seen[-1].build_options["zero_once"] is True
+    assert seen[-1].build_options[option] is True
     assert _pipeline_fingerprint(original) == _pipeline_fingerprint(seen[-1])
     # Nested Stage-D records also retain the option; genuinely old records default false.
-    record.pop("zero_once")
+    record.pop(option)
     stage_d.recheck_record(record)
-    assert seen[-1].build_options["zero_once"] is True
-    record["build_options"].pop("zero_once")
+    assert seen[-1].build_options[option] is True
+    record["build_options"].pop(option)
     stage_d.recheck_record(record)
-    assert seen[-1].build_options["zero_once"] is False
+    assert seen[-1].build_options[option] is False
 
 
 def test_stall_diag_rejects_unidentified_or_obsolete_rate_circuits():
