@@ -397,6 +397,11 @@ def test_cli_exposes_new_assumptions_and_sensitivity(capsys):
     assert configured[0]["hazard"] == pytest.approx(0.1)
     assert configured[0]["campaign_failure"] == pytest.approx(
         analytic(Model(ticks=4, copies=2, hazard=0.1, recovery_ticks=3))["campaign_failure"])
+    skipped = [row for row in configured if row["campaign_failure"] is None]
+    assert [row["scenario"] for row in skipped] == [
+        "10% persistent susceptible lanes", "5% persistent susceptible lanes"]
+    for row in skipped:
+        assert row["note"].startswith("skipped: frailty_fraction must exceed marginal first-stall probability")
     for args in (["--tick-seconds", "0"], ["--time-fraction", "2"],
                  ["--frailty-fraction", "0.01"]):
         with pytest.raises(SystemExit):

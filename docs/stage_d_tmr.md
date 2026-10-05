@@ -516,6 +516,10 @@ integrated hazard so `q * (1-product(1-h_weak[t])) = p`, the homogeneous lane's
 first-stall mission probability. This requires q>p, with q=1 the homogeneous
 case. For constant h, `h_weak=1-(1-p/q)^(1/T)`. Thus frailty changes repair
 overlap and repeat failures without changing marginal first-stall risk.
+The CLI sensitivity sweep preserves this feasibility rule: if a scenario's
+overrides make `q <= p`, it emits that row with a null campaign failure and a
+`skipped:` note reporting q and p. It does not clamp q or relax model
+validation; use a larger q or a lower mission hazard to evaluate that scenario.
 At h=5e-5, q=0.1/0.05 gives h_weak about 6.69e-4/3.70e-3. After successful
 rejoin, `post_rejoin_multiplier` multiplies that same lane's intensity for the
 remainder of the mission; it does not resample susceptibility or compound on

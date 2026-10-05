@@ -60,6 +60,11 @@ def _log_survival(hazard: np.ndarray) -> np.ndarray:
         return np.log1p(-hazard)
 
 
+def _first_stall_probability(hazard: np.ndarray) -> float:
+    """Marginal chance that a lane stalls at least once during the mission."""
+    return -math.expm1(float(_log_survival(hazard).sum()))
+
+
 @dataclass(frozen=True)
 class Model:
     ticks: int = 1000
@@ -106,7 +111,7 @@ class Model:
     def kernel_hazard(self, *, rejoined: bool = False) -> np.ndarray:
         """Hazard of a susceptible lane; its susceptibility survives every reset."""
         intensity = -_log_survival(self.hazard)
-        p = -math.expm1(-float(intensity.sum()))
+        p = _first_stall_probability(self.hazard)
         q = self.frailty_fraction
         if q < 1:
             if p >= q:
@@ -499,7 +504,11 @@ def campaign_gate(*, trials: int = 300, target_failure: float = 0.03,
 
 
 def sensitivity_table(base: Model | None = None) -> list[dict]:
-    """Reproducible assumptions for the design table; all are scenarios, not fits."""
+    """Reproducible assumptions for the design table; all are scenarios, not fits.
+
+    Infeasible frailty scenarios are reported as skipped rows rather than silently
+    clamped: preserving a marginal first-stall probability p requires q > p.
+    """
     scenarios = [
         ("Ideal R=2 floor at h=5e-5", {}),
         ("Low evidence envelope", {"hazard": 1.5e-5}),
@@ -531,14 +540,28 @@ def sensitivity_table(base: Model | None = None) -> list[dict]:
     base = Model() if base is None else base
     rows = []
     for label, kwargs in scenarios:
+        hazard = _rates("hazard", kwargs.get("hazard", base.hazard), base.ticks)
+        frailty_fraction = kwargs.get("frailty_fraction", base.frailty_fraction)
+        p_first_stall = _first_stall_probability(hazard)
+        row = {"scenario": label, "hazard": float(hazard[0]),
+               "f_repair": kwargs.get("recovery_failure", base.recovery_failure),
+               "controller_hazard": float(_rates(
+                   "controller_hazard", kwargs.get("controller_hazard", base.controller_hazard),
+                   base.ticks)[0]),
+               "writer_hazard": float(_rates(
+                   "writer_hazard", kwargs.get("writer_hazard", base.writer_hazard), base.ticks)[0]),
+               "frailty_fraction": frailty_fraction,
+               "post_rejoin_multiplier": kwargs.get("post_rejoin_multiplier",
+                                                     base.post_rejoin_multiplier)}
+        if frailty_fraction < 1 and p_first_stall >= frailty_fraction:
+            row.update(campaign_failure=None,
+                       note=("skipped: frailty_fraction must exceed marginal first-stall "
+                             f"probability (q={frailty_fraction:g}, p={p_first_stall:g})"))
+            rows.append(row)
+            continue
         model = replace(base, **kwargs)
-        rows.append({"scenario": label, "hazard": float(model.hazard[0]),
-                     "f_repair": model.recovery_failure,
-                     "controller_hazard": float(model.controller_hazard[0]),
-                     "writer_hazard": float(model.writer_hazard[0]),
-                     "frailty_fraction": model.frailty_fraction,
-                     "post_rejoin_multiplier": model.post_rejoin_multiplier,
-                     "campaign_failure": analytic(model)["campaign_failure"]})
+        row["campaign_failure"] = analytic(model)["campaign_failure"]
+        rows.append(row)
     return rows
 
 
