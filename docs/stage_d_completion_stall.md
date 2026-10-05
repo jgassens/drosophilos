@@ -1078,3 +1078,190 @@ The four additional 256-trial noisy capture screens completed as reported above.
 `git diff --check` passes.
 No simulator or machine source was changed. Integration and committing remain
 with the orchestrator; no commit is attempted.
+
+## Capture verification (2026-10-05)
+
+**The Juno 441837 recapture confirms the master-survivor mechanism for base
+copies 17 and 74, including the predicted bits, failed valid re-ignition and
+successful selected-rail COPY. It refines the reset phase account: the arrivals
+do not all land just after both latch members fire.** Copy 74 is directly
+double-railed on bit 3; its fault train is no longer merely indirect evidence.
+This section supersedes the earlier evidence limits for these two base copies.
+RR copies 11 and 24 were not included in this recapture.
+
+### Capture and rebuild
+
+Inputs are under
+`/Users/jeremiahgassensmith/programming/drosophilos/data/stage_d/`:
+`mixB_s108_c100_completion740.json`,
+`mixB_s108_c100_completion740_copy17.npz` and
+`mixB_s108_c100_completion740_copy74.npz`. The accompanying diagnostic reports
+are `reports/base_copy17_completion.md` and `reports/base_copy74_completion.md`.
+The failed commit commands are unchanged: **43,408,414**, neuron **28143**
+(`c4_sel`), and **19,107,156**, neuron **28341** (`c5_sub`).
+
+`stall_diag.build_tick_pipeline(record)` rebuilt the authoritative nested
+`build_options`: generic datapath, true guards v2, selected-rail COPY,
+rate-robust off and shipped reset strength 0.75. The rebuilt netlist has
+**29,375 neurons / 52,808 synapses**. `load_dump` validated the recorded roles
+with **zero ID drift** in both captures. Each dump explicitly captures **6,366
+IDs**, including the target cell's complete Q/M domains, guard, grant, COPY and
+all arms; silence of the probes below is therefore observable. Copy 17 contains
+46,301,284 spikes in **43,114,738–45,271,503**; copy 74 contains 49,165,920 in
+**18,799,802–20,956,617**, inclusive.
+
+`datapath_view` from the failed STARTs (**43,403,114 / 19,101,769**) shows all
+eleven Q valids rising and exclusive Q rails holding the new words **48 / 187**,
+with C/Z/V all zero. Direct master-rail inspection before reset gives the old
+words **0 with Z=1 / 197 with C/Z/V=0**, agreeing with the isolated model's
+reference words. Further event extraction used the rebuilt cell's neuron IDs
+and nominal synaptic delays, rather than replaying static draws or CUDA strays.
+Steps remain 0.1 ms. The ≤141-step train criterion is used for latch members;
+the slower OR and fault gates are inspected as individual spikes.
+
+### Exactly one old master rail survives in each copy
+
+| Copy | Master reset trigger | Survivor u/v | Spikes bracketing master READY | Last survivor u/v spikes |
+|---|---|---|---|---|
+| 17 | `M.reset` **3500**, **43,409,210** | `M.b8r0` **3351/3352** | u: 43,410,010 → 43,410,054; v: 43,409,985 → 43,410,029; READY **3521** at **43,410,011** | **45,271,480 / 45,271,499** |
+| 74 | `M.reset` **4077**, **19,107,932** | `M.b3r0` **3908/3909** | u: 19,108,743 → 19,108,786; v: 19,108,724 → 19,108,767; READY **4098** at **19,108,764** | **20,956,595 / 20,956,576** |
+
+Both members of each survivor fire continuously across reset and through capture
+end. Their largest post-trigger gaps are **80/83 steps** (17 u/v) and **85/83**
+(74 u/v), including the reset disturbance. Every other old master rail stops
+before READY. Unchanged rails then restart only after their selected COPY arm,
+with **857–965-step** gaps in copy 17 and **885–998-step** gaps in copy 74;
+flipped old rails remain silent. No master valid latch or completion-tree latch
+survives the reset. Thus this is old data storage surviving, not a retained
+completion root or a COPY failure.
+
+### Actual inhibitor arrivals and entrainment
+
+The captured reset inhibitors emit **four spikes, with no fifth**:
+
+| Copy / inhibitor | Emission steps | Arrival steps at both survivor members (+18) | Arrival offsets from first |
+|---|---|---|---|
+| 17 / **3501** | 43,409,267; 43,409,317; 43,409,366; 43,409,413 | **43,409,285; 43,409,335; 43,409,384; 43,409,431** | **0/50/99/146** |
+| 74 / **4078** | 19,107,985; 19,108,033; 19,108,079; 19,108,126 | **19,108,003; 19,108,051; 19,108,097; 19,108,144** | **0/48/94/141** |
+
+The rebuilt inhibitor fan-out has −2,716-q edges to both members, all with
+18-step delays. These are nominal quanta; the capture does not record each
+copy's perturbed weights. The following are the last member spikes at or before
+each arrival; parenthesized numbers are their ages in steps. An age of zero
+means the same recorded step, without a claim about within-step event order.
+
+| Copy | Inhibitor arrival | Survivor u spike (age) | Survivor v spike (age) |
+|---|---:|---|---|
+| 17 | 43,409,285 | 43,409,255 (30) | 43,409,258 (27) |
+| 17 | 43,409,335 | 43,409,333 (2) | 43,409,334 (1) |
+| 17 | 43,409,384 | 43,409,381 (3) | 43,409,376 (8) |
+| 17 | 43,409,431 | 43,409,381 (50) | 43,409,425 (6) |
+| 74 | 19,108,003 | 19,107,972 (31) | 19,108,003 (0) |
+| 74 | 19,108,051 | 19,108,045 (6) | 19,108,043 (8) |
+| 74 | 19,108,097 | 19,108,090 (7) | 19,108,091 (6) |
+| 74 | 19,108,144 | 19,108,141 (3) | 19,108,091 (53) |
+
+Before inhibition, both captured survivors have **34-step member periods**, with
+their members three steps apart: copy 17 u/v at 43,409,187/43,409,190,
+43,409,221/43,409,224, 43,409,255/43,409,258; copy 74 u/v at
+19,107,904/19,107,901, 19,107,938/19,107,935, 19,107,972/19,107,969.
+The middle two arrivals in each copy find both members within
+their **22-step refractory interval**. The first copy-17 arrival finds neither
+member in that interval; the first copy-74 arrival coincides with v. The final
+arrivals find only v (17) or u (74) recently fired, after the pair has separated.
+After the last arrival, copy 17 next fires u/v at **43,409,460/43,409,508**;
+copy 74 at **19,108,226/19,108,174**. Inhibition stretches the train and changes
+its phase but does not extinguish either loop.
+
+This directly confirms survival in the predicted fast-mode/reset interaction,
+while refining the isolated reconstruction's simplified “each arrival within
+0–14 steps / just after both” account. Copy 74's **0/48/94/141** arrival offsets
+match its isolated noise-free prediction exactly. Copy 17's captured
+**0/50/99/146** differs slightly from the predicted **0/49/96/140**. Spike timing
+and the wired delays are captured evidence; refractory/membrane effects are
+interpreted using the recorded circuit physics, not measured voltage traces.
+
+### The survivor's OR resumes; valid ignition and completion do not
+
+| Probe | Copy 17, bit 8 | Copy 74, bit 3 |
+|---|---|---|
+| Valid OR | **3419**: last pre-gap **43,409,258**, resumes **43,409,870**, last **45,271,484** | **3961**: last pre-gap **19,107,969**, resumes **19,108,553**, last **20,956,544** |
+| OR interspike gap | **612 steps**; last/resumed at reset trigger +48/+660 | **584 steps**; last/resumed at trigger +37/+621 |
+| Valid latch u/v last spikes | **3420/3421**: **43,409,307 / 43,409,273** | **3962/3963**: **19,107,986 / 19,108,024** |
+| Ignition relay | **3422**: last **43,355,991**, no spike for this reset/rewrite | **3964**: last **19,050,256**, no spike for this reset/rewrite |
+| OR-driven `ign.edge_inh` | **3423**: **43,409,279 → 43,409,916**, then fires through **45,271,355** | **3965**: **19,107,988 → 19,108,599**, then fires through **20,956,562** |
+| Valid-driven `ign.hold_inh` tail | **3424**, last **43,409,381** | **3966**, last **19,108,057** |
+
+The OR resumes **before READY and COPY** in each copy, so its initial renewed
+drive comes from the old survivor. After the final reset arrival, the OR fires
+**12,501 / 25,231** times and its edge inhibitor **12,685 / 27,240** times.
+The valid latch remains dark throughout. The edge inhibitor's nominal
+**−7,966-q / 18-step** connection continues delivering inhibition to the silent
+ignition relay; the lighter valid-driven hold inhibitor dies. This is the
+predicted failure to re-arm, with renewed OR excitation and sustained inhibitory
+input observed directly. The gap is insufficient at these draws, consistent
+with the isolated experiments. Copy 74's captured OR gap **584** is slightly
+longer than the isolated survivor's **555** (+19 → +574), with the same outcome.
+
+All ten other master valids re-ignite. Only the survivor-dependent tree path
+fails to re-ignite: copy 17 `c0_4.L` **3465/3466**, `c1_2.L` **3483/3484**,
+root `c3_0.L` **3495/3496**; copy 74 `c0_1.L` **4024/4025**, `c1_0.L`
+**4048/4049**, `c2_0.L` **4066/4067**, root **4072/4073**. The roots' last u/v
+spikes are **43,409,258/43,409,283** and **19,107,987/19,107,966**; neither root fires after
+READY. DONE **3632/4209** never fires for these transactions. DONE inhibitors
+**3633/4210** stop at **43,409,354 / 19,108,141**, confirming that the missing
+input is renewed master completion, rather than a sustained DONE inhibitor.
+
+### COPY writes the selected word; copy 74 retains an extra bit-3 rail
+
+COPY u/v **3542/3543** starts at **43,410,054/43,410,112** in copy 17, and
+**4119/4120** at **19,108,808/19,108,867** in copy 74. Every selected `cp*.edge` fires
+exactly once after reset; every opposite arm is silent. The complete arm evidence
+is below (`r` is the selected rail; each entry is neuron ID @ spike step).
+
+| Bit | Copy 17 r / arm ID @ step | Copy 74 r / arm ID @ step |
+|---:|---|---|
+| 0 | r0 / **3546 @ 43,410,135** | r1 / **4127 @ 19,108,892** |
+| 1 | r0 / **3554 @ 43,410,135** | r1 / **4135 @ 19,108,886** |
+| 2 | r0 / **3562 @ 43,410,132** | r0 / **4139 @ 19,108,894** |
+| 3 | r0 / **3570 @ 43,410,136** | r1 / **4151 @ 19,108,888** |
+| 4 | r1 / **3582 @ 43,410,143** | r1 / **4159 @ 19,108,904** |
+| 5 | r1 / **3590 @ 43,410,135** | r1 / **4167 @ 19,108,893** |
+| 6 | r0 / **3594 @ 43,410,138** | r0 / **4171 @ 19,108,889** |
+| 7 | r0 / **3602 @ 43,410,136** | r1 / **4183 @ 19,108,889** |
+| 8 | r0 / **3610 @ 43,410,134** | r0 / **4187 @ 19,108,881** |
+| 9 | r0 / **3618 @ 43,410,136** | r0 / **4195 @ 19,108,899** |
+| 10 | r0 / **3626 @ 43,410,149** | r0 / **4203 @ 19,108,895** |
+
+In copy 17, the ten cleared selected master u neurons start between
+**43,410,178–43,410,190**; bit 8 r0 was already live. In particular new bit 4 r1
+**3337** starts **43,410,189**, bit 5 r1 **3341** at **43,410,179**, and
+Z=0 rail **3355** at **43,410,183**. The final master is the exclusive word
+**48, C/Z/V=0**, despite its missing valid8/completion. COPY therefore delivers
+the desired data, but does not complete the transaction.
+
+In copy 74 all eleven selected master u neurons start between
+**19,108,921–19,108,953** and hold to capture end. For bit 3, Q's selected r1 **3687**
+drives arm **4151** at **19,108,888**; the new `M.b3r1` u/v **3910/3911**
+starts at **19,108,936/19,108,994**. The opposite arm **4147** never fires;
+the old `M.b3r0` **3908/3909** is the reset survivor, not a second COPY write.
+Both rails then persist beside each other. The other ten bits match **187,
+C/Z/V=0** exclusively, so COPY writes the requested rails but does not leave
+an exclusive architectural word.
+
+`M.fault3.and` **3967** fires **5,414** times, starting at **19,109,292**,
+exactly **READY +528**, then **19,109,674 / 19,110,057 / 19,110,442**
+(gaps **382/383/385**), through **20,956,487**. This agrees with the isolated
+forced-survivor prediction (**READY +526**, initial periods **380–385**).
+The entire captured fault train has variable intervals (**217–394**, median
+**359** steps), so the initial near-periodic match is not a claim of a fixed
+period over the whole strayed capture. All other master fault gates in copy 74,
+and all master fault gates in copy 17, remain silent.
+
+The capture thus confirms the predicted unchanged-bit survivor **17 b8r0** and
+flipping-bit survivor **74 b3r0**, their blocked valid one-shots, and successful
+COPY with the latter's persistent double rail. The refinements concern the
+actual reset phase and OR recovery timing, not the initiating latch or the
+completion blockage. Analysis and assertion scripts were kept in the task's
+scratch directory outside the repository and run with the existing repository
+virtualenv; only this document is changed.
