@@ -7,7 +7,8 @@ replicated neural log, and repair a stalled replica from that log. Voting alone
 leaves failed replicas unavailable: at the observed stall rate, unrepaired TMR
 still has about **50% campaign failure probability** over 100 logical copies ×
 1,000 ticks. **0.2245426% is an ideal floor at h=5e-5, R=2, f_repair=0,
-controller-lane hazard=0, writer hazard=0, homogeneous replicas and perfect
+controller-lane hazard=0, writer hazard=0, alpha=0 (purely transaction-driven
+exposure), homogeneous replicas and perfect
 timers/protection; it is not a forecast.** At the same hazard, f_repair=1%
 raises failure to **0.9430644%**, and f_repair=10% to **7.1533518%**.
 With no qualified repair (f_repair=1), it is **49.9825019%** before controller
@@ -578,16 +579,22 @@ conditional idealizations. Inputs have no measured TMR calibration.
 | Unrepaired controllers, kernel-scale | 5e-5 | 0 | 5e-5 | 0 | 1 | 1 | 50.0948125% |
 | Static writer, 1e-7 | 5e-5 | 0 | 0 | 1e-7 | 1 | 1 | 1.2173251% |
 | Static writer, 1e-6 | 5e-5 | 0 | 0 | 1e-6 | 1 | 1 | 9.7194373% |
+| Static writer, low kernel-scale | 5e-5 | 0 | 0 | 5e-6 | 1 | 1 | 39.4832017% |
+| Static writer, illustrative kernel-scale | 5e-5 | 0 | 0 | 2.4e-5 | 1 | 1 | 90.9488354% |
+| Static writer, kernel-scale | 5e-5 | 0 | 0 | 5e-5 | 1 | 1 | 99.3278023% |
 | 10% persistent susceptible lanes | 5e-5 | 0 | 0 | 0 | 0.1 | 1 | 0.4002315% |
 | 5% persistent susceptible lanes | 5e-5 | 0 | 0 | 0 | 0.05 | 1 | 2.9360588% |
 | Post-rejoin intensity ×2 | 5e-5 | 0 | 0 | 0 | 1 | 2 | 0.2357042% |
-| Joint illustrative assumptions | 1.1129796e-4 | 0.01 | 2.4e-5 | 1e-7 | 0.2 | 1 | 21.8515843% |
+| Joint illustrative assumptions (h_s = h_c) | 1.1129796e-4 | 0.01 | 2.4e-5 | 2.4e-5 | 0.2 | 1 | 92.8394916% |
 
 At h_c=2.4e-5, controller loss alone is about 15.31%; the table adds the
 kernel floor independently. A writer at 1e-7 alone costs about 0.995% across
-100,000 service-ticks. No data establishes h_c or h_s near 1e-8 or below;
-the controller uses the same primitives as the kernels. Setting them to zero
-is an explicit best-case assumption, not credit earned by replication.
+100,000 service-ticks, but the kernel-scale rows show why it is not a suitable
+published joint assumption. The joint row sets h_s=h_c=2.4e-5 because both are
+unqualified neural control paths built from the same primitive family; no
+evidence justifies treating the single writer as 240 times more reliable. No
+data establishes h_c or h_s near 1e-8 or below; setting them to zero is an
+explicit best-case assumption, not credit earned by replication.
 
 Residual protection sensitivity at h=5e-5, R=2, f_repair=0, h_c=h_s=0, q=m=1:
 
@@ -762,7 +769,7 @@ adds roughly 3.72M neurons / 7.815M edges, before indexing/control.
 The revised protected design exceeds one 166,700-neuron MCNS image before
 placement/relay costs. Distribute it or reduce the architecture with measured
 sharing; do not call it a single-node Profile 2 fit. A shared timer oscillator
-could save much of the 36k timer allocation but becomes a new common dependency
+could save much of the 60,090-neuron 15-channel timer allocation but becomes a new common dependency
 and is an unmeasured design change. The capacity report must precede any >4-node
 scale-up. For 100 logical services, mutable neuron state is roughly 23–24M
 neurons at this budget, despite shared topology; wall time is not inferred by
@@ -864,8 +871,8 @@ the gate regardless of a larger random pass count.
 | 3: protected comparator/voter | Same-pair whole-vector certificate | All 4,096 two-bit three-lane rail patterns × 8 identity/order conditions (32,768): 0 incorrect certificates, all valid quorum cases complete, cross-word AB/BC false quorum rejected. 100 seeds × 3 voter-lane outages × 6 receive/compare/publish boundaries (1,800): each single outage masked. 100 trials each of shared-qualifier/common-input/power failures (300): bounded stop, no wrong certificate. 10,000 independent healthy demands: 0 false failure; measure latency maximum. |
 | 4: neural commit log | Quorum append, watermark and mid-append exclusion | 100 seeds × 5 retry windows (before append/after append/after certificate/after publish-before-ACK/after reload-compaction) × 3 failed members (1,500): exactly 1 application/notification, no torn record, two-member quorum live. 100 each conflicting-payload/gap-or-stale/majority-loss/static-writer-loss trials (400): all refuse or stop safely; writer loss fails liveness. Exhaust bounded FSM reachable crash-prefix states for 2 banks/3 members/2 ticks/1 retry, 100% invariants; report enumerated count. |
 | 5: watches, fencing and integrated rejoin | Tagged deadlines, counters and consumer isolation | Per timer role/channel: 10,000 independently perturbed healthy demands with 0 false timeout, 10,000 forced stalls with 0 missed/late authorization. 100 seeds × fast/stuck/cancel-late/cancel-next-tick faults × 3 channels × 5 deadline classes (6,000): single-channel faults masked, 0 unsafe fence. 100 each dark READY/double rail/continuous firing/never-ACK × 3 reload consumers (1,200): unchanged authoritative bank, no indefinite hold; good pair continues. Repeat step 1's 5,400 repairs through the real log/fence, same thresholds. After each success, follow 1,000 ticks under the SAME static draws, report conditional repeat-stall hazard/CI. Inject corruption/premature READY/partial reload, 100 per class per lane (900): 0 rejoin. Exhaust all 65,536 values per 16-bit counter, correct +1 or overflow stop; 10,000 noisy counter demands, 0 wrong identities. |
-| 6: integrated toy qualification | 100 TMR services / 300 independently perturbed kernel lanes; controller/log/timer noise enabled | **300 independent seed/placement campaigns × 100 services × 1,000 ticks**, 0 failed campaigns: exact state every tick, once-only retry, no unmasked timeout/truncation/unsafe publish. Zero failures gives one-sided 95% campaign upper bound 0.994%, not evidence for 0.2245%. Separately 100 campaigns per one-stall/two-overlap/late-duplicate/lost-ACK class: single stalls masked/fenced, two overlaps stop boundedly, duplicates apply once, 0 safety violations. Report repair tails/exhaustion/protection faults and estimate fresh h, f_repair, h_c, h_s and frailty before updating sensitivity. |
-| 7: actual Stage D / F extension | minidoom p_* wider state schema, split kill domains, qualified controller/writer replacement where required | Repeat step 6's 300 campaigns with real state, all pass. F: 100 seeds per kernel/log-member/writer kill domain × 5 append/apply/reload boundaries: every tolerated kill restores correct state within measured R, no host game computation/repeated apply; majority loss stops in all trials. 100/100 capacity mappings meet declared neuron/edge/memory limits before >4-node scaling. New controller/writer replacement domains repeat step 1/5 thresholds; without replacement do not claim recovery. Label hybrid/all-neural and placement modes; F2 has its own exit. |
+| 6: integrated toy qualification | 100 TMR services / 300 independently perturbed kernel lanes; controller/log/timer noise enabled | **300 independent seed/placement campaigns × 100 services × 1,000 ticks**: accept at most **3 failed campaigns**. This is a pre-registered one-sided 95% test of a 3% campaign-failure target: at 3%, P(X≤3)=1.9890%; at the ideal 0.2245426% floor, P(X≤3)=99.5031%. Do not re-roll or select seeds/placements after observing a failure. Exact state every tick, once-only retry, no unmasked timeout/truncation/unsafe publish. Separately 100 campaigns per one-stall/two-overlap/late-duplicate/lost-ACK class: single stalls masked/fenced, two overlaps stop boundedly, duplicates apply once, 0 safety violations. Report repair tails/exhaustion/protection faults and estimate fresh h, f_repair, h_c, h_s and frailty before updating sensitivity. |
+| 7: actual Stage D / F extension | minidoom p_* wider state schema, split kill domains, qualified controller/writer replacement where required | Repeat step 6's **pre-registered 300-campaign, at-most-3-failures / 3% target** with real state; under the ideal floor its pass probability is again 99.5031% (99.0086% for both gates if independent). Do not re-roll or select seeds/placements after observing a failure. F: 100 seeds per kernel/log-member/writer kill domain × 5 append/apply/reload boundaries: every tolerated kill restores correct state within measured R, no host game computation/repeated apply; majority loss stops in all trials. 100/100 capacity mappings meet declared neuron/edge/memory limits before >4-node scaling. New controller/writer replacement domains repeat step 1/5 thresholds; without replacement do not claim recovery. Label hybrid/all-neural and placement modes; F2 has its own exit. |
 
 For zero failures in n independent demands, the **one-sided 95% binomial upper
 bound is `1-0.05^(1/n)`**: 300 gives 0.9936%, 10,000 gives 0.02995%. Step 1
@@ -916,7 +923,7 @@ missions, static identity/frailty with failed repairs and post-rejoin exposure,
 unrepaired controller majority loss, static writer loss, cadence scaling,
 Wilson hazard intervals, nonstationary hazards, common-mode scope, Monte Carlo
 agreement, censoring and CLI/errors. The headline, every main sensitivity-table
-row and the observed-profile results are pinned at 1e-11 relative tolerance.
+row and the observed-profile results are pinned at 1e-9 relative tolerance.
 The exact requested command was attempted:
 
 ```sh

@@ -22,7 +22,7 @@ that recurrence. Both support time-varying hazards and explicit common modes.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from numbers import Integral
@@ -455,7 +455,50 @@ def first_stall_estimate(stalls: int, *, copies: int = 100, ticks: int = 1000) -
             "hazard_confidence_95": tuple(to_h(p) for p in interval)}
 
 
-def sensitivity_table() -> list[dict]:
+def binomial_cdf(successes: int, trials: int, probability: float) -> float:
+    """P[X <= successes] for a binomial variate, without a scipy dependency."""
+    _integer("trials", trials, 1)
+    _integer("successes", successes, 0)
+    if successes >= trials:
+        return 1.0
+    if not math.isfinite(probability) or not 0 <= probability <= 1:
+        raise ValueError("probability must be in [0, 1]")
+    if probability == 0:
+        return 1.0
+    if probability == 1:
+        return 0.0
+    term = (1 - probability) ** trials
+    total = term
+    for observed in range(successes):
+        term *= (trials - observed) * probability / ((observed + 1) * (1 - probability))
+        total += term
+    return min(1.0, total)
+
+
+def campaign_gate(*, trials: int = 300, target_failure: float = 0.03,
+                  floor_failure: float | None = None) -> dict:
+    """Exact one-sided gate and floor pass chance for independent campaigns.
+
+    The acceptance count is the largest count whose chance at the target rate is
+    at most 5%, so accepting it is a one-sided 95% test of the stated target.
+    """
+    _integer("trials", trials, 1)
+    if not math.isfinite(target_failure) or not 0 < target_failure < 1:
+        raise ValueError("target_failure must be in (0, 1)")
+    if floor_failure is None:
+        floor_failure = analytic(Model())["campaign_failure"]
+    if not math.isfinite(floor_failure) or not 0 <= floor_failure <= 1:
+        raise ValueError("floor_failure must be in [0, 1]")
+    acceptance = max(k for k in range(trials + 1)
+                     if binomial_cdf(k, trials, target_failure) <= 0.05)
+    return {"trials": trials, "target_failure": target_failure,
+            "accept_at_most": acceptance,
+            "target_false_accept_probability": binomial_cdf(
+                acceptance, trials, target_failure),
+            "floor_pass_probability": binomial_cdf(acceptance, trials, floor_failure)}
+
+
+def sensitivity_table(base: Model | None = None) -> list[dict]:
     """Reproducible assumptions for the design table; all are scenarios, not fits."""
     scenarios = [
         ("Ideal R=2 floor at h=5e-5", {}),
@@ -475,16 +518,20 @@ def sensitivity_table() -> list[dict]:
         ("Unrepaired controllers, kernel-scale", {"controller_hazard": 5e-5}),
         ("Static writer, 1e-7", {"writer_hazard": 1e-7}),
         ("Static writer, 1e-6", {"writer_hazard": 1e-6}),
+        ("Static writer, low kernel-scale", {"writer_hazard": 5e-6}),
+        ("Static writer, illustrative kernel-scale", {"writer_hazard": 2.4e-5}),
+        ("Static writer, kernel-scale", {"writer_hazard": 5e-5}),
         ("10% persistent susceptible lanes", {"frailty_fraction": 0.1}),
         ("5% persistent susceptible lanes", {"frailty_fraction": 0.05}),
         ("Post-rejoin intensity x2", {"post_rejoin_multiplier": 2.0}),
         ("Joint illustrative assumptions", {"hazard": float(cadence_hazard(5e-5)),
           "recovery_failure": 0.01, "controller_hazard": 2.4e-5,
-          "writer_hazard": 1e-7, "frailty_fraction": 0.2}),
+          "writer_hazard": 2.4e-5, "frailty_fraction": 0.2}),
     ]
+    base = Model() if base is None else base
     rows = []
     for label, kwargs in scenarios:
-        model = Model(**kwargs)
+        model = replace(base, **kwargs)
         rows.append({"scenario": label, "hazard": float(model.hazard[0]),
                      "f_repair": model.recovery_failure,
                      "controller_hazard": float(model.controller_hazard[0]),
@@ -517,9 +564,6 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--trials", type=int, default=20000, help="whole Monte Carlo campaigns; 0 skips sampling")
     parser.add_argument("--seed", type=int, default=108)
     args = parser.parse_args(argv)
-    if args.sensitivity:
-        print(json.dumps(sensitivity_table(), indent=2, allow_nan=False))
-        return
     try:
         _integer("trials", args.trials, 0)
         if args.profile == "observed" and args.ticks != 1000:
@@ -536,12 +580,17 @@ def main(argv: Sequence[str] | None = None) -> None:
                       global_common_mode=args.global_common_mode)
     except (ValueError, TypeError) as error:
         parser.error(str(error))
+    if args.sensitivity:
+        print(json.dumps(sensitivity_table(model), indent=2, allow_nan=False))
+        return
     exact = analytic(model)
     exact.pop("group_failure_by_tick")
     report = {
         "assumption": "sensitivity only; ideal case is a floor, not a forecast; static frailty; "
                       "healthy results correct; unrepaired controller lanes; static single writer",
         "parameters": vars(args),
+        "effective_hazard": (float(model.hazard[0]) if np.all(model.hazard == model.hazard[0])
+                             else model.hazard.tolist()),
         "unreplicated_stalls_only": unreplicated_failure(model.hazard, ticks=model.ticks, copies=model.copies),
         "analytic": exact,
         "monte_carlo": monte_carlo(model, trials=args.trials, seed=args.seed) if args.trials else None,
