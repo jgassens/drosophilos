@@ -61,8 +61,10 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
     """Wrap consumer register S (with completion and fault latch, i.e. after wire_fault_path)
     with a master M and a commit controller. The caller must NOT wire the producer's CLEARED
     to S's reset: S is cleared by commit-done, by F, or by the producer's TIMEOUT.
-    The pipeline's opt-in compact_register_resets pass runs after all wiring, so
-    these COMMIT/grant/COPY clears and later ALU/readout extensions share S's policy."""
+    The pipeline's experimental_register_reset pass runs after all wiring, so
+    these COMMIT/grant/COPY clears and later ALU/readout extensions share S's policy.
+    Its compact timed reset is unqualified; the closed-loop verification prototype
+    is likewise a final pass used only by qualification tests."""
     n = len(S.rails)
     if M is None:
         M = add_register(net, drive, f"{name}.M", n, with_completion=True)

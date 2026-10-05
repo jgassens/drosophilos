@@ -16,6 +16,12 @@ from ..sim.model import D_MAX
 COMPACT_READY_DELAY_STEPS = 100
 COMPACT_READY_TAIL_LINKS = 8
 
+# Qualification prototype, NOT a released register policy. See the measured
+# frontier in docs/stage_d_completion_stall.md before enabling it in a builder.
+VERIFY_WINDOW_LINKS = 4
+VERIFY_DELAY_STEPS = 100
+VERIFY_MAX_RETRIES = 3
+
 
 @dataclass(frozen=True)
 class Latch:
@@ -124,6 +130,113 @@ def compact_reset_domains(net: Netlist, drive: Drive, controllers: list[tuple[in
                             else net.params.default_delay_steps)
         if src in inhibitors and net.quanta[e] < 0:
             net.quanta[e] = round(baseline.setdefault(e, net.quanta[e]) * scale)
+
+
+@dataclass(frozen=True)
+class ResetVerification:
+    domain: tuple[int, ...]
+    busy: int
+    attempts: tuple[int, ...]
+    checks: tuple[int, ...]
+    exhausted: Latch
+    added_neurons: int
+    added_synapses: int
+
+
+def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
+                           inh: int, ready: int, ready_chain: list[int],
+                           fault_target: int | None = None) -> ResetVerification:
+    """Experimental silence certificate with three statically unrolled retries.
+
+    Finalize AFTER every reset extension and mirrored reader. The domain is the
+    complete negative fan-out of ``inh``; even a gate or a mirrored reader can
+    veto the certificate. A refractory-limited busy neuron bounds the aggregate
+    veto charge independently of register width. Four 100-step links following
+    the ordinary recovery chain must propagate without that veto to emit READY.
+
+    A parallel seven-link deadline is cancelled by a successful certificate.
+    Otherwise it starts another ordinary four-tap train through the SAME inh,
+    preserving every compiled reset weight (including rate-reader gains). No
+    feedback edge restarts an attempt. After three retries a sticky exhaustion
+    latch inhibits all attempt entries and READY and raises the existing FAULT
+    when supplied. Only a new simulator/image clears exhaustion.
+
+    This is a spiking circuit, not a host observer. Neither silence nor a bounded
+    retry count proves analogue recovery. It is retained for falsifiable tests;
+    ``verified_register_reset=True`` is rejected by the public kernel builder.
+    """
+    if len(ready_chain) != 15:
+        raise ValueError("reset verification requires a fifteen-hop recovery chain")
+    if not 0 <= VERIFY_DELAY_STEPS <= D_MAX:
+        raise ValueError("invalid reset verification delay")
+    old_edge = [e for e in net.incoming[ready] if net.src[e] == ready_chain[-1]]
+    if len(old_edge) != 1 or len(net.incoming[ready]) != 1:
+        raise ValueError("reset verification requires an unmodified READY output")
+    if any(role.startswith(f"{name}.verify.") for role in net.roles):
+        raise ValueError("reset verification already installed")
+    n0, e0 = net.n, net.nnz
+    domain = tuple(sorted({d for s, d, q in zip(net.src, net.dst, net.quanta)
+                           if s == inh and q < 0}))
+    busy = net.neuron(f"{name}.verify.busy")
+    for tap in domain:
+        net.synapse(tap, busy, drive.pulse)
+    exhausted = add_latch(net, drive, f"{name}.verify.exhausted")
+    attempts, checks = [], []
+    start = trigger
+    previous_deadline = None
+    for attempt in range(VERIFY_MAX_RETRIES + 1):
+        prefix = f"{name}.verify.a{attempt}"
+        if attempt:
+            start = net.neuron(f"{prefix}.reset")
+            net.synapse(previous_deadline, start, drive.pulse)
+            prev = start
+            net.synapse(start, inh, drive.pulse)
+            for k in range(1, 4):
+                relay = net.neuron(f"{prefix}.reset_relay{k}")
+                net.synapse(prev, relay, drive.pulse)
+                net.synapse(relay, inh, drive.pulse)
+                prev = relay
+            prev = start
+            for k in range(15):
+                recovery = net.neuron(f"{prefix}.recovery{k}")
+                net.synapse(prev, recovery, drive.pulse)
+                prev = recovery
+        else:
+            prev = ready_chain[-1]
+        attempts.append(start)
+        recovery_end = prev
+        for k in range(VERIFY_WINDOW_LINKS):
+            timer = net.neuron(f"{prefix}.quiet{k}")
+            if attempt == k == 0:
+                # Preserve existing consumers of READY and the recovery prefix.
+                edge = old_edge[0]
+                net.incoming[ready].remove(edge)
+                net.dst[edge] = timer
+                net.delay[edge] = VERIFY_DELAY_STEPS
+                net.incoming[timer].append(edge)
+            else:
+                net.synapse(prev, timer, drive.pulse, VERIFY_DELAY_STEPS)
+            net.synapse(busy, timer, -int(round(0.75 * drive.loop)))
+            prev = timer
+        checks.append(prev)
+        net.synapse(prev, ready, drive.pulse)
+        certificate = prev
+        prev = recovery_end
+        for k in range(7):
+            deadline = net.neuron(f"{prefix}.deadline{k}")
+            net.synapse(prev, deadline, drive.pulse, VERIFY_DELAY_STEPS)
+            if k >= 4:
+                net.synapse(certificate, deadline, -int(round(2.2 * drive.loop)))
+            prev = deadline
+        previous_deadline = prev
+    net.synapse(previous_deadline, exhausted.u, drive.ignite)
+    for entry in [*attempts, ready]:
+        net.synapse(exhausted.u, entry, -int(round(2.2 * drive.loop)))
+    if fault_target is not None:
+        net.synapse(exhausted.u, fault_target, drive.ignite)
+    net.group(f"{name}.verify.exhausted", exhausted.members)
+    return ResetVerification(domain, busy, tuple(attempts), tuple(checks), exhausted,
+                             net.n - n0, net.nnz - e0)
 
 
 def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),

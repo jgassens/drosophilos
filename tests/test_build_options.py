@@ -41,6 +41,8 @@ CURRENT_PIPELINE_OPTIONS = {
     "zero_once": False,
     "robust_request_clear": False,
     "robust_register_reset": False,
+    "verified_register_reset": False,
+    "experimental_register_reset": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -144,6 +146,8 @@ def test_build_options_record_every_netlist_shaping_option():
         "zero_once": True,
         "robust_request_clear": False,
         "robust_register_reset": False,
+        "verified_register_reset": False,
+        "experimental_register_reset": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -179,6 +183,8 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "zero_once": False,
         "robust_request_clear": False,
         "robust_register_reset": False,
+        "verified_register_reset": False,
+        "experimental_register_reset": False,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -232,16 +238,9 @@ def test_robust_request_clear_rejects_unqualified_policy_combinations(options):
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("zero_once", [False, True])
 def test_register_reset_covers_the_complete_domain_and_changes_nothing_else(rate_robust, zero_once):
-    from drosophilos.protocol.handshake import compact_register_resets
-
     _, old, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust, zero_once=zero_once)
     _, new, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
-                                       zero_once=zero_once)
-    # Compile the experimental primitive directly: public builds reject it until
-    # the full envelope passes, but its wiring/rounding contract remains tested.
-    new_regs = [r for sr, _ in new.inputs.values() for r in (sr.stage, sr.master)]
-    new_regs += [r for c in new.cells for r in (c.stage, c.master)]
-    compact_register_resets(new.net, new.drive, new_regs)
+                                       zero_once=zero_once, experimental_register_reset=True)
     assert (old.net.n, old.net.nnz) == (new.net.n, new.net.nnz)
     assert (old.net.roles, old.net.src, old.net.dst, old.net.bias) == (
         new.net.roles, new.net.src, new.net.dst, new.net.bias)
@@ -367,7 +366,7 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
 
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
 def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath, option):
     _, pl, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
                                        datapath=datapath, **{option: True})
@@ -386,7 +385,7 @@ def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, 
         _assert_conditioned_train_inputs(pl.net, pl.drive)
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
 def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch, option):
     real_block = kernel_campaign.block
     seen = {}
@@ -417,7 +416,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
 def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 

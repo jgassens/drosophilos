@@ -681,6 +681,10 @@ def parser() -> argparse.ArgumentParser:
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
                     help="withdrawn: rejected until full mix-B reset/reload qualification passes")
+    ap.add_argument("--verified-register-reset", action="store_true",
+                    help="unqualified closed-loop prototype: rejected; see docs/stage_d_completion_stall.md")
+    ap.add_argument("--experimental-register-reset", action="store_true",
+                    help="EXPERIMENTAL, known full-domain failures: 1.75-loop reset / eight delayed READY links")
     ap.add_argument("--robust-request-clear", action="store_true",
                     help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--max-ms", type=float, default=None,
@@ -761,7 +765,8 @@ def recheck_record(rec: dict) -> dict:
     # fallback for records that predate it.
     datapath = options.pop("datapath", rec.get("datapath", "generic"))
     flags = {key: bool(options.pop(key, rec.get(key, False)))
-             for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset")}
+             for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
+                         "verified_register_reset", "experimental_register_reset")}
     for key in ("true_guard_version", "rate_robust_version"):
         options.pop(key, None)
     strength = options.pop("kill_strength", None)
@@ -897,7 +902,9 @@ def main(argv=None):
     if not check["ir_equal"] or check.get("c_equal") is False:
         raise SystemExit("the references disagree; not running the neural comparison")
     pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once,
-               robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset)
+               robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset,
+               verified_register_reset=a.verified_register_reset,
+               experimental_register_reset=a.experimental_register_reset)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -949,6 +956,8 @@ def main(argv=None):
         "zero_once": pl.build_options["zero_once"],
         "robust_request_clear": pl.build_options["robust_request_clear"],
         "robust_register_reset": pl.build_options["robust_register_reset"],
+        "verified_register_reset": pl.build_options["verified_register_reset"],
+        "experimental_register_reset": pl.build_options["experimental_register_reset"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),
