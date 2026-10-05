@@ -49,7 +49,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
-from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
+from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
 from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
 from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
@@ -285,7 +285,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    true_guards: bool = True, relight_repair_delay: bool = True,
                    copy_requires_rail: bool = True, rate_robust: bool = False,
                    zero_once: bool = False, robust_request_clear: bool = False,
-                   robust_register_reset: bool = False) -> Pipeline:
+                   robust_register_reset: bool = False, verified_register_reset: bool = False,
+                   experimental_register_reset: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -325,8 +326,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `robust_register_reset=True` is currently rejected: the former compact policy
     fails biased READY reloads, and its replacement has not passed the full mix-B
     envelope. The experimental primitive and measured frontier are retained in
-    tests/test_robust_reset.py and docs/stage_d_completion_stall.md. Producer and
-    machine resets retain their original policy; the option off is unchanged."""
+    tests/test_robust_reset.py and docs/stage_d_completion_stall.md.
+    `verified_register_reset=True` is also rejected: the closed-loop prototype
+    does not meet the full-domain reload requirement. Its bounded retries and
+    silence window are evaluated in tests/test_verified_reset.py.
+    `experimental_register_reset=True` permits campaigns of the unqualified
+    four compact 1.75-loop taps / eight delayed READY links candidate. It is
+    explicitly experimental, not an alias for either rejected robust option.
+    Producer and machine resets retain their original policy; off is unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -340,7 +347,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         raise ValueError("robust_request_clear requires relight_requests, four request taps, "
                          "kill_strength=0.75, start_relight_hops=5, relight_repair_delay=True, "
                          "true_guards=True and retry_clear=False")
-    if robust_register_reset and (
+    reset_options = {"robust_register_reset": robust_register_reset,
+                     "verified_register_reset": verified_register_reset,
+                     "experimental_register_reset": experimental_register_reset}
+    if sum(bool(value) for value in reset_options.values()) > 1:
+        raise ValueError("register reset options are mutually exclusive")
+    reset_option = next((key for key, value in reset_options.items() if value), None)
+    if reset_option and (
             params != Params() or drive != replace(Drive.from_params(params), kill_pulses=4,
                                                   rate_robust=rate_robust) or
             not all((relight_requests, true_guards, copy_requires_rail, powerup_veto,
@@ -351,13 +364,18 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             any(cs["op"] not in {"ADD", "SUB", "AND", "XOR", "SEL"} for cs in spec) or
             any(isinstance(cs.get(key), (tuple, list)) and cs[key][0] != "const"
                 for cs in spec for key in ("a", "b", "c"))):
-        raise ValueError("robust_register_reset requires default physics/drive, standard "
+        raise ValueError(f"{reset_option} requires default physics/drive, standard "
                          "timing, true guards, selected-rail COPY, no retry_clear and a "
                          "2/8-bit single-stream ADD/SUB/AND/XOR/SEL kernel with constant "
                          "or cell operands, without memories, parameters or pacing")
     if robust_register_reset:
         raise ValueError("robust_register_reset is not qualified over the full mix-B reload envelope; "
                          "see docs/stage_d_completion_stall.md for the measured frontier")
+    if verified_register_reset:
+        raise ValueError("verified_register_reset is not qualified: silence verification cannot "
+                         "repair the combined three-sigma datapath/reload frontier; see "
+                         "docs/stage_d_completion_stall.md. The unqualified timed candidate is "
+                         "available only as experimental_register_reset")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
@@ -902,6 +920,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                         true_guards=true_guards)
         else:
             gate_commit(key, creq, reg.commit_in, readers)
+    if experimental_register_reset:
+        # Finalize only after ALU, control and rate-reader reset extensions.
+        registers = [r for reg, _, _ in inputs.values() for r in (reg.stage, reg.master)]
+        registers += [r for cell in order for r in (cell.stage, cell.master)]
+        compact_register_resets(net, drive, registers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
@@ -924,6 +947,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "zero_once": zero_once,
         "robust_request_clear": robust_request_clear,
         "robust_register_reset": robust_register_reset,
+        "verified_register_reset": verified_register_reset,
+        "experimental_register_reset": experimental_register_reset,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

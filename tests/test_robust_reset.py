@@ -43,8 +43,10 @@ CORNER_BIAS = {"slow3sigma": -.6, "fast3sigma": .6, "fast30_bias": .6}
 
 
 def _candidate_pipeline(*args, strength=1.75, tail=8, **kwargs):
-    """Exercise the experimental final pass while the public option is withdrawn."""
+    """Exercise the public experiment; direct compilation compares rejected policies."""
     kwargs.pop("robust_register_reset", None)
+    if strength == 1.75 and tail == 8:
+        return build_pipeline(*args, **kwargs, experimental_register_reset=True)
     pl = build_pipeline(*args, **kwargs)
     regs = [r for sr, _ in pl.inputs.values() for r in (sr.stage, sr.master)]
     regs += [r for c in pl.cells for r in (c.stage, c.master)]
@@ -69,7 +71,7 @@ def _sparse_strays(sim, rng, steps):
 
 
 def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
-                 corner=True, noisy=True, progress=False):
+                 corner=True, noisy=True, progress=False, verified=False):
     """Two actual staged commits, loading the SAME Q rail at its observed READY.
 
     A one-bit word isolates the reset/reload contract from ALU rate-gate failure.
@@ -85,18 +87,28 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
     reg = add_staged_commit(net, drive, "cell", Q, _NoProducer(), ordered_grant=True,
                             copy_requires_rail=True)
     M = reg.master
-    compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in (Q, M)],
-                          strength=strength, ready_tail_links=tail)
+    if verified:
+        from drosophilos.protocol.handshake import verify_register_resets
+        verify_register_resets(net, drive, [Q, M])
+    else:
+        compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in (Q, M)],
+                              strength=strength, ready_tail_links=tail)
     topo = net.topology()
     # Move the actual Q READY and M READY->COPY path earlier, not an external
     # proxy ignition. 100 steps is one extended synaptic delay.
     for r in (Q, M):
-        edge = np.flatnonzero(topo.dst == r.ready)
-        assert len(edge) == 1 and advance <= topo.delay[edge[0]]
-        topo.delay[edge[0]] -= advance
+        edge = np.flatnonzero((topo.dst == r.ready) & (topo.quanta > 0))
+        assert len(edge) == (4 if verified else 1) and np.all(advance <= topo.delay[edge])
+        topo.delay[edge] -= advance
     rails = {x for r in (Q, M) for pair in r.rails for latch in pair for x in latch.members}
     ready = {x for r in (Q, M) for x in [*r.ready_chain, r.ready]}
+    if verified:
+        ready.update(i for i, role in enumerate(net.roles)
+                     if ".verify." in role and (".quiet" in role or ".recovery" in role))
     rng = np.random.default_rng(seed)
+    # A verified path can spend three retry windows at each reset. The timed
+    # candidate's 1.8-second horizon would misclassify a late second DONE.
+    trial_steps = 32000 if verified else 18000
     failures = ready_missing = faults = survivors = 0
     min_copy_after_ready = 10**9
     for lo in range(0, n, 250):
@@ -119,7 +131,7 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
             bias = np.asarray(net.bias) + rng.normal(0, .2, (count, topo.n))
         sim = RefSim(topo, PARAMS, n_nodes=count, quanta=q, V_th=vth, bias=bias)
         if noisy:
-            _sparse_strays(sim, rng, 18000)
+            _sparse_strays(sim, rng, trial_steps)
         for b in range(count):
             sim.add_events(b, [10, 3000, 6000], [M.rails[0][0].u, Q.rails[0][0].u, reg.commit_in],
                            [DRIVE.ignite] * 3)
@@ -130,7 +142,7 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
         cp_gate = reg.copy_gates[0]
         copy_delay = int(topo.delay[(topo.src == cp_gate) & (topo.dst == M.rails[0][0].u)][0])
         # Inspect every step: scheduling READY+1 must not slip by a host polling interval.
-        for step in range(18000):
+        for step in range(trial_steps):
             sim.step()
             if not sim._spk_step:
                 continue
@@ -160,7 +172,8 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
                        faults=faults, survivors=survivors), flush=True)
     return dict(trials=n, failures=failures, ready_missing=ready_missing, faults=faults,
                 survivors=survivors, copy_arrival_after_ready=int(min_copy_after_ready),
-                advance=advance, tail=tail, strength=strength)
+                advance=advance, tail=None if verified else tail,
+                strength=.75 if verified else strength, verified=verified)
 
 
 @pytest.mark.parametrize("rate", [False, True])
@@ -454,7 +467,8 @@ def test_extended_stage_domain_is_dark_at_ready_and_rearms(rate):
     assert not np.any(np.isin(ev["neuron"], list(targets)) & (ev["step"] > ready - 100))
 
 
-def _extended_domain_trial(rate, *, strength=1.75, tail=8, scope="all", noise_seed=None):
+def _extended_domain_trial(rate, *, strength=1.75, tail=8, scope="all", noise_seed=None,
+                           verified=False):
     """Real ADD transactions at combined three-sigma draws on the reset domain.
 
     All incoming weights (including ignition, loop, reset and mirrored edges),
@@ -463,8 +477,13 @@ def _extended_domain_trial(rate, *, strength=1.75, tail=8, scope="all", noise_se
     """
     args = (PARAMS, 2, [{"name": "out", "op": "ADD", "a": "input", "b": ("const", "one")}])
     opts = dict(consts={"one": 1}, zero_once=True, rate_robust=rate)
-    pl = (build_pipeline(*args, **opts) if strength is None else
+    pl = (build_pipeline(*args, **opts) if strength is None or verified else
           _candidate_pipeline(*args, **opts, strength=strength, tail=tail))
+    if verified:
+        from drosophilos.protocol.handshake import verify_register_resets
+        regs = [r for sr, _ in pl.inputs.values() for r in (sr.stage, sr.master)]
+        regs += [r for c in pl.cells for r in (c.stage, c.master)]
+        verify_register_resets(pl.net, pl.drive, regs)
     topo, cell = pl.net.topology(), pl.cells[0]
     targets = {d for s, d, q in zip(topo.src, topo.dst, topo.quanta)
                if s in {cell.stage.reset_inh, cell.master.reset_inh} and q < 0}
@@ -480,6 +499,9 @@ def _extended_domain_trial(rate, *, strength=1.75, tail=8, scope="all", noise_se
             return i in pl.net.rate_readouts.values()
         targets = {i for i in targets if selected(i)}
     ready = {x for r in (cell.stage, cell.master) for x in [*r.ready_chain, r.ready]}
+    if verified:
+        ready.update(i for i, role in enumerate(pl.net.roles)
+                     if ".verify." in role and (".quiet" in role or ".recovery" in role))
     q = np.rint(topo.quanta * np.where(
         np.isin(topo.dst, list(targets)), np.where(topo.quanta > 0, np.exp(-.12), np.exp(.12)),
         np.where(np.isin(topo.dst, list(ready)), np.exp(.12), 1.))).astype(np.int64)

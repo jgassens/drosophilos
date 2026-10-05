@@ -17,7 +17,8 @@ from ..lib.netlist import Drive, Netlist
 from ..sim.model import Params
 from .celement import add_and_gate, add_completion_tree, add_or_latched, add_state, rail_of, set_input
 from .flipflop import FlipFlop, connect_clear, power_on_events
-from .latch import Latch, add_edge_relay, add_latch, add_ready, add_reset, compact_reset_domains, connect_trigger
+from .latch import (Latch, ResetVerification, add_edge_relay, add_latch, add_ready, add_reset,
+                    add_reset_verification, compact_reset_domains, connect_trigger)
 from .watchdog import StaleMonitor, Watchdog, add_stale_monitor, add_watchdog
 
 
@@ -40,6 +41,7 @@ class Register:
     storage: str = "latch"
     flag_storage: str = "latch"
     rail_inputs: list = field(default_factory=list)  # rail_inputs[i][r]: where one ignition pulse sets rail (i, r)
+    verification: ResetVerification | None = None  # qualification prototype only
 
     @property
     def rail_taps(self) -> list[list[int]]:
@@ -110,11 +112,30 @@ def compact_register_resets(net: Netlist, drive: Drive, registers: list[Register
 
     This belongs after extend_reset and staged-commit wiring: strengthening only
     add_register's original fan-out would leave their later reset targets weak.
-    The kernel opt-in is withdrawn; direct calls support qualification experiments.
+    Only experimental_register_reset exposes this policy in kernel campaigns.
+    It is not qualified over the full mix-B domain.
     """
     if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
         raise ValueError("compact register reset is qualified only for latch storage")
     compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in registers])
+
+
+def verify_register_resets(net: Netlist, drive: Drive, registers: list[Register]) -> None:
+    """Install the unqualified closed-loop prototype for direct experiments only.
+
+    No kernel flag enables this pass: silence does not qualify the complete
+    reload path. In particular the combined three-sigma datapath corner fails
+    before the first reset. See tests/test_verified_reset.py.
+    """
+    if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
+        raise ValueError("reset verification requires latch storage")
+    if any(r.verification is not None for r in registers):
+        raise ValueError("reset verification already installed")
+    for reg in registers:
+        name = net.roles[reg.reset_trigger].removesuffix(".reset")
+        reg.verification = add_reset_verification(
+            net, drive, name, reg.reset_trigger, reg.reset_inh, reg.ready, reg.ready_chain,
+            None if reg.fault_latch is None else reg.fault_latch.u)
 
 
 @dataclass

@@ -159,12 +159,16 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         zero_once = options.pop("zero_once", campaign.get("zero_once", False))
         robust_request_clear = options.pop("robust_request_clear", campaign.get("robust_request_clear", False))
         robust_register_reset = options.pop("robust_register_reset", campaign.get("robust_register_reset", False))
+        verified_register_reset = options.pop("verified_register_reset", campaign.get("verified_register_reset", False))
+        experimental_register_reset = options.pop("experimental_register_reset", campaign.get("experimental_register_reset", False))
         strength = options.pop("kill_strength", None)
         if strength is not None:
             options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
         pl = build(k, params, datapath, rate_robust=rate_robust, zero_once=zero_once,
                    robust_request_clear=robust_request_clear,
-                   robust_register_reset=robust_register_reset, **options)
+                   robust_register_reset=robust_register_reset,
+                   verified_register_reset=verified_register_reset,
+                   experimental_register_reset=experimental_register_reset, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -205,6 +209,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             zero_once=campaign.get("zero_once", False),  # older captures used per-bit Z0 edges
             robust_request_clear=campaign.get("robust_request_clear", False),
             robust_register_reset=campaign.get("robust_register_reset", False),
+            verified_register_reset=campaign.get("verified_register_reset", False),
+            experimental_register_reset=campaign.get("experimental_register_reset", False),
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

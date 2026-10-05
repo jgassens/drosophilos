@@ -698,8 +698,10 @@ TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_completion_sta
 now raises a descriptive `ValueError`, including through campaigns, diagnostic
 rebuilds and Stage D recheck. **No tested setting satisfies the requested full
 mix-B envelope.** A longer READY chain fixes the isolated rail recovery race,
-but does not qualify the entire extended reset domain. The experimental final
-pass remains available to the tests; it is not enabled by a kernel build.
+but does not qualify the entire extended reset domain. At commit `b62de0e` the
+experimental final pass was available only to tests. The closed-loop evaluation
+below subsequently exposes it under an explicitly experimental campaign flag;
+the robust option remains withdrawn.
 
 The option off preserves the ordered topology, weights, delays, biases and
 machine fingerprints. The preparatory whitelist is narrowed to exercised 2/8-bit
@@ -888,3 +890,191 @@ full-domain failures. The older 1,600-seed completion surveys were not rerun.
 `git diff --check` passes. Integration and committing belong to the orchestrator;
 no commit is attempted. A long noisy Stage D campaign and RR11's original
 completion stall remain outside these conditional experiments.
+
+## Closed-loop verification and experimental campaign fallback (2026-10-04)
+
+**Choice: fallback B.** The tested closed-loop prototype does not meet the
+complete contract. `verified_register_reset=False` is recorded by every kernel
+build; requesting True raises a descriptive qualification error, including
+from either CLI, diagnostic rebuilds and Stage D `--recheck`. It must not
+silently select a timed circuit. `robust_register_reset=True` still raises.
+The 1.75-loop/eight-READY-link candidate can now be measured in campaigns with
+`experimental_register_reset=True` / `--experimental-register-reset`. This is
+an **unqualified experiment with known full-domain failures**, not a robustness
+claim. The flags are mutually exclusive.
+
+### Neural verification design tested
+
+`latch.add_reset_verification` and `handshake.verify_register_resets` implement
+the prototype for direct qualification experiments. No simulator, integration
+rule, host-generated READY or prescribed reset-spike list is involved.
+
+1. Finalize after all wiring. Monitor **every target of the register inhibitor's
+   negative fan-out**, including both members of rails, valid/tree latches,
+   ALU state and gates, FAULT, ACT, COMMIT, grant/COPY, power-up vetoes,
+   `zero_once`, and compiled `rate_robust` reader mirrors. The original ordinary
+   four-tap, 0.75-loop train and all its integer fan-out weights remain intact.
+2. All monitored targets excite one refractory-limited BUSY neuron. BUSY
+   inhibits each of four timer neurons at 0.75-loop strength. The existing
+   fifteen-link recovery prefix feeds these four **100-step** timer links;
+   only a propagated certificate can drive the existing READY output.
+   The measured certificate interval is about 52–57 ms, comfortably longer
+   than the measured storage periods (up to 6 ms in the deterministic screen).
+   The busy aggregate limits veto firing rate as register width grows; it does
+   not eliminate residual inhibitory charge or analogue timing assumptions.
+3. A parallel seven-link deadline is vetoed by the certificate. If no
+   certificate cancels it, it starts another ordinary four-tap train through
+   the **same reset inhibitor**. This preserves mirrored gains exactly.
+   Three separate retry stages are statically unrolled: there is no feedback
+   edge that can start a fifth attempt.
+4. The final uncancelled deadline ignites a sticky exhaustion latch. It holds
+   all four attempt entries and READY down and drives the register's existing
+   FAULT latch where present. Masters without such a latch expose the
+   `<register>.verify.exhausted` group as explicit terminal stall evidence.
+   Exhaustion is outside the reset domain and requires a new image/simulator
+   to clear. A forced surviving rail gets no READY, exactly four attempts,
+   and exhaustion; a later trigger pulse cannot restart it.
+
+This is a **candidate silence certificate**, not a proof for arbitrary spike
+schedules. Sustained survivors veto it in the tested draws. A finite
+silence interval cannot prove membrane recovery, exclude all late external
+ignitions, or fix a datapath that cannot complete before any reset. Neither
+exhaustion nor an unobserved READY is counted as a successfully emptied domain.
+
+### Primitive evidence, latency and cost
+
+The four captured primitives retain the original role-mapped seed-108/B=100
+weights, thresholds and biases. New detector/controller edges and neurons have
+independent log-normal sigma .04 weights and sigma .2 mV thresholds/biases.
+Every neuron receives Bernoulli 5-Hz, 150-q strays. Four initial ignition pulses,
+the later 300-q kick and random reset phases challenge the entrained modes.
+
+The exploratory noisy screen ran **256 trials per captured primitive**. All
+1,024 reached READY with zero observed survivors, false READY, exhaustion or
+undecided outcomes. Latency is measured from the original trigger's spike to
+READY, in ms. “Retry” includes every trial needing at least one extra train;
+two master-74 trials needed two retries.
+
+| Draw | Trials needing retry | Common latency min / median / p95 / max | Retry latency min / median / p95 / max |
+|---|---:|---|---|
+| Master 74 | 41 / 256 | 140.2 / 143.0 / 145.3 / 146.7 | 311.2 / 315.0 / 321.5 / 492.7 |
+| Master 17 | 195 / 256 | 138.8 / 141.5 / 143.3 / 144.4 | 306.5 / 311.3 / 314.83 / 317.5 |
+| Master 24, RR capture | 133 / 256 | 140.6 / 143.6 / 145.29 / 146.9 | 309.8 / 314.2 / 317.8 / 320.0 |
+| Stage Z0 18 | 43 / 256 | 140.8 / 143.6 / 146.4 / 147.6 | 311.4 / 314.6 / 319.23 / 321.2 |
+
+Minimum certificate intervals in these four settings were 52.6, 52.3, 51.9,
+and 52.4 ms. The nominal one-rail, non-entrained common case is 142.7 ms from
+trigger to READY, versus the ordinary chain's 84.8 ms: **+57.9 ms**. No stronger
+inhibition is applied to storage in that common case.
+
+The deterministic screen covers 32 phases in each captured draw and all ten
+previous corner settings. There are no false READY or undecided outcomes.
+However, the additional fast20, fast30 and biased-fast30 stress settings each
+leave **32/32 live terminal survivors after all four trains**, with READY
+withheld and exhaustion at **716.1 ms**. These extra-fast settings extend beyond
+the combined three-sigma storage corner; they are not relabelled as its failure
+rate. A separate biased-fast30/biased-slow-controller screen also exhausts
+**64/64 noisy trials**. Bounded retries provide a fail-stop, not stronger kill
+margin. At the combined fast-three-sigma storage/fast-biased-detector setting,
+64 noisy trials yielded 64 safe READYs, 53 needing a retry.
+
+The prototype adds **104 neurons and D + 152 + F synapses per register**, where
+D is the number of distinct final reset targets and F is 1 if an existing
+FAULT latch is driven, otherwise 0. It reuses the original recovery chain and
+inhibitor; it rewires the old final READY edge. In the measured two-bit
+ADD/XOR kernel with `zero_once` and `robust_request_clear`:
+
+| Register | Base D / added synapses | RR D / added synapses |
+|---|---:|---:|
+| Input Q | 27 / 180 | 37 / 190 |
+| Input M | 17 / 169 | 23 / 175 |
+| Each cell Q | 157 / 310 | 185 / 338 |
+| Each cell M | 47 / 199 | 65 / 217 |
+
+### Actual reload paths and the release blockers
+
+The actual one-bit staged-cell harness loads the same Q rail at **observed
+Q READY + 1 step** and copies through the real M READY → COPY latch → selected
+arm → M rail → completion path. At the adverse slow-three-sigma rail/fast-READY
+corner, ten noisy trials per base/RR build completed both transactions with
+**0 failures, faults, survivors or missing READY**. COPY's minimum arrival
+after M READY was 151 steps (base), 142 (RR). These are small screens, not a
+10,000-trial qualification. The verified harness observes 32,000 steps to
+include retries: the timed harness's 18,000-step limit initially mislabeled a
+late second DONE as a failure; extending observation showed it completing.
+
+Two stronger counterexamples prevent release:
+
+* **The combined full-domain corner still fails.** The real two-bit ADD path
+  applies adverse three-sigma weights, thresholds and biases to the entire
+  extended domain, with READY independently fast. Base produces no Q completion
+  and neither Q nor M reset fires; RR completes Q and resets M but produces no
+  output. Both requested transactions fail to complete. The new detector has
+  no causal input before a reset, so it cannot repair the base failure. The
+  old timed candidate and the option-off baseline fail the same experiment.
+* **A replacement READY is insufficient for kernel sequencing.** Cell Q READY
+  is not consumed by the existing kernel. IDLE is re-lit at a fixed delay from
+  DONE, and the next operation starts while verification is still running.
+  In the nominal two-cell ADD/XOR run, a Q retry clears newly active state. Of
+  the expected outputs `[0, 3, 1]`, only the first, correct `0` is produced,
+  in base and RR, with both auxiliary opt-ins off and with `zero_once` plus
+  `robust_request_clear` on. Tests assert that the second START precedes Q READY
+  and a retry follows that START. An eventual verified policy needs a stage
+  READY/IDLE interlock as well as a separately repaired full-domain datapath.
+
+The new slow tests retain 40,000-trial primitive safety surveys (reporting
+exhaustion and terminal survivors separately) and 10,000-trial actual noisy
+reload qualification gates. **They were not run for the rejected prototype;
+no 40,000-reset or 10,000-reload success is claimed for verified reset.** The
+finite counterexamples already disqualify it. The earlier 0/720,000 kill and
+four 0/10,000 reload results in this document belong exclusively to the timed
+1.75/eight-link candidate and its stated, narrower experiments.
+
+### Campaign exposure and compatibility
+
+The experimental flag applies the existing idempotent final pass after all
+ALU/control/mirror extensions, to input and cell Q/M registers only. It adds
+**zero neurons and zero synapses per register**; three tap links become zero
+delay and eight READY links become 100 steps. Ordinary READY's nominal
+84.8 ms becomes 150.4 ms, a **65.6-ms** increase. It has no conditional retry
+case. Whole-tick overhead and its real Stage D failure rate remain unmeasured.
+The prior whitelist is retained: standard physics/drive/timing, true guards,
+selected-rail COPY, 2/8-bit single-stream ADD/SUB/AND/XOR/SEL with cell/constant
+operands, no memories/parameters/pacing or `retry_clear`. Existing `zero_once`,
+`robust_request_clear`, and `rate_robust` options remain independent.
+
+Both new booleans are recorded in `build_options`, Stage D's top-level record
+and kernel_campaign records. Diagnostic rebuild and recheck preserve the
+recorded option; authoritative nested Stage D options override top-level
+fallbacks. Older records default False. Tests run the experimental multi-cell
+kernel for every combination of the three existing opt-ins, with generic and
+specialized datapaths, and require `[0, 3, 1]`. Ordered default netlist hashes
+and machine hashes remain pinned to their pre-change values.
+
+Example campaign (not run here; output is explicitly experimental):
+
+```sh
+uv run python -m drosophilos.bench.stage_d --ticks 1000 --copies 100 \
+  --mix B --seed 108 --backend torch-fast --device cuda \
+  --experimental-register-reset --out stage_d_experimental_reset_108.json
+uv run python -m drosophilos.bench.stage_d \
+  --recheck stage_d_experimental_reset_108.json
+```
+
+The exact requested command was attempted:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_verified_reset.py tests/test_robust_reset.py tests/test_build_options.py -m 'not slow'
+```
+
+`uv` is blocked by sandbox denial opening
+`/Users/jeremiahgassensmith/.cache/uv/sdists-v9/.git`. Validation instead uses
+the existing repository virtualenv, `PYTHONPATH=.:tests`,
+`PYTHONDONTWRITEBYTECODE=1`, and task-local TMPDIR/pytest basetemp/cache.
+All **209 requested non-slow tests pass** in separate file runs: 40 in
+`test_verified_reset.py`, 86 in `test_robust_reset.py`, and 83 in
+`test_build_options.py`, including the thirteen ordered default/machine hashes.
+The four additional 256-trial noisy capture screens completed as reported above.
+`git diff --check` passes.
+No simulator or machine source was changed. Integration and committing remain
+with the orchestrator; no commit is attempted.
