@@ -286,7 +286,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    copy_requires_rail: bool = True, rate_robust: bool = False,
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
-                   experimental_register_reset: bool = False) -> Pipeline:
+                   experimental_register_reset: bool = False, stable_latch: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -318,6 +318,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place.
     `zero_once=True` replaces per-bit Z0 ignition with a shared OR/one-shot in each
     stage's reset domain, keeping nonzero results at the latch's nominal rate.
+    `stable_latch=True` is reserved and rejected: no evaluated storage circuit
+    passes the independent mix-B rate, holding and gate/reload requirements.
+    See docs/stable_latch.md; false retains the exact legacy storage circuit.
     `robust_request_clear=True` uses the compact four-tap request-only clear:
     1.1-loop inhibition and zero-delay tap links. It requires the standard
     request-priority policy, four configured taps, 0.75 base kill strength,
@@ -336,6 +339,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Producer and machine resets retain their original policy; off is unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
+    if stable_latch or (drive is not None and drive.stable_latch):
+        from ..protocol.latch import STABLE_LATCH_UNQUALIFIED
+        raise ValueError(STABLE_LATCH_UNQUALIFIED)
     if not relight_requests and true_guards:
         raise ValueError("relight_requests=False requires true_guards=False")
     drive = replace(drive or Drive.from_params(params), kill_pulses=kernel_kill_pulses,
@@ -944,6 +950,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "relight_repair_delay": relight_repair_delay,
         "copy_requires_rail": copy_requires_rail,
         "rate_robust": drive.rate_robust,
+        "stable_latch": drive.stable_latch,
         "zero_once": zero_once,
         "robust_request_clear": robust_request_clear,
         "robust_register_reset": robust_register_reset,

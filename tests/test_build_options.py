@@ -38,6 +38,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "relight_repair_delay": True,
     "copy_requires_rail": True,
     "rate_robust": False,
+    "stable_latch": False,
     "zero_once": False,
     "robust_request_clear": False,
     "robust_register_reset": False,
@@ -106,6 +107,7 @@ def test_current_default_netlists_match_fixed_policy_builds():
     # Ordered roles, edges, weights, delays and biases, not only neuron/edge counts.
     # Captured from the pre-rate-conditioning machine; Drive's legacy default is vital.
     assert not machine_default.drive.rate_robust
+    assert not machine_default.drive.stable_latch
     raw = json.dumps([machine_default.net.roles, machine_default.net.src,
                       machine_default.net.dst, machine_default.net.quanta,
                       machine_default.net.delay, machine_default.net.bias], separators=(",", ":"))
@@ -143,6 +145,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "relight_repair_delay": False,
         "copy_requires_rail": False,
         "rate_robust": False,
+        "stable_latch": False,
         "zero_once": True,
         "robust_request_clear": False,
         "robust_register_reset": False,
@@ -180,6 +183,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "commit_reignite": False,
         "retry_clear": False,
         **LEGACY_2026_09_20,
+        "stable_latch": False,
         "zero_once": False,
         "robust_request_clear": False,
         "robust_register_reset": False,
@@ -337,6 +341,54 @@ def test_unqualified_register_reset_cannot_be_enabled(entry):
             build_tick_pipeline({"block": "tick", **pl.build_options, "robust_register_reset": True})
 
 
+@pytest.mark.parametrize("other", [None, "rate_robust", "zero_once", "robust_request_clear",
+                                    "experimental_register_reset"])
+def test_stable_latch_rejects_unqualified_combinations(other):
+    with pytest.raises(ValueError, match="stable_latch is not qualified"):
+        build_pipeline(PARAMS, 2,
+                       [{"name": "out", "op": "ADD", "a": "input", "b": ("const", "k")}],
+                       consts={"k": 1}, stable_latch=True, **({other: True} if other else {}))
+
+
+@pytest.mark.parametrize("entry", ["drive", "campaign", "campaign_cli", "stage_d_cli",
+                                    "recheck_flat", "recheck_nested", "diag_flat", "diag_nested",
+                                    "stage_diag_flat", "stage_diag_nested"])
+def test_stable_latch_cannot_be_silently_enabled_or_rebuilt(entry, monkeypatch):
+    from drosophilos.bench import stage_d
+
+    with pytest.raises(ValueError, match="stable_latch is not qualified"):
+        if entry == "drive":
+            build_pipeline(PARAMS, 2, [], drive=replace(Drive.from_params(PARAMS), stable_latch=True))
+        elif entry == "campaign":
+            kernel_campaign.block("tick", PARAMS, stable_latch=True)
+        elif entry == "campaign_cli":
+            kernel_campaign.main(["tick", "--stable-latch"])
+        elif entry == "stage_d_cli":
+            monkeypatch.setattr(stage_d, "three_point_check", lambda *args: {"ir_equal": True})
+            stage_d.main(["--stable-latch", "--ticks", "1", "--c-ticks", "0"])
+        else:
+            record = ({"build_options": {"stable_latch": True}} if entry.endswith("nested")
+                      else {"stable_latch": True})
+            if entry.startswith("recheck"):
+                stage_d.recheck_record(record)
+            else:
+                if entry.startswith("stage_diag"):
+                    record["stage"] = "D"
+                build_tick_pipeline(record)
+
+
+def test_stable_latch_false_is_recorded_and_old_records_default_false():
+    _, pl, _, _ = kernel_campaign.block("tick", PARAMS, stable_latch=False)
+    assert pl.build_options["stable_latch"] is pl.drive.stable_latch is False
+    record = {"block": "tick", **pl.build_options}
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
+    record.pop("stable_latch")
+    _, _, legacy = build_tick_pipeline(record)
+    assert legacy.build_options["stable_latch"] is False
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(legacy)
+
+
 def test_conditioned_rates_are_recorded_rebuilt_and_shared():
     ks, legacy, _, _ = kernel_campaign.block("tick", PARAMS)
     pl = build_pipeline(PARAMS, ks.width, ks.cells, consts=ks.consts, mems=ks.mems,
@@ -410,6 +462,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     kernel_campaign.main(["tick", "--copies", "1", "--max-ms", "1",
                           "--" + option.replace("_", "-"), "--out", str(out)])
     record = json.loads(out.read_text())
+    assert record["stable_latch"] is False
     assert seen[option] is seen["build"][1].build_options[option] is True
     assert record[option] is True
     _, _, rebuilt = build_tick_pipeline(record)
@@ -450,6 +503,7 @@ def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch
     record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--" + option.replace("_", "-"),
                            "--rate-robust", "--out", str(out)])
     original = seen[-1]
+    assert record["stable_latch"] is record["build_options"]["stable_latch"] is False
     assert record[option] is record["build_options"][option] is True
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(original) == _pipeline_fingerprint(rebuilt)

@@ -31,6 +31,7 @@ def _upper95(errors: int, n: int) -> float:
 
 
 def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: bool = False,
+          stable_latch: bool = False,
           zero_once: bool = False, robust_request_clear: bool = False,
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False):
@@ -60,6 +61,7 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
     width = prog.width if prog is not None else ks.width
     pl = build_pipeline(params, width, ks.cells, consts=ks.consts, mems=ks.mems,
                         outputs=ks.outputs, datapath=datapath, rate_robust=rate_robust,
+                        stable_latch=stable_latch,
                         zero_once=zero_once, robust_request_clear=robust_request_clear,
                         robust_register_reset=robust_register_reset,
                         verified_register_reset=verified_register_reset,
@@ -83,6 +85,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--stable-latch", action="store_true",
+                    help="unqualified: rejected; see docs/stable_latch.md for the measured frontier")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
@@ -106,6 +110,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     P = Params()
     ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust,
+                              stable_latch=a.stable_latch,
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
                               robust_register_reset=a.robust_register_reset,
                               verified_register_reset=a.verified_register_reset,

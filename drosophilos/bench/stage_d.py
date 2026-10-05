@@ -677,6 +677,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--stable-latch", action="store_true",
+                    help="unqualified: rejected; see docs/stable_latch.md for the measured frontier")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
@@ -765,7 +767,7 @@ def recheck_record(rec: dict) -> dict:
     # fallback for records that predate it.
     datapath = options.pop("datapath", rec.get("datapath", "generic"))
     flags = {key: bool(options.pop(key, rec.get(key, False)))
-             for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
+             for key in ("rate_robust", "stable_latch", "zero_once", "robust_request_clear", "robust_register_reset",
                          "verified_register_reset", "experimental_register_reset")}
     for key in ("true_guard_version", "rate_robust_version"):
         options.pop(key, None)
@@ -902,6 +904,7 @@ def main(argv=None):
     if not check["ir_equal"] or check.get("c_equal") is False:
         raise SystemExit("the references disagree; not running the neural comparison")
     pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once,
+               stable_latch=a.stable_latch,
                robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset,
                verified_register_reset=a.verified_register_reset,
                experimental_register_reset=a.experimental_register_reset)
@@ -953,6 +956,7 @@ def main(argv=None):
         "backend": a.backend, "simulator": st["simulator"], "device": a.device, "dtype": str(dtype),
         "copies": a.copies, "mix": a.mix, "datapath": pl.datapath,
         "rate_robust": pl.build_options["rate_robust"], "neurons": pl.net.n, "edges": pl.net.nnz,
+        "stable_latch": pl.build_options["stable_latch"],
         "zero_once": pl.build_options["zero_once"],
         "robust_request_clear": pl.build_options["robust_request_clear"],
         "robust_register_reset": pl.build_options["robust_register_reset"],
