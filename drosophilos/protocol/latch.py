@@ -41,6 +41,29 @@ def add_latch(net: Netlist, drive: Drive, name: str) -> Latch:
     return Latch(u, v)
 
 
+def add_experimental_autapses(net: Netlist, drive: Drive) -> None:
+    """Finalize kernel storage with the stable-latch probe's 0.2-loop feedback.
+
+    Call after all readers/qualifiers and controllers are wired. Local feedback
+    is not a reset: it must never be mirrored onto consumers. The mirror registry
+    remains available for subsequent genuine clears, but no new reader may be
+    installed after this transform. This is unqualified on the 44-step rate
+    floor and reload margin; only the experimental kernel builder calls it.
+    """
+    edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
+    latches = [Latch(u, v) for (u, v), q in edges.items()
+               if q == drive.loop and edges.get((v, u)) == drive.loop
+               and net.roles[u].endswith(".u")
+               and net.roles[v] == net.roles[u].removesuffix(".u") + ".v"]
+    mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
+    try:
+        for latch in latches:
+            for member in latch.members:
+                net.synapse(member, member, -round(drive.loop * .2), 0)
+    finally:
+        net.inhibition_mirrors = mirrors
+
+
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
               pulses: int = 4, strength: float = 0.75) -> tuple[int, int, int]:
     """Reset controller. `trigger` fires once per activation of its source (edge detector,

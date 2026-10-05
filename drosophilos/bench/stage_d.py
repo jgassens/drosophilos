@@ -677,6 +677,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--experimental-autapse", action="store_true",
+                    help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
@@ -766,7 +768,7 @@ def recheck_record(rec: dict) -> dict:
     datapath = options.pop("datapath", rec.get("datapath", "generic"))
     flags = {key: bool(options.pop(key, rec.get(key, False)))
              for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
-                         "verified_register_reset", "experimental_register_reset")}
+                         "verified_register_reset", "experimental_register_reset", "experimental_autapse")}
     for key in ("true_guard_version", "rate_robust_version"):
         options.pop(key, None)
     strength = options.pop("kill_strength", None)
@@ -904,7 +906,8 @@ def main(argv=None):
     pl = build(k, P, a.datapath, rate_robust=a.rate_robust, zero_once=a.zero_once,
                robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset,
                verified_register_reset=a.verified_register_reset,
-               experimental_register_reset=a.experimental_register_reset)
+               experimental_register_reset=a.experimental_register_reset,
+               experimental_autapse=a.experimental_autapse)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -958,6 +961,7 @@ def main(argv=None):
         "robust_register_reset": pl.build_options["robust_register_reset"],
         "verified_register_reset": pl.build_options["verified_register_reset"],
         "experimental_register_reset": pl.build_options["experimental_register_reset"],
+        "experimental_autapse": pl.build_options["experimental_autapse"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),

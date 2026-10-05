@@ -50,7 +50,7 @@ import numpy as np
 
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
-from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
+from ..protocol.latch import Latch, add_edge_relay, add_experimental_autapses, add_latch, connect_trigger
 from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
@@ -286,7 +286,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    copy_requires_rail: bool = True, rate_robust: bool = False,
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
-                   experimental_register_reset: bool = False) -> Pipeline:
+                   experimental_register_reset: bool = False, experimental_autapse: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -333,7 +333,15 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `experimental_register_reset=True` permits campaigns of the unqualified
     four compact 1.75-loop taps / eight delayed READY links candidate. It is
     explicitly experimental, not an alias for either rejected robust option.
-    Producer and machine resets retain their original policy; off is unchanged."""
+    Producer and machine resets retain their original policy; off is unchanged.
+    `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
+    It adds zero-delay, 0.2-loop inhibitory feedback to each kernel latch member,
+    without mirroring feedback onto readers. It is unqualified on the 44-step
+    rate floor and reload margin. All combinations of zero_once,
+    robust_request_clear and experimental_register_reset are allowed, subject
+    to their existing restrictions; the control machine is unchanged."""
+    if experimental_autapse and not rate_robust:
+        raise ValueError("experimental_autapse requires rate_robust=True")
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -925,6 +933,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         registers = [r for reg, _, _ in inputs.values() for r in (reg.stage, reg.master)]
         registers += [r for cell in order for r in (cell.stage, cell.master)]
         compact_register_resets(net, drive, registers)
+    if experimental_autapse:
+        add_experimental_autapses(net, drive)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
@@ -949,6 +959,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "robust_register_reset": robust_register_reset,
         "verified_register_reset": verified_register_reset,
         "experimental_register_reset": experimental_register_reset,
+        "experimental_autapse": experimental_autapse,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,
