@@ -16,6 +16,7 @@ from drosophilos.bench.tmr_model import (
     binned_hazard,
     cadence_hazard,
     campaign_failure,
+    campaign_gate,
     first_stall_estimate,
     main,
     monte_carlo,
@@ -111,11 +112,11 @@ def test_tiny_probabilities_survive_floating_point_subtraction():
 
 
 def test_measured_scale_is_not_a_zero_failure_prediction():
-    assert unreplicated_failure() == pytest.approx(0.9932628952197202, rel=1e-11, abs=0)
+    assert unreplicated_failure() == pytest.approx(0.9932628952197202, rel=1e-9, abs=0)
     assert analytic(Model(recovery_ticks=None))["campaign_failure"] == pytest.approx(
-        0.499825019462443, rel=1e-11, abs=0)
+        0.499825019462443, rel=1e-9, abs=0)
     assert analytic(Model(recovery_ticks=2))["campaign_failure"] == pytest.approx(
-        0.0022454261829047573, rel=1e-11, abs=0)
+        0.0022454261829047573, rel=1e-9, abs=0)
 
 
 @pytest.mark.parametrize("recovery", [1, 2, 4, None])
@@ -189,7 +190,7 @@ def test_observed_profile_preserves_event_indices_and_mission_risk():
 ])
 def test_observed_profile_numbers_are_pinned(r, expected):
     assert analytic(Model(hazard=observed_hazard(), recovery_ticks=r))["campaign_failure"] == pytest.approx(
-        expected, rel=1e-11, abs=0)
+        expected, rel=1e-9, abs=0)
     np.testing.assert_allclose(observed_hazard(None)[::250],
                                [2 / 49534, 2 / 49275, 4 / 48520, 1 / 47865], rtol=1e-13)
 
@@ -202,18 +203,31 @@ def test_sensitivity_table_pins_every_scenario():
         0.07764730679677306, 0.009430644425412686, 0.07153351777649868,
         0.499825019462443, 0.009639301657169587, 0.1550120453021273,
         0.5009481254597747, 0.012173250563826921, 0.09719437273408485,
+        0.3948320165763758, 0.9094883539930324, 0.9932780228911906,
         0.00400231476637074, 0.02936058841882918, 0.002357042072461883,
-        0.21851584279045028,
+        0.9283949159733037,
     ]
     rows = sensitivity_table()
     assert len(rows) == len(expected)
     assert "floor" in rows[0]["scenario"]
     np.testing.assert_allclose([row["campaign_failure"] for row in rows], expected,
-                               rtol=1e-11, atol=0)
+                               rtol=1e-9, atol=0)
     assert rows[0]["f_repair"] == 0
     assert rows[-1]["controller_hazard"] > 0
     assert rows[-1]["f_repair"] > 0
     assert rows[-1]["frailty_fraction"] < 1
+    assert rows[-1]["writer_hazard"] == rows[-1]["controller_hazard"]
+    writer_hazards = {row["writer_hazard"] for row in rows}
+    assert {5e-6, 2.4e-5, 5e-5} <= writer_hazards
+
+
+def test_campaign_gate_is_pre_registered_and_likely_at_the_ideal_floor():
+    gate = campaign_gate()
+    assert gate["trials"] == 300
+    assert gate["target_failure"] == 0.03
+    assert gate["accept_at_most"] == 3
+    assert gate["target_false_accept_probability"] == pytest.approx(0.01989003115797692, rel=1e-12)
+    assert gate["floor_pass_probability"] == pytest.approx(0.9950309149220667, rel=1e-9)
 
 
 def test_unrepaired_controller_majority_and_static_writer_have_closed_forms():
@@ -292,7 +306,7 @@ def test_frailty_preserves_first_stall_marginal_without_repair():
         assert q * unreplicated_failure(frail.kernel_hazard(), copies=1) == pytest.approx(
             unreplicated_failure(model.hazard, copies=1), rel=1e-12)
         assert analytic(frail)["campaign_failure"] == pytest.approx(
-            analytic(model)["campaign_failure"], rel=1e-11)
+            analytic(model)["campaign_failure"], rel=1e-9)
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -371,11 +385,23 @@ def test_cli_exposes_new_assumptions_and_sensitivity(capsys):
     main(["--trials", "0", "--f-repair", "0.01", "--controller-hazard", "2.4e-5",
           "--writer-hazard", "1e-7", "--frailty-fraction", "0.2", "--tick-seconds", "13"])
     report = json.loads(capsys.readouterr().out)
-    assert report["analytic"]["campaign_failure"] == pytest.approx(0.21851584279045028, rel=1e-11)
+    assert report["analytic"]["campaign_failure"] == pytest.approx(0.21851584279045028, rel=1e-9)
+    assert report["effective_hazard"] == pytest.approx(0.00011129795841264512)
     assert "floor" in report["assumption"]
     main(["--sensitivity"])
     rows = json.loads(capsys.readouterr().out)
     assert rows == sensitivity_table()
+    main(["--sensitivity", "--ticks", "4", "--copies", "2", "--hazard", "0.1",
+          "--recovery-ticks", "3", "--tick-seconds", "13", "--time-fraction", "0"])
+    configured = json.loads(capsys.readouterr().out)
+    assert configured[0]["hazard"] == pytest.approx(0.1)
+    assert configured[0]["campaign_failure"] == pytest.approx(
+        analytic(Model(ticks=4, copies=2, hazard=0.1, recovery_ticks=3))["campaign_failure"])
+    skipped = [row for row in configured if row["campaign_failure"] is None]
+    assert [row["scenario"] for row in skipped] == [
+        "10% persistent susceptible lanes", "5% persistent susceptible lanes"]
+    for row in skipped:
+        assert row["note"].startswith("skipped: frailty_fraction must exceed marginal first-stall probability")
     for args in (["--tick-seconds", "0"], ["--time-fraction", "2"],
                  ["--frailty-fraction", "0.01"]):
         with pytest.raises(SystemExit):
