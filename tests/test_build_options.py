@@ -232,9 +232,16 @@ def test_robust_request_clear_rejects_unqualified_policy_combinations(options):
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("zero_once", [False, True])
 def test_register_reset_covers_the_complete_domain_and_changes_nothing_else(rate_robust, zero_once):
+    from drosophilos.protocol.handshake import compact_register_resets
+
     _, old, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust, zero_once=zero_once)
     _, new, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
-                                       zero_once=zero_once, robust_register_reset=True)
+                                       zero_once=zero_once)
+    # Compile the experimental primitive directly: public builds reject it until
+    # the full envelope passes, but its wiring/rounding contract remains tested.
+    new_regs = [r for sr, _ in new.inputs.values() for r in (sr.stage, sr.master)]
+    new_regs += [r for c in new.cells for r in (c.stage, c.master)]
+    compact_register_resets(new.net, new.drive, new_regs)
     assert (old.net.n, old.net.nnz) == (new.net.n, new.net.nnz)
     assert (old.net.roles, old.net.src, old.net.dst, old.net.bias) == (
         new.net.roles, new.net.src, new.net.dst, new.net.bias)
@@ -252,12 +259,12 @@ def test_register_reset_covers_the_complete_domain_and_changes_nothing_else(rate
                 assert d1 == 0
                 changed_taps += 1
             else:
-                assert target.endswith((".ready_delay12", ".ready_delay13", ".ready_delay14", ".ready"))
+                assert target.endswith(tuple(f".ready_delay{k}" for k in range(8, 15)) + (".ready",))
                 assert d1 == 100
                 changed_ready += 1
             assert source.rsplit(".", 1)[0] in {old.net.roles[r.reset_trigger].removesuffix(".reset") for r in regs}
             assert d0 == 18
-    assert changed_taps == 3 * len(regs) and changed_ready == 4 * len(regs)
+    assert changed_taps == 3 * len(regs) and changed_ready == 8 * len(regs)
     targets = {new.net.roles[d] for s, d in zip(new.net.src, new.net.dst) if s in inhibitors}
     for suffix in (".act.u", ".faultL.u", ".commit.u", ".grant.L.u", ".copy.u", ".veto0.u"):
         assert any(t.endswith(suffix) for t in targets), suffix
@@ -290,6 +297,9 @@ def test_register_reset_rejects_unqualified_policy(options):
 
 @pytest.mark.parametrize("width,op,params,mems", [
     (16, "ADD", PARAMS, None), (2, "MULP", PARAMS, None),
+    (1, "ADD", PARAMS, None), (4, "ADD", PARAMS, None),
+    (2, "MOV", PARAMS, None), (2, "OR", PARAMS, None),
+    (2, "LOAD", PARAMS, {"rom": (2, {0: 1})}),
     (2, "ADD", replace(PARAMS, default_delay_ms=1.9), None),
     (2, "ADD", PARAMS, {"ram": (2, {0: 1}, "ram")}),
 ])
@@ -299,11 +309,33 @@ def test_register_reset_rejects_unqualified_physics_and_kernel(width, op, params
                        consts={"k": 1}, mems=mems, robust_register_reset=True)
 
 
+def test_register_reset_rejects_parameter_sources():
+    with pytest.raises(ValueError, match="robust_register_reset requires"):
+        build_pipeline(PARAMS, 2, [{"name": "out", "op": "ADD", "a": "input", "b": ("param", "k")}],
+                       robust_register_reset=True)
+
+
 def test_recheck_rejects_unqualified_recorded_register_reset_timing():
     from drosophilos.bench.stage_d import recheck_record
 
     with pytest.raises(ValueError, match="robust_register_reset requires"):
         recheck_record({"robust_register_reset": True, "build_options": {"idle_hops": 1}})
+
+
+@pytest.mark.parametrize("entry", ["kernel", "stage_d", "recheck", "diagnostic"])
+def test_unqualified_register_reset_cannot_be_enabled(entry):
+    from drosophilos.bench import stage_d
+
+    with pytest.raises(ValueError, match="robust_register_reset is not qualified"):
+        if entry == "kernel":
+            kernel_campaign.block("tick", PARAMS, robust_register_reset=True)
+        elif entry == "stage_d":
+            stage_d.main(["--robust-register-reset", "--ticks", "1", "--c-ticks", "0"])
+        elif entry == "recheck":
+            stage_d.recheck_record({"build_options": {"robust_register_reset": True}})
+        else:
+            _, pl, _, _ = kernel_campaign.block("tick", PARAMS)
+            build_tick_pipeline({"block": "tick", **pl.build_options, "robust_register_reset": True})
 
 
 def test_conditioned_rates_are_recorded_rebuilt_and_shared():
@@ -335,7 +367,7 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
 
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "robust_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
 def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath, option):
     _, pl, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
                                        datapath=datapath, **{option: True})
@@ -354,7 +386,7 @@ def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, 
         _assert_conditioned_train_inputs(pl.net, pl.drive)
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "robust_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
 def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch, option):
     real_block = kernel_campaign.block
     seen = {}
@@ -385,7 +417,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "robust_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear"])
 def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 

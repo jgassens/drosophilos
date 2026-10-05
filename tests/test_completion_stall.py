@@ -28,7 +28,7 @@ from drosophilos.lib.staged import add_staged_commit
 from drosophilos.protocol.handshake import add_register, compact_register_resets
 from drosophilos.protocol.latch import add_latch, add_reset
 from drosophilos.protocol.token import rails_for
-from drosophilos.sim.model import Params, Topology
+from drosophilos.sim.model import Params
 from drosophilos.sim.ref64 import RefSim
 from drosophilos.sim.trace import SpikeTrace
 
@@ -39,7 +39,7 @@ WIDTH = 11  # 8 data bits, C, Z, V
 # copy: (rate_robust, cell, state cell with power-up veto, old master word, new stage word)
 FAILS = {
     17: (False, "c4_sel", True, 0b01000000000, 0b00000110000),   # tick 728: px 0 -> 48
-    74: (False, "c5_sub", False, 0b00011000101, 0b00010111011),  # tick 323: 197 (C) -> 187 (C)
+    74: (False, "c5_sub", False, 0b00011000101, 0b00010111011),  # tick 323: 197 -> 187; C/Z/V = 0
     11: (True, "c10_xor", False, 0b00000000110, 0b00000111011),  # tick 864: 6 -> 59
     24: (True, "c2_sel", False, 0b01000000000, 0b00000110000),   # tick 654: 0 -> 48
 }
@@ -195,7 +195,7 @@ def _immune(c, bits):
 
 
 # ---- reduced primitive: one master rail latch and the real 4-tap master reset ------------
-def _reset_latch(copy, bit, *, nominal=False, compact=None):
+def _reset_latch(copy, bit, *, nominal=False):
     name, old = FAILS[copy][1], FAILS[copy][3]
     rail = (old >> bit) & 1
     net = Netlist(PARAMS)
@@ -205,17 +205,6 @@ def _reset_latch(copy, bit, *, nominal=False, compact=None):
     topo = net.topology()
     if nominal:
         q, vth, bias = topo.quanta.astype(np.int64), np.full(net.n, PARAMS.V_th), np.zeros(net.n)
-    delay = topo.delay.copy()
-    if compact is not None:  # candidate: control.add_request_clear's form applied to this reset
-        chain = [trigger] + [net.roles.index(f"{name}.M.reset_relay{k}") for k in (1, 2, 3)]
-        for e in range(topo.nnz):
-            s, d = int(topo.src[e]), int(topo.dst[e])
-            if s in chain[:-1] and d == chain[chain.index(s) + 1]:
-                delay[e] = 0
-            if s == inh and d in latch.members:  # the copy's fan-out draws, rescaled
-                q[e] = int(round(q[e] * compact / 0.75))
-        order = np.lexsort((delay, topo.dst, topo.src))
-        topo, q = Topology.from_edges(topo.n, topo.src, topo.dst, topo.quanta, delay), q[order]
     return topo, latch, trigger, inh, q, vth, bias
 
 
@@ -309,10 +298,9 @@ def test_replayed_realization_stalls_only_at_copy74_draws():
 def test_copy74_rail_survives_the_real_reset_only_at_its_draws():
     """2,000 strayed resets at random phases, real add_reset controller: copy 74's b3r0
     (loop +6/+13 %, u V_th -0.46 mV, four inhibitor spikes) survives; the nominal latch
-    and controller never do, nor does the compact candidate with copy 74's draws."""
+    and controller never do. Compact-policy surveys live in test_robust_reset."""
     assert _strayed_survival(74, 3, 2000) == 8
     assert _strayed_survival(74, 3, 2000, nominal=True) == 0
-    assert _strayed_survival(74, 3, 2000, compact=1.1) == 0
 
 
 @pytest.mark.slow

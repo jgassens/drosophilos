@@ -83,7 +83,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
-                    help="use compact clears for stage/master register reset domains")
+                    help="withdrawn: rejected until full mix-B reset/reload qualification passes")
     ap.add_argument("--robust-request-clear", action="store_true",
                     help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--out", default=None)

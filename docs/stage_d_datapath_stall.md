@@ -660,30 +660,36 @@ virtualenv, `uv run --no-sync`, a writable task-local `UV_CACHE_DIR` and pytest
 file; the subsequent optional `zero_once` implementation is described above. Integration and committing remain with the
 orchestrator; no commit is attempted.
 
-## Qualified compact register reset (2026-10-04)
+## Compact register reset withdrawn after review (2026-10-04)
 
-The optional `robust_register_reset` now covers the entire Q reset domain as well
-as the input/cell masters. The qualification and evaluation tables are in
+`robust_register_reset=True` now raises `ValueError`: full mix-B reload
+qualification failed. The measured frontier and regression details are in
 [the completion-stall report](stage_d_completion_stall.md#register-reset-qualification-and-opt-in-2026-10-04).
-The selected controller has four taps with zero-delay links and **1.75 × loop**
-inhibition. Its existing READY chain's final four delays become 100 steps:
-**+32.8 ms per reset, no added neurons or logical synapse edges**. The request
-clear's 1.1 strength failed the independent fast-loop/weak-clear/controller corner.
+The experimental primitive retains four taps with zero-delay links and
+**1.75 × loop** inhibition. Eight final 100-step READY links (+65.6 ms) repair
+the biased stage-rail reload race; the earlier four-link policy (+32.8 ms)
+does not. Neither setting is exposed as a qualified kernel option.
 
 The stage **c3_xor.Q.b9r0** primitive uses copy 18's reconstructed seed-108 static
 draws, the four captured ignition offsets and additional synthetic kicks/strays.
 It has **0 survivors in 40,000 resets**. The actual capture's background stream is
 not replayed; even the original controller need not fail at every reduced phase.
-The slow-storage/independently-fast-READY corner retains a **20-step / 2.0-ms**
-reload margin using actual emitted pulses. The slow controller emits only three
-spikes and has a separate positive margin. Real weak COPY pulses and stage words
-loaded exactly at READY also succeed in base and RR staged cells.
+The old **20-step / 2.0-ms** isolated margin omitted tonic bias. At −0.2 mV
+storage bias it becomes **−30 steps**, and the actual next stage word can fail
+to complete. Tests now assert biased margins and advance actual stage loading
+and master READY→COPY by 100 steps when evaluating the eight-link candidate.
 
 Finalizing after all wiring includes `extend_reset` ALU state, FAULT, ACT,
 COMMIT/grant/COPY, `zero_once`'s OR/relay/inhibitors, and RR mirrored readers.
 Two-word, fault-discard/reload, whole-Q-domain silence, multi-cell arithmetic and
-small noisy RefSim checks exercise these effects. `zero_once` still prevents
+noisy RefSim checks exercise these effects. The combined three-sigma extended
+domain still fails: base stops before its first cell reset, and RR never
+completes its master. This also happens with the option off; changing reset
+timing/strength cannot qualify that full envelope. `zero_once` still prevents
 multiple Z0 ignition; it is independently selectable and is not required by this
-reset option. Neither change establishes a fix for the RR34/RR43 captures or all
+experimental reset. Neither change establishes a fix for the RR34/RR43 captures or all
 false-fault mechanisms. The control machine and default-off netlist fingerprints
-are unchanged; unqualified timing, storage/kernel policies are rejected.
+are unchanged. The old policy's measured steady tick cost was +149–174 ms
+(+2.7–3.1%), with +311 ms first-tick latency in the three-tick probe. Cell-stage
+READY is unread and adds no critical-path delay; master COPY and input READY
+consume the relevant delays. The eight-link candidate's tick cost is unmeasured.

@@ -12,6 +12,11 @@ from ..lib.netlist import Drive, Netlist
 from ..sim.model import D_MAX
 
 
+# Physical timing choices, independent of the simulator's delay-ring capacity.
+COMPACT_READY_DELAY_STEPS = 100
+COMPACT_READY_TAIL_LINKS = 8
+
+
 @dataclass(frozen=True)
 class Latch:
     u: int  # input member and output tap
@@ -31,7 +36,7 @@ def add_latch(net: Netlist, drive: Drive, name: str) -> Latch:
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
-              pulses: int = 4, strength: float = 0.75, *, tap_delay_steps: int | None = None) -> tuple[int, int, int]:
+              pulses: int = 4, strength: float = 0.75) -> tuple[int, int, int]:
     """Reset controller. `trigger` fires once per activation of its source (edge detector,
     see connect_trigger) and starts a short relay chain; the inhibitory neuron `inh` fires
     once per relay, i.e. `pulses` times ~5.3 ms apart, each delivering `strength` x loop
@@ -43,8 +48,8 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
     the members' after-hyperpolarisation, which the membrane sheds with tau_m = 20 ms, grows
     with the total inhibitory charge; four half pulses cost about what one 1.5x pulse costs
     and kill at every phase (measured: both members, 4 pulses, 0.5x -> 50/50).
-    `tap_delay_steps` overrides only the links between taps. Configured tap counts
-    are not emitted spike counts (four ordinary taps emit five nominal spikes).
+    Configured tap counts are not emitted spike counts (four ordinary taps emit
+    five nominal spikes).
     Returns (trigger, inh, edge)."""
     trigger = net.neuron(f"{name}.reset")
     inh = net.neuron(f"{name}.reset_inh")
@@ -53,7 +58,7 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
     net.synapse(trigger, inh, drive.pulse)
     for k in range(1, pulses):
         r = net.neuron(f"{name}.reset_relay{k}")
-        net.synapse(prev, r, drive.pulse, delay_steps=tap_delay_steps)
+        net.synapse(prev, r, drive.pulse)
         net.synapse(r, inh, drive.pulse)
         prev = r
     q = -int(round(strength * drive.loop))
@@ -70,39 +75,55 @@ def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates
 
 
 def compact_reset_domains(net: Netlist, drive: Drive, controllers: list[tuple[int, int]],
-                          *, strength: float = 1.75) -> None:
-    """Compile fully wired register reset domains to four compact 1.75-loop taps.
+                          *, strength: float = 1.75,
+                          ready_tail_links: int = COMPACT_READY_TAIL_LINKS) -> None:
+    """Compile experimental register domains to four compact 1.75-loop taps.
 
-    Call ONCE, after all reset extensions and rate-reader mirrors are installed.
+    Call after all reset extensions and rate-reader mirrors are installed.
     Working on the completed fan-out includes ALU state, FAULT, ACT, COMMIT,
-    grant/COPY, power-up vetoes, zero_once and mirrored readers. The integer
-    ratio preserves their compiled gains (notably the 16x reader clear).
+    grant/COPY, power-up vetoes, zero_once and mirrored readers. Scale from the
+    original integer weights, rounding once, including compiled reader gains.
+    Retaining those originals makes repeated/overlapping calls idempotent.
     Producer, request, RAM and machine controllers are not implicitly selected.
-    READY retains its fifteen-hop chain; its final four synaptic delays become
-    100 steps each (+328 steps at the qualified physics). This protects the
-    slow storage / fast READY corner without adding neurons or synapses.
+    READY retains its fifteen-hop chain; its final eight synaptic delays become
+    100 steps each (+656 steps at the default physics). The optional tail length
+    is for qualification of the recovery frontier, including the rejected policy.
     """
     inhibitors = {inh for _, inh in controllers}
     links = set()
     ready_links = set()
+    delayed_ready_links = set()
     roles = {role: i for i, role in enumerate(net.roles)}
+    if not 0 <= ready_tail_links <= 16 or not 0 <= COMPACT_READY_DELAY_STEPS <= D_MAX:
+        raise ValueError("invalid compact register READY delay")
     for trigger, _ in controllers:
         name = net.roles[trigger].removesuffix(".reset")
-        chain = [trigger] + [roles[f"{name}.reset_relay{k}"] for k in (1, 2, 3)]
-        if f"{name}.reset_relay4" in roles:
+        taps = [f"{name}.reset_relay{k}" for k in (1, 2, 3)]
+        if any(t not in roles for t in taps) or f"{name}.reset_relay4" in roles:
             raise ValueError("compact register reset requires exactly four taps")
+        chain = [trigger] + [roles[t] for t in taps]
         links.update(zip(chain, chain[1:]))
         if f"{name}.ready" in roles:
-            tail = [roles[f"{name}.ready_delay{k}"] for k in (11, 12, 13, 14)] + [roles[f"{name}.ready"]]
-            ready_links.update(zip(tail, tail[1:]))
+            names = [f"{name}.ready_delay{k}" for k in range(15)]
+            if any(n not in roles for n in names) or f"{name}.ready_delay15" in roles:
+                raise ValueError("compact register reset requires a fifteen-hop READY chain")
+            chain = [trigger] + [roles[n] for n in names] + [roles[f"{name}.ready"]]
+            pairs = list(zip(chain, chain[1:]))
+            ready_links.update(pairs)
+            if ready_tail_links:
+                delayed_ready_links.update(pairs[-ready_tail_links:])
+    # Private compilation metadata only: it is never serialized in the topology.
+    baseline = getattr(net, "_compact_reset_baseline", {})
+    net._compact_reset_baseline = baseline
     scale = round(strength * drive.loop) / round(0.75 * drive.loop)
     for e, (src, dst) in enumerate(zip(net.src, net.dst)):
         if (src, dst) in links:
             net.delay[e] = 0
         if (src, dst) in ready_links:
-            net.delay[e] = D_MAX
+            net.delay[e] = (COMPACT_READY_DELAY_STEPS if (src, dst) in delayed_ready_links
+                            else net.params.default_delay_steps)
         if src in inhibitors and net.quanta[e] < 0:
-            net.quanta[e] = round(net.quanta[e] * scale)
+            net.quanta[e] = round(baseline.setdefault(e, net.quanta[e]) * scale)
 
 
 def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),

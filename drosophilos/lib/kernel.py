@@ -49,7 +49,7 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
-from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
+from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
 from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
 from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
@@ -322,13 +322,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     request-priority policy, four configured taps, 0.75 base kill strength,
     start_relight_hops=5, relight_repair_delay=True, true_guards=True and
     no retry_clear; the other kill trains and handshake delays are unchanged.
-    `robust_register_reset=True` compacts the input/cell stage and master resets,
-    including their entire extended reset domains, to four taps at 1.75-loop with
-    zero-delay tap links and +328 steps of READY recovery. Producer resets retain
-    their original policy. RAM, multiplier and paced/multi-stream kernels are
-    unqualified and rejected with this option.
-    Only the standard timing/control policy and default physical drive are qualified;
-    rate_robust, zero_once and robust_request_clear are independent opt-ins."""
+    `robust_register_reset=True` is currently rejected: the former compact policy
+    fails biased READY reloads, and its replacement has not passed the full mix-B
+    envelope. The experimental primitive and measured frontier are retained in
+    tests/test_robust_reset.py and docs/stage_d_completion_stall.md. Producer and
+    machine resets retain their original policy; the option off is unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -349,12 +347,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                      commit_reignite, relight_repair_delay)) or retry_clear or
             (act_hops, idle_hops, watchdog_hops, in_watchdog_hops, start_relight_hops,
              request_clear_pulses) != (11, 20, 170, None, 5, 4) or
-            n not in (1, 2, 4, 8) or phases or (streams and list(streams) != ["input"]) or
-            any(cs["op"] not in {"MOV", "ADD", "SUB", "AND", "OR", "XOR", "SEL", "LOAD"}
-                for cs in spec) or any(len(m) > 2 and m[2] == "ram" for m in (mems or {}).values())):
+            n not in (2, 8) or phases or (streams and list(streams) != ["input"]) or mems or
+            any(cs["op"] not in {"ADD", "SUB", "AND", "XOR", "SEL"} for cs in spec) or
+            any(isinstance(cs.get(key), (tuple, list)) and cs[key][0] != "const"
+                for cs in spec for key in ("a", "b", "c"))):
         raise ValueError("robust_register_reset requires default physics/drive, standard "
                          "timing, true guards, selected-rail COPY, no retry_clear and a "
-                         "1/2/4/8-bit single-stream ALU/ROM kernel without pacing")
+                         "2/8-bit single-stream ADD/SUB/AND/XOR/SEL kernel with constant "
+                         "or cell operands, without memories, parameters or pacing")
+    if robust_register_reset:
+        raise ValueError("robust_register_reset is not qualified over the full mix-B reload envelope; "
+                         "see docs/stage_d_completion_stall.md for the measured frontier")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
@@ -900,10 +903,6 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         else:
             gate_commit(key, creq, reg.commit_in, readers)
     outs = [cells[o] for o in (outputs or [order[-1].name])]
-    if robust_register_reset:
-        registers = [r for reg, _, _ in inputs.values() for r in (reg.stage, reg.master)]
-        registers += [r for c in order for r in (c.stage, c.master)]
-        compact_register_resets(net, drive, registers)
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
     pl.const_values = dict(consts or {})

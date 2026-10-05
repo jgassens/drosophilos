@@ -106,10 +106,11 @@ def add_register(net: Netlist, drive: Drive, name: str, width: int, with_complet
 
 
 def compact_register_resets(net: Netlist, drive: Drive, registers: list[Register]) -> None:
-    """Finalize selected, fully wired latch registers with the compact reset policy.
+    """Finalize selected latch registers with the experimental compact reset policy.
 
     This belongs after extend_reset and staged-commit wiring: strengthening only
     add_register's original fan-out would leave their later reset targets weak.
+    The kernel opt-in is withdrawn; direct calls support qualification experiments.
     """
     if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
         raise ValueError("compact register reset is qualified only for latch storage")
