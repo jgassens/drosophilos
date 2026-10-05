@@ -6,21 +6,27 @@ control-node service**, vote complete canonical states, commit through a protect
 replicated neural log, and repair a stalled replica from that log. Voting alone
 leaves failed replicas unavailable: at the observed stall rate, unrepaired TMR
 still has about **50% campaign failure probability** over 100 logical copies ×
-1,000 ticks. With an assumed two-tick unavailability interval and successful
-recovery, the independent-stall prediction is **0.2245%**. Recovery and protection
-must be measured before either number can describe an implemented machine.
+1,000 ticks. **0.2245426% is an ideal floor at h=5e-5, R=2, f_repair=0,
+controller-lane hazard=0, writer hazard=0, homogeneous replicas and perfect
+timers/protection; it is not a forecast.** At the same hazard, f_repair=1%
+raises failure to **0.9430644%**, and f_repair=10% to **7.1533518%**.
+With no qualified repair (f_repair=1), it is **49.9825019%** before controller
+or writer failures. The sensitivity table below varies these assumptions,
+cadence and persistent frailty. Recovery feasibility is the first build gate.
 
 Sources are [the plan](plan.md), [Stage D harness](stage_d.md), the
 [performance ledger](perf_campaign.md), and the updated
 [datapath](stage_d_datapath_stall.md), [request](stage_d_request_stall.md), and
-[completion](stage_d_completion_stall.md) stall reports. `docs/stable_latch.md`
-is **absent in this checkout**. The task's statement that a latch-level cure was
-shown impossible under independent per-neuron noise is a supplied premise, not
-a proof independently inspected here. The available reports already rule out
+[completion](stage_d_completion_stall.md) stall reports, and
+[stable-latch qualification frontier](stable_latch.md). The latter finds that
+none of its evaluated combinations meets all six requirements: the experimental
+autapse improves clear counts but fails the independent-corner rate floor and
+reload-margin gates. This is an inspected finite qualification frontier, not a
+proof that every possible latch design is impossible. These reports rule out
 treating a stronger clear or a timed READY as a generally qualified cure.
-The campaign combining `zero_once`, `robust_request_clear`, and
-`experimental_register_reset` is running per the task; its result is unknown.
-The model uses the historical hazard, not an assumed improvement from those flags.
+No improvement from combining `zero_once`, `robust_request_clear`, and
+`experimental_register_reset` is assumed here. A new campaign must retain its
+flags, counts and exposure before its result can replace the historical hazard.
 
 ## 1. What the plan requires, and what runs on the host
 
@@ -51,9 +57,11 @@ the game on the host. A Python decoded-state voter, Python commit log, host
 timeout/restart decision, or host-computed checkpoint-to-spike loader would be
 such external orchestration. Each exceeds the literal five-operation inventory,
 must be disclosed, and cannot be presented as a neural protected voter or a
-transport-only host. **This design chooses neural vote, watchdog, log, apply,
-and recovery**, avoiding that exception for these decisions. It does not claim
-F2 for the rest of the existing runtime.
+transport-only host. The primary design uses neural vote, watchdog, log, apply
+and recovery. Section 5 also costs a **hybrid C–F alternative**, using neural
+comparison, log storage, state application and transfer with Python timing,
+identity counters, fencing and recovery sequencing. Both remain design
+candidates; neither claims F2.
 
 FlyLink must remain a conduit:
 
@@ -63,6 +71,10 @@ FlyLink must remain a conduit:
 | Destination/multicast group, port, epoch, sequence, flags, payload | Neural sender's port codec, represented by tokens |
 | Transport checksum | External transport; packet corruption only |
 | Logical request ID, tick, comparison, quorum, timeout, retransmit, checkpoint selection | Neural circuits |
+
+The fourth row is this all-neural design's addition; the plan's FlyLink inventory
+specifies the first three. The hybrid variant declares its Python decisions
+separately and does not attribute them to the transport or neural sender.
 
 The host may deliver a checkpoint's already-generated rail events using a fixed
 mapping. It may not decode a majority, synthesize those rails from Python game
@@ -147,6 +159,17 @@ overlapping tick pipeline must not be wrapped without that barrier. A later
 pipelined version needs per-tick speculative buffers and an explicit rollback
 contract and a new hazard/latency measurement.
 
+**Proposal followed by a wedged master rewrite:** a complete buffered proposal
+may still contribute to this tick's quorum even if its producer subsequently
+stalls. Eligibility for START k+1 requires a separate local-rearm certificate:
+all architectural masters read back equal to the certified C[k], Q/M completion
+and actual READY/IDLE interlocks agree, and the incarnation remains current.
+Healthy lanes use this checked local feedback, not a per-tick log reload.
+Local readback runs concurrently with append/publication; dispatch waits for
+two rearmed lanes. A proposal alone never cancels the rearm watchdog. A wedged
+lane is fenced and takes the full log reload path in section 3. If readback adds
+critical-path time, remeasure cadence and R; the budget is not a free reload.
+
 ### Protected voter and majority-backed log
 
 Use three independently placed voter/controller/log lanes. Each has its own
@@ -158,8 +181,11 @@ final selection/qualification problem. Its residual failure rate, including
 shared inputs, fan-out and controller faults, is a model parameter, not zero by
 construction. An unprotected Python `majority()` is not its implementation.
 
-Use a static single writer initially; no gratuitous leader election is needed
-for this experiment. Every log member checks the previous committed index,
+The initial all-neural prototype has a **static single writer and no qualified
+writer repair or replacement path**. It is a service-liveness single point of
+failure, even when its corruption is fail-stop. `writer_hazard` counts its stall
+as a failed campaign; zero is only the ideal floor assumption. Every log member
+checks the previous committed index,
 request identity and payload, writes a complete inactive record, then emits a
 neural durable-within-the-declared-crash-model ACK. A commit certificate requires
 two matching stored records. Publish `(state, last_applied_tick, request_id)` as
@@ -186,13 +212,32 @@ that archive is not authoritative runtime storage. On controller/node restart,
 neural peer agreement chooses the highest certified committed prefix, reconciles
 an interrupted append, and fences obsolete writers before accepting new work.
 “Raft-shaped” in the plan is not a substitute for proving these rules. If a
-static writer dies, bounded fail-stop is sufficient for the first D prototype;
+static writer dies, bounded fail-stop preserves safety **and fails D liveness**.
 F requires protected replacement-writer selection as well.
+
+**Log member wedged mid-append:** the append watch runs on every request, not
+only after a restart. A member ACKs only a fully written and read-back record.
+Timeout fences that member/incarnation and discards its uncertified inactive
+bank; the previous certified bank stays live. Two matching member ACKs can
+commit without the third; late ACKs from the fenced generation cannot publish.
+The controller/log lane stays unavailable thereafter in this prototype. Loss
+of a second member stops commits. Resetting/rebuilding a member from the two
+remaining certified peers is a possible extension, but it has **no qualified
+repair path here** and receives no availability credit in the model.
+
+Voter buffers, comparators, input journal and log banks share each controller
+lane's failure domain. Their raw stall probability is `controller_hazard`;
+unrepaired 2-of-3 controller availability is explicitly modeled separately from
+kernel repair. Residual wrong certificates/final qualifier defects remain in
+`voter_failure`. The two terms must not count the same event twice. A small raw
+controller hazard is not justified by triplication: these lanes contain the
+same unqualified storage primitives. The hybrid alternative reduces neural
+sequencing hazards but retains neural comparator/log-member exposure.
 
 ## 3. Neural stall detection, masking, and recovery
 
 Arm a per-lane timer on accepted `START(epoch,tick)`, outside that lane's reset
-domain. Cancel it only on the matching complete proposal/commit participation
+domain. Cancel it only on the matching complete proposal **and local-rearm**
 certificate, not a heartbeat, a rail train, or activity on a previous tick.
 Use three independently protected timer channels per lane and a two-of-three
 timeout authorization. Timer cancellation and reset must be tagged and finish
@@ -254,6 +299,18 @@ The recovery state machine is:
    A partial load, survivor, timeout, wrong tag or bad readback leaves the lane
    fenced; it must never vote just because a timer elapsed.
 
+**Wedged reload consumer:** each consumer has a private validated transfer
+buffer and one-way selected-rail fan-out. Copy the pinned certified checkpoint
+into that buffer before engaging the consumer. Consumer ACK, READY, reset and
+backpressure have no path into authoritative bank storage/reset/read enable or
+other consumers' ports. The external recovery deadline expires independently;
+fence the consumer, discard its transfer buffer, and release the global dispatch
+barrier for the healthy pair. It cannot keep the log pinned indefinitely.
+Inject a permanently dark READY, both rails, continuous consumer firing and
+never-ACK at each word; require unchanged bank readback and healthy commits.
+Failure of this isolation is service-fatal protection failure, not safe
+f_repair. The buffer/fence fan-out has an explicit budget in section 5.
+
 Bound the attempts and total recovery deadline. Exhaustion leaves a permanently
 unavailable lane and is reported separately; it is not a successful repair.
 A qualified cold spare could replace it, but needs additional capacity and its
@@ -286,14 +343,14 @@ loss of all neural nodes.
 
 Implementation: [tmr_model.py](../drosophilos/bench/tmr_model.py), pure Python/NumPy.
 It neither imports game code nor controls the simulator. `Model`, `analytic`,
-`monte_carlo`, `binned_hazard`, and `unreplicated_failure` are usable directly.
+`monte_carlo`, `binned_hazard`, `cadence_hazard`, `first_stall_estimate`,
+`sensitivity_table`, and `unreplicated_failure` are usable directly.
 
 ### Evidence and temporal distribution
 
-Use h = 5×10⁻⁵ per active replica per tick, with 4–6×10⁻⁵ as a sensitivity range,
-from roughly 4–6 stalled copies per 100 over 1,000 ticks. This range is not a
-confidence interval. Treat each observation as a right-censored first-stall
-mission. The specifically documented head-to-head runs give:
+Use h=5e-5 as an illustrative **old-cadence** point, not a fitted TMR hazard.
+Treat each observation as a right-censored first-stall mission. The specifically
+documented head-to-head runs give:
 
 | Build | Completed ticks before first stalled attempt | Fully matched copies |
 |---|---|---:|
@@ -306,6 +363,40 @@ startup burn-in cannot establish long-run liveness. Total attempted exposure is
 97,083 + 4 + 98,102 + 5 = **195,194 replica-ticks**, giving 9/195,194 ≈ 4.61×10⁻⁵.
 The ledger also reports a batch fault in each run; “zero wrong” does not mean
 “zero detected internal faults.” The older nine-stall build is not pooled here.
+
+The review request also reports six-stall campaigns, including **zero_once
+6/100**; their exact event times are not supplied in these reports, so use the
+mission fraction rather than inventing attempted exposure. For independent
+copies of a fixed build, `first_stall_estimate` maps a binomial Wilson 95%
+interval for first-stall fraction p to constant hazard `h=1-(1-p)^(1/1000)`:
+
+| Campaign tally (100 copies × 1,000 ticks) | First-stall fraction, Wilson 95% CI | Equivalent old-cadence h, 95% CI |
+|---|---|---|
+| Default 4/100 | 4%; 1.5663–9.8371% | 4.08212e-5; 1.57871e-5–1.03546e-4 |
+| Rate-robust 5/100 | 5%; 2.1544–11.1750% | 5.12920e-5; 2.17789e-5–1.18496e-4 |
+| Reported six-stall / zero_once 6/100 | 6%; 2.7786–12.4768% | 6.18735e-5; 2.81791e-5–1.33258e-4 |
+| Historical old build 9/100 (separate cohort) | 9%; 4.8073–16.2262% | 9.43062e-5; 4.92652e-5–1.77034e-4 |
+
+These intervals describe copy sampling only, under the stated independence and
+constant-h assumptions. Same-seed/different-build observations are not pooled
+as independent cohorts. Static frailty can violate constant-h; the interval is
+not confidence in the floor. Unknown stall times in the six-stall runs do not
+justify pooling them with the nine known events. Even 4–6/100 permits a much
+wider hazard range than 4–6e-5.
+
+**Cadence exposure:** the source steady interval is 5.84 neural seconds (about
+5.8), whereas the proposed serialized schedule is about 13 s. Let alpha be the
+fraction of cumulative hazard driven by elapsed neural time rather than tick
+transactions. `cadence_hazard` uses
+`h_new=1-(1-h_old)^((1-alpha)+alpha*13/5.84)`.
+At h_old=5e-5, alpha=0/0.5/1 gives h_new=5e-5/8.0649449e-5/1.1129796e-4.
+The fully time-driven R=2 result is **1.1073261%**, not 0.2245%; at R=3 it is
+about 1.84%. Apply the same transform to the confidence endpoints. The upper
+6/100 endpoint becomes about 2.97e-4, so the table spans **1.5e-5–3e-4** at the
+TMR cadence (and records 9/100 separately). Holds, reset pauses and additional
+counter/reload delays count as elapsed exposure. Alpha and the actual cadence
+remain unmeasured; scaling per-tick exposure is an assumption to qualify, not
+evidence of a measured improvement.
 
 The timing sensitivity pools the nine events into four bins. Pooling two builds
 with the same seed is illustrative, not nine independent measurements of one
@@ -338,8 +429,9 @@ Thus R=1 cannot save two stalls in the same tick; R=2 also exposes the next tick
 Convert a neural-time budget conservatively as
 `R = max(1, ceil((detection + reset + load + verify + join) / healthy_tick_period))`.
 Use a measured effective hazard while healthy lanes are holding at a barrier:
-strays continue during pauses. The model counts exposure opportunities, not wall
-time, and does not independently model hold-time faults or HPC time limits.
+strays continue during pauses. The model counts cadence-adjusted exposure
+opportunities, not HPC wall time; long variable holds require a time-varying
+h[t] or a conservative cadence bound. It does not model HPC time limits.
 
 Let p = 1 − product(1−h[t]). Without replication/recovery:
 
@@ -380,14 +472,25 @@ P(service failure) ≈ 3 Σ h[t]²
 Unlike merely cubing a per-tick availability, this counts overlaps with a
 replica that stalled earlier. Unlike permanent TMR, it allows repeated repairs.
 
-`voter_failure` v[t] includes residual fatal voter/commit-controller/log failure;
+`controller_hazard` h_c[t] is a raw stall hazard for each of three independent
+controller/voter/log lanes. There is no modeled controller repair. With
+`p_c[t]=1-product_{u<=t}(1-h_c[u])`, its majority-loss CDF is
+`F_controller[t]=3p_c[t]^2-2p_c[t]^3`. Multiply surviving kernel probability
+by `1-F_controller[t]`; a second controller stall fails liveness immediately.
+This includes exposure while kernels repair. `writer_hazard` h_s[t] is a
+**per-service** static-writer hazard, fatal on its first stall; it multiplies
+survival by `product(1-h_s[t])`. If one physical writer serves all 100 services,
+its failure belongs in `global_common_mode` instead, once per campaign.
+
+`voter_failure` v[t] includes residual fatal voter/commit-controller/log failure
+after excluding already modeled raw controller/writer stalls;
 `watchdog_failure` w[t] includes residual fatal detection/fencing failure.
 These are **per-service per-tick rates after protection and demand weighting**,
 not raw component rates. A timer's per-demand miss probability must be multiplied
 by its demand rate and evaluated for whether it actually defeats the service
 deadline; do not insert it unconverted. Safe false exclusions belong in lane
 unavailability. `common_mode` c[t] is a shock defeating at least two lanes of
-one service. Surviving service mass is multiplied by `(1−v)(1−w)(1−c)` each tick.
+one service. Surviving mass is multiplied by `(1−h_s)(1−v)(1−w)(1−c)` each tick.
 `global_common_mode` g[t] represents a shock shared by all C services:
 
 ```
@@ -396,16 +499,40 @@ P(exit failure) = 1 − S_service^C × product_t(1−g[t])
 
 The last factor is applied once per campaign, not raised to C. All these
 independent-factor assumptions are explicit; overlapping categories must not
-double-count a mechanism. `recovery_failure` is conditional on a repair attempt
-and leaves that lane down for the mission. Duration variability, latent static
-frailty and repeated failures immediately after rejoin are not fitted by this
-model. Use a worst-case R and a nonzero failure fraction until measured.
+double-count a mechanism. `recovery_failure` (CLI alias `--f-repair`) is
+conditional on a completed repair attempt and leaves that lane down for the
+mission. Use a worst-case R and a nonzero failure fraction until measured;
+no qualified path corresponds to f_repair=1, not assumed successful repair.
+Duration variability is not fitted. Use R=3 if a retry exceeds the R=2 bound.
 An unsafe reload that is wrongly certified for rejoin is a protection failure,
 not the safe, fenced `recovery_failure` outcome.
 
-### Results: predicted probabilities, not neural campaign results
+**Static frailty is explicit:** at mission start each kernel lane independently
+draws susceptibility with probability q=`frailty_fraction`. That draw survives
+every reset/reload. Nonsusceptible lanes have zero hazard (an extreme sensitivity
+construction, not measured perfect hardware). Susceptible lanes have scaled
+integrated hazard so `q * (1-product(1-h_weak[t])) = p`, the homogeneous lane's
+first-stall mission probability. This requires q>p, with q=1 the homogeneous
+case. For constant h, `h_weak=1-(1-p/q)^(1/T)`. Thus frailty changes repair
+overlap and repeat failures without changing marginal first-stall risk.
+At h=5e-5, q=0.1/0.05 gives h_weak about 6.69e-4/3.70e-3. After successful
+rejoin, `post_rejoin_multiplier` multiplies that same lane's intensity for the
+remainder of the mission; it does not resample susceptibility or compound on
+each repair. Default 1 retains the original static weakness.
 
-Constant hazard, successful bounded repair, perfect protection, no common mode:
+The exact solver averages four conditional identity-preserving chains (0–3
+susceptible lanes), retaining unavailable lane, return countdown and the mask
+of lanes previously rejoined. The Monte Carlo draws susceptibility once per
+physical copy and retains it when renewing events. The homogeneous H/D/P chain
+above is the q=1, multiplier=1 specialization. Repair failure is independent of
+frailty here; state-dependent failure and correlated controller/kernel weakness
+need additional measurements and a new model, not hidden zeros.
+
+### Results: sensitivity probabilities, not forecasts or neural campaign results
+
+Historical homogeneous R comparison, **f_repair=0, h_c=h_s=0, alpha=0,
+perfect timers/protection, no common mode**. These are conditional floors at
+each specified hazard; 4–6e-5 is not the evidence envelope:
 
 | Configuration | h=4e-5 | h=5e-5 | h=6e-5 |
 |---|---:|---:|---:|
@@ -423,7 +550,46 @@ At h=5e-5, unrepaired per-service failure is 0.00690403, repaired R=2 is
 to **0.27775% (R=2)**, **1.73193% (R=10)**, and **15.3966% (R=100)**. Its bins
 are too sparsely populated to demonstrate a true hazard peak, but timing matters.
 
-Sensitivity at h=5e-5, R=2, with other additional terms zero:
+The main sensitivity table is generated by `sensitivity_table()` / CLI
+`--sensitivity` and pinned numerically in tests. All rows use C=100, T=1,000,
+R=2 and v=w=c=g=0; h is **per actual logical tick after cadence scaling**.
+h_c is per controller lane, h_s per service writer, q is the persistent
+susceptible fraction, and m is post-rejoin intensity multiplier. **The first
+row is the ideal floor conditional on h=5e-5, not a forecast or a lower bound
+over all hazards.** Zero protection terms elsewhere also make those rows
+conditional idealizations. Inputs have no measured TMR calibration.
+
+| Scenario | h | f_repair | h_c | h_s | q | m | Campaign failure |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **Ideal R=2 floor at h=5e-5** | 5e-5 | 0 | 0 | 0 | 1 | 1 | **0.2245426%** |
+| Low evidence envelope | 1.5e-5 | 0 | 0 | 0 | 1 | 1 | 0.0202330% |
+| 4/100 constant-h estimate | 4.0821161e-5 | 0 | 0 | 0 | 1 | 1 | 0.1497310% |
+| 5/100 constant-h estimate | 5.1291979e-5 | 0 | 0 | 0 | 1 | 1 | 0.2362813% |
+| 6/100 including zero_once | 6.1873489e-5 | 0 | 0 | 0 | 1 | 1 | 0.3436241% |
+| 9/100 old build, separate cohort | 9.4306232e-5 | 0 | 0 | 0 | 1 | 1 | 0.7963402% |
+| Half time-driven, 13 s | 8.0649449e-5 | 0 | 0 | 0 | 1 | 1 | 0.5830629% |
+| Fully time-driven, 13 s | 1.1129796e-4 | 0 | 0 | 0 | 1 | 1 | 1.1073261% |
+| Wide cadence/evidence envelope | 3e-4 | 0 | 0 | 0 | 1 | 1 | 7.7647307% |
+| 1% failed repairs | 5e-5 | 0.01 | 0 | 0 | 1 | 1 | 0.9430644% |
+| 10% failed repairs | 5e-5 | 0.1 | 0 | 0 | 1 | 1 | 7.1533518% |
+| No qualified repair: all fail | 5e-5 | 1 | 0 | 0 | 1 | 1 | 49.9825019% |
+| Unrepaired controllers, low | 5e-5 | 0 | 5e-6 | 0 | 1 | 1 | 0.9639302% |
+| Unrepaired controllers, illustrative | 5e-5 | 0 | 2.4e-5 | 0 | 1 | 1 | 15.5012045% |
+| Unrepaired controllers, kernel-scale | 5e-5 | 0 | 5e-5 | 0 | 1 | 1 | 50.0948125% |
+| Static writer, 1e-7 | 5e-5 | 0 | 0 | 1e-7 | 1 | 1 | 1.2173251% |
+| Static writer, 1e-6 | 5e-5 | 0 | 0 | 1e-6 | 1 | 1 | 9.7194373% |
+| 10% persistent susceptible lanes | 5e-5 | 0 | 0 | 0 | 0.1 | 1 | 0.4002315% |
+| 5% persistent susceptible lanes | 5e-5 | 0 | 0 | 0 | 0.05 | 1 | 2.9360588% |
+| Post-rejoin intensity ×2 | 5e-5 | 0 | 0 | 0 | 1 | 2 | 0.2357042% |
+| Joint illustrative assumptions | 1.1129796e-4 | 0.01 | 2.4e-5 | 1e-7 | 0.2 | 1 | 21.8515843% |
+
+At h_c=2.4e-5, controller loss alone is about 15.31%; the table adds the
+kernel floor independently. A writer at 1e-7 alone costs about 0.995% across
+100,000 service-ticks. No data establishes h_c or h_s near 1e-8 or below;
+the controller uses the same primitives as the kernels. Setting them to zero
+is an explicit best-case assumption, not credit earned by replication.
+
+Residual protection sensitivity at h=5e-5, R=2, f_repair=0, h_c=h_s=0, q=m=1:
 
 | Additional assumption | Campaign failure |
 |---|---:|
@@ -434,9 +600,6 @@ Sensitivity at h=5e-5, R=2, with other additional terms zero:
 | c=1e-6 | 9.71944% |
 | g=1e-8 per campaign-tick | 0.22554% |
 | g=1e-6 | 0.32427% |
-| 1% of repairs leave the lane permanently down | 0.94306% |
-| 10% of repairs leave it down | 7.15335% |
-| All repairs fail | 49.9825% |
 
 These protection and recovery rates are hypothetical sensitivity inputs. The
 current evidence does not measure any of them. At low rates a target campaign
@@ -470,6 +633,8 @@ Run each row with `--recovery-ticks none|1|2|10`:
 uv run python -m drosophilos.bench.tmr_model --recovery-ticks 2 --trials 20000 --seed 108
 uv run python -m drosophilos.bench.tmr_model --profile observed --recovery-ticks 2 --trials 20000
 uv run python -m drosophilos.bench.tmr_model --recovery-ticks 2 --voter-failure 1e-8 --watchdog-failure 1e-8 --trials 0
+uv run python -m drosophilos.bench.tmr_model --sensitivity
+uv run python -m drosophilos.bench.tmr_model --tick-seconds 13 --time-fraction 1 --f-repair .01 --controller-hazard 2.4e-5 --writer-hazard 1e-7 --frailty-fraction .2 --trials 0
 ```
 
 Independent noise draws do not give independence from shared compiler defects,
@@ -498,6 +663,7 @@ means logical edges (`nnz`), not summed quanta/anatomical contacts. Relevant anc
 | Latched two-input AND/OR, base builder | 6 / 10 | Gate integration tens of ms; budget 30–60 ms/level from H0 |
 | Validated B-bit register, current base builder | 17B+16 / 36B+13 | Width/depth-dependent; READY alone ≈84.8 ms nominal |
 | H-hop watchdog, one start/cancel source | H+6 / 2H+14 | ≈5.3H ms, plus entry/output overhead |
+| Current four-bit adder channel / accumulator, read-only builder counts | 603 / 1,278; 1,406 / 2,800 | Adder contract ~539-ms full cycle; not a qualified 16-bit counter |
 | Experimental reset verifier, per register | +104 / +(D+152+F) | Common ≈140–147 ms, retries ≈306–493 ms; exhaustion 716.1 ms |
 
 Register/gate/watchdog counts were checked read-only with the current builders:
@@ -535,7 +701,48 @@ fast single rails; conditioning/true-rail qualification remains required.
 | One 40-bit input/identity journal per controller | 2,088 | 4,359 |
 | Provisional 48-bit controller metadata register per controller | 2,496 | 5,223 |
 | Three watchdog channels per kernel lane, H=4,000 | 36,054 | 72,126 |
-| Subtotal before recovery sequencers/glue | **166,581** | **320,601** |
+| Original storage/comparison/watchdog subtotal | **166,581** | **320,601** |
+| Nine 16-bit incrementers: tick/epoch/incarnation × three controllers; four 4-bit adder channels each | 21,708 | 46,008 |
+| Three private 72-bit reload transfer buffers | 3,720 | 7,815 |
+| Append and recovery deadlines: three channels each, H=4,000 allowance | 24,036 | 48,084 |
+| Revised subtotal before recovery sequencers/glue | **216,045** | **422,508** |
+
+Counter storage was in the 48-bit metadata allocation; arithmetic was missing.
+The incrementer allowance deliberately retains each adder channel's local
+registers in addition to metadata, without assuming cheap register sharing.
+Carry qualification, +1 ROM, increment trigger/ACK and overflow veto belong in
+the glue allowance below. An alternative built from four 4-bit accumulators
+per counter costs 50,616 neurons / 100,800 edges for nine counters, **28,908 /
+54,792 more** than the adder allocation; it is not silently substituted.
+Neither is a built/qualified 16-bit incrementer. Up to four ~539-ms carry cycles
+cost ~2.16 s nominal. Precompute next tick identity during the ~12.1-s kernel
+evaluation, keep it uncommitted, and activate only with the matching commit
+certificate. Rollover stops and drains; no wrap is accepted. Epoch/incarnation
+increments during fencing/rejoin must enter the repair latency budget. If
+counter work cannot overlap, cadence exceeds 13 s and h must be scaled again.
+
+The private reload buffer carries the whole comparison record and is isolated
+per kernel consumer. Authoritative-bank readout, buffer filling, independent
+completion/deadline and fence fan-out are not shared with consumer ACK/reset.
+Append/recovery watches were formerly unallocated shorter timers. The table
+now reserves six full H=4,000 channels as a capacity allowance; shorter proven
+deadlines may reduce that count. Timer voters/cancel controls remain glue.
+
+**Timer noise exposure is not zero:** fifteen H=4,000 channels total cost
+60,090 neurons / 120,210 edges (nine lane watches plus six service watches).
+At 5 Hz, a 13-s tick exposes them to about **3,905,850 stray impulses per
+service-tick**; over 100 × 1,000 ticks this is about **3.906e11**. Static mix-B
+draws apply to every timer neuron/edge as well. A 4,000-neuron chain exposed for
+21.2 s receives about 424,000 strays per demand, but that is exposure, not a
+failure probability. Let d be raw per-channel missed-timeout probability;
+independent 2-of-3 miss probability is `3d²-2d³`, with shared cancel/fence
+defects separate. A missed safe repair deadline belongs in f_repair; an
+unbounded/unsafe service stall belongs in watchdog_failure. False timeouts
+add lane outages to h, controller_hazard, or a fatal common-mode term as
+appropriate. The floor sets all these terms to zero only as an idealization.
+For scale, w=1e-8 already adds about 0.10 percentage point of campaign risk;
+the residual table shows joint v/w sensitivity. Actual rates need measurement
+and fault injection; neuron exposure alone cannot establish timer reliability.
 
 The existing 14 Q/M pairs per kernel suggest 28 reset-domain verifiers. Applying
 the prototype's count only as an allowance gives 3×28×104 = **8,736 neurons**
@@ -544,19 +751,20 @@ reset extensions; fan-out is not free. A further isolation fan-out can cost up
 to about 3×29,375 = **88,125 edges** if every kernel neuron needs a fence input.
 Reserve **5–10k neurons / 15–30k edges** for reset sequencing, selected-rail
 load/copy, identity/conflict checks, timer majority/cancellation, output
-qualification, epoch ports and static-writer control. This produces an order
-**180–190k neurons and roughly 450–520k edges** if ΣD is 20–60k. That range is
+qualification, carry/overflow control, epoch ports and static-writer control.
+This produces **229,781–234,781 neurons / 558,401–613,401 edges** if ΣD is
+20–60k and ΣF=0 (add the enumerated ΣF). That range is
 a provisional allocation, not a bound; extra conditioning and wider metadata
 can exceed it. Full log history, cold spares and F leader replacement are excluded.
 Archiving 1,000 additional 72-bit validated records on three log members alone
 adds roughly 3.72M neurons / 7.815M edges, before indexing/control.
 
-The naive protected design already exceeds one 166,700-neuron MCNS image before
+The revised protected design exceeds one 166,700-neuron MCNS image before
 placement/relay costs. Distribute it or reduce the architecture with measured
 sharing; do not call it a single-node Profile 2 fit. A shared timer oscillator
 could save much of the 36k timer allocation but becomes a new common dependency
 and is an unmeasured design change. The capacity report must precede any >4-node
-scale-up. For 100 logical services, mutable neuron state is roughly 18–19M
+scale-up. For 100 logical services, mutable neuron state is roughly 23–24M
 neurons at this budget, despite shared topology; wall time is not inferred by
 multiplying the old 100-copy run by three.
 
@@ -575,7 +783,8 @@ Healthy-lane watchdogs cancel concurrently and add no 21.2-s serial wait.
 The initial one-outstanding-tick barrier also sacrifices the existing pipeline's
 overlap: using 12.1 s as a first estimate for a serialized kernel gives
 **12.9–13.6 s/tick**, about 2.2–2.3× the old 5.84-s interval. This is an estimate,
-not a measured repeated serialized schedule. Concurrent replication does not
+not a measured repeated serialized schedule; counter overlap and concurrent
+local-rearm readback must be demonstrated to retain it. Concurrent replication does not
 triple neural latency. Later buffering could preserve overlap, but needs a new
 capacity, correctness, and timing analysis. The 35-Hz game tick is logical, not
 demonstrated real-time execution.
@@ -590,18 +799,95 @@ the measured larger R. The completion report's +65.6 ms READY delay for the
 experimental reset is not a whole-kernel recovery time. Barrier pause/hold
 hazards and neural/wall-time run ceilings must be included in the real campaign.
 
+R=2 has only about **1–4 s margin** against two 13-s periods. One extra reset,
+counter carry or reload retry can consume it. The hard deadline is 26 s from
+loss of eligibility to verified rejoin; failure to meet it exhausts safely and
+counts in f_repair. A policy extending the deadline must report R=3 or more:
+at h=5e-5, ideal R=3 failure is **0.3736830%** (time-scaled h gives about 1.84%).
+Do not average recovery duration or credit a late success as R=2.
+
+### Plan-permitted hybrid C–F alternative (not F2)
+
+Keep the three neural kernels, proposal buffers, exact neural comparators,
+voted buffers, neural input journal/log banks, and selected-rail neural
+checkpoint transfer/application. Python maintains tick/epoch/incarnation
+counters, START/rearm/append/recovery timers, fence scheduling, quorum-backed
+append sequencing and bounded retries. Host control emits explicitly hybrid
+control tokens; it does not decode/vote state or recompute world updates.
+Software decision/token generation exceeds the literal host inventory and is
+permitted only by the labeled C–F control-plane exception. It must not be
+presented as neural sender logic. The storage/application certificate still
+comes from neural member readback and neural exact comparison.
+
+Remove neural timer chains, nine neural incrementers and three metadata
+registers from the revised subtotal: **131,751 neurons / 251,067 edges**.
+Private reload buffers remain. Keep 8,736 verifier neurons, enumerated
+ΣD+12,768+ΣF verifier edges and up to 88,125 fence edges. Reserve 3–6k neurons /
+9–18k edges for neural copy/qualification and host-to-neural fence/tag ports.
+This gives the following comparable planning allocations:
+
+| Variant, one service | Subtotal N / edges | Including reset/fence/glue allowances | Control cost and exposure |
+|---|---:|---:|---|
+| **All-neural candidate** | 216,045 / 422,508 | 229,781–234,781 N / 558,401–613,401 edges + ΣF | 15 long timer channels, nine incrementers; raw controller/log and static neural writer hazards remain |
+| **Hybrid C–F candidate** | 131,751 / 251,067 | 143,487–146,487 N / 380,960–429,960 edges + ΣF | Python five deadline classes (three lane + append + recovery), three counters and writer sequencing per service; neural comparator/log hazards remain |
+
+Both use ΣD=20–60k, the same three kernels, isolated reload buffers and bounded
+log capacity. Hybrid saves **84,294 neurons / 171,441 edges at subtotal**, about
+39%/41%; all-neural extra glue is separately shown. These are allocations, not
+constructed netlist measurements; placement/conditioning can increase both.
+The hybrid lower end fits below 166,700 before placement, not a claimed MCNS
+mapping. Its 100-service state is about 14.3–14.7M mutable neurons plus host
+O(100) service records / 500 timers / 300 counters and retained retry metadata;
+Python object memory and wall-time costs must be measured, not priced as neurons.
+
+Hybrid timing/counter sequencing removes the corresponding neural exposure,
+but h_c remains nonzero for neural buffers/comparators/log banks. Represent
+software writer failure per service in h_s, and shared control-process death
+in g once per campaign. No protected host failover is specified here either;
+halt fails liveness. Full-domain reload remains unqualified for both variants.
+Use measured cadence for each (neural vote/log still costs ~0.8–1.5 s); zeroing
+all protection hazards for hybrid would repeat the floor error. Every gate
+below applies to both variants and reports its explicit hybrid/all-neural label.
+
 ## 6. Staged implementation and acceptance gates
 
-| Step | Work | Acceptance before proceeding |
+All counts below are **proposed acceptance experiments, not completed runs**.
+Thresholds apply separately to each build/variant. Record opt-ins, static draws,
+seeds, placements and trial denominators. A deterministic corner failure blocks
+the gate regardless of a larger random pass count.
+
+| Step | Work | Trial count and pass threshold before proceeding |
 |---|---|---|
-| 0: model and protocol spec | This document/model; freeze canonical record, identity, fencing and reset/load interfaces | Model agrees with binomial closed forms and exhaustive short missions; Monte Carlo agrees within sampling uncertainty; validate endpoints, censoring and repair off-by-one behavior. No neural reliability claim. |
-| 1: transactional output fence | One tick outstanding, neural input journal and complete tagged-state assembly | Exact canonical fields under scripted/fresh input; skew/reorder field completions; no mixed tick, no partial publish; reference observer cannot influence runtime. |
-| 2: protected comparator/voter | Three complete kernel lanes, triplicated buffers/comparators, same-pair whole-vector certificate | Exhaustive small words including absent/double rails; stale epochs/incarnations; one differing lane; two agreeing lanes with a silent third; AB agreeing on one word and BC on another must not create a false vector quorum. Inject each voter-lane failure and a common-mode failure. Measure protection overhead. |
-| 3: neural commit log | Quorum append, two-bank publication, persistent request identity/applied watermark, bounded compaction | Duplicate before append, after append, after certificate, after publication but before ACK, and after reload/compaction: one logical application/notification. Conflicting identity refuses. Kill one log lane at every boundary; no torn state/index. Kill majority: no commit. Small controller FSM exhaustive crash-prefix check. |
-| 4: neural watchdog/fencing | Tagged START/cancel, replicated timer decisions, lane exclusion | No false timeout within the measured healthy envelope; terminal lane detects within B; old ACK cannot cancel next watch; one fast/stuck timer cannot reset a healthy lane; surviving two commit every requested tick. Separate internal versus service timeout counters. |
-| 5: reset/load/rejoin | Full-domain quiescence, verified reload, Q READY/IDLE interlock | Force each measured request/Q/M stall; both old members/late events contained; same-rail and changed-rail reload; compare all architecture to C[k]. Recovery completes within declared R or exhausts while fenced. Stall again after rejoin under the SAME static draws. Deliberate corruption, premature READY and partial reload never rejoin. Measure f_repair and conditional repeat hazard. |
-| 6: integrated toy qualification | 100 logical TMR services, all 300 lanes independently perturbed, retained observers | 1,000 ticks with exact canonical comparison each tick and exactly-once log retry. Independent seeds and opt-in flags recorded; inject one stall, overlapping two stalls, late duplicates and lost ACKs. Report recovered events, repair latency tails, exhaustion, protection faults, duplicates/wrong/missing and truncation separately. Do not infer success from the analytic prediction. |
-| 7: actual Stage D and F boundary | Run explicitly named minidoom p_* program/architectural schema; extend checkpoint/continuation coverage | Meet the plan's quoted D exit including commit-log replay. Then F kills physical nodes at safe and unsafe points, restores via surviving neural checkpoints, and proves no repeated committed world update. Label remaining Python orchestration and compiler/placement modes; F2 has its own exit. |
+| 0: model and protocol spec | Freeze record, identity, fencing and reset/load interfaces | Every model test passes. Exhaustive three-tick schedules: 512 per R=1/2/3/100/None, plus static-identity/repair-failure/rejoin oracles. Monte Carlo: 25,000 campaigns per tested new-component/nonstationary setting, within six binomial standard errors of analytic. Exact numerical table pins; no neural claim. |
+| **1: recovery feasibility, before voter/log construction** | Force-quiesce full domains and reload through actual ports/readback/READY-IDLE paths from a fixed neural checkpoint fixture | **All nine historical stall realizations**, unchanged static draws, same-rail and changed-rail reload: 18/18 correct, no survivors/unsafe READY. Then **300 recoveries per realization per reload type** with fresh stray seeds (5,400 total): 0 exhausted/late/wrong repairs in each 300-trial cell, 0 unsafe rejoin. All finish within declared 26-s R=2 bound. Also 100 deterministic full-domain adverse-corner/retry-phase probes per build, all pass. Current full-domain/IDLE counterexamples fail this gate; stop building protection until repaired or select a separately qualified spare. Host membrane reset/image replacement is not recovery. |
+| 2: transactional output fence | One tick outstanding, complete tagged-state assembly and local rearm | 10 independent mix-B seeds × 1,000 ticks, half scripted/half fresh: 0 wrong/mixed/partial states, no observer influence. 100 trials per skew/reorder/stale-tag/proposal-then-master-wedge case × 3 lanes (1,200): 0 unsafe publish/START; two good lanes continue, wedged lane fenced within deadline. |
+| 3: protected comparator/voter | Same-pair whole-vector certificate | All 4,096 two-bit three-lane rail patterns × 8 identity/order conditions (32,768): 0 incorrect certificates, all valid quorum cases complete, cross-word AB/BC false quorum rejected. 100 seeds × 3 voter-lane outages × 6 receive/compare/publish boundaries (1,800): each single outage masked. 100 trials each of shared-qualifier/common-input/power failures (300): bounded stop, no wrong certificate. 10,000 independent healthy demands: 0 false failure; measure latency maximum. |
+| 4: neural commit log | Quorum append, watermark and mid-append exclusion | 100 seeds × 5 retry windows (before append/after append/after certificate/after publish-before-ACK/after reload-compaction) × 3 failed members (1,500): exactly 1 application/notification, no torn record, two-member quorum live. 100 each conflicting-payload/gap-or-stale/majority-loss/static-writer-loss trials (400): all refuse or stop safely; writer loss fails liveness. Exhaust bounded FSM reachable crash-prefix states for 2 banks/3 members/2 ticks/1 retry, 100% invariants; report enumerated count. |
+| 5: watches, fencing and integrated rejoin | Tagged deadlines, counters and consumer isolation | Per timer role/channel: 10,000 independently perturbed healthy demands with 0 false timeout, 10,000 forced stalls with 0 missed/late authorization. 100 seeds × fast/stuck/cancel-late/cancel-next-tick faults × 3 channels × 5 deadline classes (6,000): single-channel faults masked, 0 unsafe fence. 100 each dark READY/double rail/continuous firing/never-ACK × 3 reload consumers (1,200): unchanged authoritative bank, no indefinite hold; good pair continues. Repeat step 1's 5,400 repairs through the real log/fence, same thresholds. After each success, follow 1,000 ticks under the SAME static draws, report conditional repeat-stall hazard/CI. Inject corruption/premature READY/partial reload, 100 per class per lane (900): 0 rejoin. Exhaust all 65,536 values per 16-bit counter, correct +1 or overflow stop; 10,000 noisy counter demands, 0 wrong identities. |
+| 6: integrated toy qualification | 100 TMR services / 300 independently perturbed kernel lanes; controller/log/timer noise enabled | **300 independent seed/placement campaigns × 100 services × 1,000 ticks**, 0 failed campaigns: exact state every tick, once-only retry, no unmasked timeout/truncation/unsafe publish. Zero failures gives one-sided 95% campaign upper bound 0.994%, not evidence for 0.2245%. Separately 100 campaigns per one-stall/two-overlap/late-duplicate/lost-ACK class: single stalls masked/fenced, two overlaps stop boundedly, duplicates apply once, 0 safety violations. Report repair tails/exhaustion/protection faults and estimate fresh h, f_repair, h_c, h_s and frailty before updating sensitivity. |
+| 7: actual Stage D / F extension | minidoom p_* wider state schema, split kill domains, qualified controller/writer replacement where required | Repeat step 6's 300 campaigns with real state, all pass. F: 100 seeds per kernel/log-member/writer kill domain × 5 append/apply/reload boundaries: every tolerated kill restores correct state within measured R, no host game computation/repeated apply; majority loss stops in all trials. 100/100 capacity mappings meet declared neuron/edge/memory limits before >4-node scaling. New controller/writer replacement domains repeat step 1/5 thresholds; without replacement do not claim recovery. Label hybrid/all-neural and placement modes; F2 has its own exit. |
+
+For zero failures in n independent demands, the **one-sided 95% binomial upper
+bound is `1-0.05^(1/n)`**: 300 gives 0.9936%, 10,000 gives 0.02995%. Step 1
+thus bounds f_repair below 1% only for each tested conditional cell, not every
+static draw. Same-draw repetitions must report clustered/static effects; they
+cannot establish a population bound by multiplying their denominators.
+Full-domain corners and all nine fixed realizations must pass separately.
+Timer miss bounds need measured demand weighting and justified voter/fence
+containment; common noise invalidates blindly squaring them.
+
+None of these campaigns directly estimates v, w or c at 1e-8. Zero-failure
+direct evidence at that per-operation level requires at least **299,573,226
+representative independent operations** (1e-10 needs 29,957,322,735). Instead
+combine exhaustive bounded protocol invariants, the specified single/common
+fault-injection trials and empirical component upper bounds in an explicit
+fault tree. Record dependencies, union-bound unproven shared events, and give
+no majority-suppression credit without demonstrated independence. Accept a
+quantitative budget only if its resulting upper campaign failure is **<1%**
+over the stated envelope, including h_c, h_s, timers/counters and f_repair;
+otherwise report it unqualified even if one seed passes. Do not claim the
+1e-10 objective without stronger evidence. Per-tick safety/exit checks remain
+mandatory regardless of any probabilistic budget.
 
 For the **TMR-aware noisy exit**, score the authoritative committed stream of
 each of the 100 services: all 1,000 canonical states match the reference; one
@@ -624,10 +910,13 @@ restart alone cannot establish it.
 
 ## 7. Validation of this design artifact
 
-All **48 tests** in `tests/test_tmr_model.py` pass using the existing environment
-and a writable task-local uv cache. They check closed forms, exhaustive small missions, repeated
-repair, permanent repair failure, nonstationary hazards, common-mode scope,
-Monte Carlo agreement, numerical stability, empirical censoring, and CLI/errors.
+All **74 tests** in `tests/test_tmr_model.py` pass using the existing environment
+and a writable task-local uv cache. They check closed forms, exhaustive small
+missions, static identity/frailty with failed repairs and post-rejoin exposure,
+unrepaired controller majority loss, static writer loss, cadence scaling,
+Wilson hazard intervals, nonstationary hazards, common-mode scope, Monte Carlo
+agreement, censoring and CLI/errors. The headline, every main sensitivity-table
+row and the observed-profile results are pinned at 1e-11 relative tolerance.
 The exact requested command was attempted:
 
 ```sh
@@ -638,5 +927,5 @@ It was blocked opening `~/.cache/uv/sdists-v9/.git` by the sandbox. The successf
 equivalent sets `UV_CACHE_DIR` to the task's writable `tmp/uv-cache`,
 `UV_PROJECT_ENVIRONMENT` to the existing repository `.venv`, `UV_NO_SYNC=1`,
 `PYTHONPATH=.`, and `PYTHONDONTWRITEBYTECODE=1`, retains the requested `TMPDIR`,
-and adds `-p no:cacheprovider --basetemp=<task-tmp>/pytest`. No netlist code was
+and adds `-p no:cacheprovider`. No netlist code was
 changed. Integration and commits belong to the orchestrator; none was attempted.
