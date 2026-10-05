@@ -478,7 +478,7 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
     assert rec["verdict"] == "exit not met: 1 mismatch, refusals 0, retries 0" and rec["retried_commit_applied_once"] is True
     assert rec["canonical_format"] == sd.FORMAT and len(rec["reference_canonical_hex"]) == 10
     assert rec["three_point_check"]["ir_equal"] and len(rec["tick_ms"][0]) == 10
-    # Old records had no top-level opt-in field.  Recheck must retain their default build.
+    # The nested build remains authoritative when the top-level duplicate is absent.
     rec.pop("rate_robust")
     out.write_text(json.dumps(rec))
     real_build = sd.build
@@ -490,9 +490,46 @@ def test_cli_writes_the_record(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sd, "build", recording_build)
     rechecked = sd.main(["--recheck", str(out)])
-    assert rechecked_build["rate_robust"] is False
+    assert rechecked_build["rate_robust"] is True
     assert rechecked["per_copy"][1]["status"] == "mismatch"
     assert rechecked["recheck"]["commit_counts_checkable"] is False
+    # A genuinely legacy record has neither field and must rebuild with False.
+    rec["build_options"].pop("rate_robust")
+    out.write_text(json.dumps(rec))
+    rechecked = sd.main(["--recheck", str(out)])
+    assert rechecked_build["rate_robust"] is False
+    assert rechecked["per_copy"][1]["status"] == "mismatch"
+
+
+@pytest.mark.parametrize("options", [
+    {},
+    {"relight_requests": False, "true_guards": False, "powerup_veto": False,
+     "copy_requires_rail": False, "commit_reignite": False, "relight_repair_delay": False},
+    {"idle_hops": 19, "act_hops": 10, "watchdog_hops": 180, "kill_strength": 1.0},
+    {"datapath": "specialized", "rate_robust": True, "true_guard_version": 2,
+     "rate_robust_version": 2},
+])
+def test_synthetic_legacy_records_recheck_with_recorded_options(options, monkeypatch):
+    """Older saved counters remain recheckable with their original build policy."""
+    rec = {"ticks": 1, "tokens": sd.tokens_for(1, 0), "build_options": dict(options),
+           "per_copy": [{"completed": 1, "matched": 1, "missing": 0,
+                         "duplicates": 0, "wrong": 0, "first_mismatch": None}], "rate_robust": False}
+    real_build = sd.build
+    builds = []
+
+    def recording_build(*args, **kwargs):
+        pl = real_build(*args, **kwargs)
+        builds.append(pl.build_options)
+        return pl
+
+    monkeypatch.setattr(sd, "build", recording_build)
+    result = sd.recheck_record(rec)
+    assert result["per_copy"][0]["status"] == "matched"
+    assert result["recheck"]["commit_counts_checkable"] is False
+    for key, value in options.items():
+        if not key.endswith("_version"):
+            assert builds[0][key] == value
+    assert rec["build_options"] == options
 
 
 def test_cli_records_per_field_stall_evidence_and_recheck_preserves_it(tmp_path, monkeypatch):

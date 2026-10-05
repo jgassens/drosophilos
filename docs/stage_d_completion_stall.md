@@ -1,5 +1,16 @@
 # Stage D completion stalls: seed 108, base 17/74 and rate-robust 11/24
 
+**Current status:** the register-reset opt-in is withdrawn after review. See
+[the qualification frontier](#register-reset-qualification-and-opt-in-2026-10-04)
+for the biased recovery failure, revised experiments and release decision.
+
+**2026-10-04 update:** an isolated reconstruction from each copy's static draws
+names the failing primitive for base 74, base 17 and RR 24: an old master rail
+survives the four-tap master reset, entrained like copy 28's request latch. It
+then blocks its valid latch's re-ignition. RR 11 is not reproduced. See
+"Isolated reconstruction from static draws" below; the text before that section
+is the original capture-only analysis.
+
 All four copies issue a **commit command**, clear their pending commit request, and
 produce master READY, but never produce DONE for that transaction. Their captured
 DONE inhibitors stop firing during the master rewrite and never resume. This points
@@ -385,3 +396,495 @@ The required nonempty-file check passed. A separate read-only assertion script
 also checks the sustained stage/COMMIT/busy trains, cleared pending requests,
 silent post-START DONE/READY/IDLE delay chains, master fault gates' absent control
 outputs, and both recapture regexes' counts and coverage of all missing domains.
+
+## Isolated reconstruction from static draws (2026-10-04)
+
+**Mechanism established for base 74, base 17 and RR 24; RR 11 is not reproduced.**
+In each of the three, one old **master rail latch survives the master's own reset**
+(`add_reset`, four taps × 0.75, inside `add_register`). It is the copy-28 failure
+class, now in the master. Each surviving latch is fast at that copy's draws. Strays
+throw it into a coincident 34–35-step mode, and that copy's reset controller drops
+its residual fifth inhibitor spike. The four arrivals then land just after both
+members fire, so the latch is **entrained, not killed**.
+
+The survivor keeps its master valid OR running. The reset kills the valid latch,
+and its one-shot ignition relay has not recovered by the time the OR restarts. That
+valid latch, the completion tree above it and W_M stay dark, and DONE never fires.
+
+Copy 74's survivor is `b3r0`, on a bit that flips 0→1. COPY then writes `b3r1`
+beside it, which reproduces the captured fault3 train. Copies 17 and 24 survive on
+unchanged bits, so their master fault gates stay silent, as captured. The device
+stray stream is not replayed. This shows the copies' static draws make the
+mechanism reproducible. It does not prove it was the event at the captured step.
+
+### Method
+
+The Stage D netlists were rebuilt from the repository with the records' build options:
+base 29,375 / 52,808, and RR v2 30,643 / 55,936. `make_perturbed_sim`'s host draws
+were regenerated with `default_rng(108)` and B = 100, in its order: weights `(100, nnz)`
+in topology edge order, then V_th, then bias. As an independent check, copy 28's
+request latch comes out at exactly the values pinned in
+`tests/test_request_clear_entrainment.py`: V_th −44.89665616330281 mV and `u→v` 4,050 q.
+
+Each failing cell was rebuilt from the real primitives:
+- `add_register` (11-bit stage),
+- `kernel._fault_latch`,
+- `add_staged_commit` with `ordered_grant=True` and `copy_requires_rail=True`,
+- for the state cell `c4_sel`, the power-up veto latch.
+
+That is 522 / 1,082 neurons/edges for `c4_sel`, 520 / 1,077 for `c5_sub` and
+604 / 1,267 for the RR cells. Draws are mapped by (source role, target role,
+delay). Every primitive edge has its kernel edge with identical nominal quanta,
+and the kernel has no other edge among these neurons. Outside inputs reach only
+the stage rails (ALU/Z output relays) and `commit_in`. **M, grant, COPY, its arms
+and DONE have no input from outside this path.**
+
+The words are the reference values (`kernel_outputs`) at the failing tick, located
+from the output cells' commit counts. Bits 8/9/10 are C/Z/V.
+
+| Copy / cell | Tick | Old master | New stage word | Bits that change |
+|---|---:|---|---|---|
+| base 17 `c4_sel` | 728 | 0 (Z) | 48 | 4, 5, 9 |
+| base 74 `c5_sub` | 323 | 197 (C/Z/V=0) | 187 (C/Z/V=0) | 1, 2, 3, 4, 5, 6 |
+| RR 11 `c10_xor` | 864 | 6 | 59 | 0, 2, 3, 4, 5 |
+| RR 24 `c2_sel` | 654 | 0 (Z) | 48 | 4, 5, 9 |
+
+Stimulus, in steps:
+- step 10: ignite the old master word (its power-up DONE clears the empty stage);
+- step 6,000 + U[0, 100] per rail: ignite the new stage word;
+- step 10,300 + U[0, 599]: one ignition event into `commit_in`;
+- run to step 17,400.
+
+Strays follow the mix-B law: Bernoulli 5 Hz × 150 q on every neuron. Noise-free,
+the path keeps the captured schedule. Commit → master READY is 1,593 steps for
+copy 17 (captured 1,597). READY → DONE is 2,538 steps (prior healthy capture 2,501),
+and 2,690 for copy 74 (captured 2,652).
+
+### Failure rates of the isolated path
+
+Each node replays its own `default_rng(seed)`, seeds 0–1,599: commit phase, load
+offsets and strays. A stall means no DONE in the ≥ 6,500 steps after commit;
+a healthy commit → DONE takes about 4,100–4,300 steps.
+
+| Copy | Own draws: stalls | Old-rail survivors (stalled / completed) | Nominal draws | Compact master reset, same seeds |
+|---|---:|---|---:|---:|
+| base 74 | **24 / 1,600** | 50 × `b3r0` (24 / 26) | 0 / 1,600 | **0 / 1,600** (no survivors) |
+| base 17 | **4 / 1,600** | 4 × `b8r0` (4 / 0) | 0 / 1,600 | 0 / 400 * |
+| RR 24 | **1 / 1,600** | 1 × `b6r0` (1 / 0) | 0 / 1,600 | 0 / 400 * |
+| RR 11 | 0 / 1,600 | none | 0 / 800 | — |
+
+\* A separate 400-realization set in which the shipped reset gave 6 (74), 1 (17)
+and 1 (24) stalls.
+
+Every stall shows the same pattern:
+- exactly one old rail is still firing at master READY;
+- that bit's valid latch is dark, along with the tree branch above it and W_M;
+- every selected copy arm fires and no opposite arm fires;
+- master fault activity appears only on copy 74's bit 3.
+
+In none of the realizations, at any setting, did COPY fail, an arm fail, a valid or
+tree latch survive, or master READY go missing.
+
+The 26 non-stalling copy-74 survivals commit with bit 3 **double-railed**: DONE
+fires while `b3r0` and `b3r1` both hold. The master fault gate has no control
+output, and the downstream effect is not modelled here.
+
+### The first break: reset survival
+
+Noise-free, the master reset inhibitor arrives at these offsets (steps after the
+first arrival):
+
+| Draws | Arrivals |
+|---|---|
+| nominal | 0/45/89/136/215 |
+| copy 17 | 0/49/96/140 |
+| copy 74 | 0/48/94/141 |
+| copy 24 | 0/49/98/147 |
+| copy 11 | 0/47/90/138/241 |
+
+As with copy 28's request clear, the tap count is not the arrival count.
+
+The three surviving latches. Nominal loop weight is 3,621 q, V_th −45 mV.
+
+| Latch | `u→v` | `v→u` | V_th u / v (mV) | Fast-mode share of strayed u intervals (≤ 38 steps) |
+|---|---:|---:|---|---:|
+| 74 `b3r0` | 3,833 (+5.9 %) | 4,083 (+12.8 %) | −45.46 / −44.78 | 16.8 % |
+| 17 `b8r0` | 4,105 (+13.4 %) | 3,811 (+5.2 %) | −44.70 / −45.38 | 1.7 % |
+| 24 `b6r0` | 3,644 (+0.6 %) | 4,153 (+14.7 %) | −45.35 / −44.77 | 42.9 % (coincident even noise-free) |
+| nominal | 3,621 | 3,621 | −45 / −45 | 0 % |
+
+In the survivor traces both members fire 2–6 steps apart at a 34–37-step period
+before the reset. Each arrival comes within 0–14 steps of a member spike, mostly
+just after both have fired, while they are refractory (22 steps). It therefore
+delays the pair instead of stopping it: copy 28's entrainment.
+
+**Reduced primitive.** The model is one `add_latch` plus the real `add_reset`, with
+role-mapped draws on all seven neurons. Strays hit every neuron, the reset comes at a
+random step in 3,000–4,999, and survival means the latch is still firing 150 ms after
+the reset. Results:
+- 74 `b3r0`: **221 / 40,000** (another 46 / 8,000).
+- 17 `b8r0`: **9 / 40,000** (another 29 / 40,000).
+- 24 `b6r0`: **42 / 40,000** (another 5 / 8,000).
+- Every other old rail of these words: 0 / 4,000.
+
+Swapping one parameter group to nominal (8,000 resets each):
+
+| Variant | 74 `b3r0` | 24 `b6r0` |
+|---|---:|---:|
+| copy draws | 46 | 5 |
+| nominal reset controller (five spikes) | 3 | 0 |
+| nominal fan-out weights | 30 | 23 |
+| nominal loop weights | 0 | 0 |
+| nominal latch V_th / bias | 0 | 0 |
+| all nominal | 0 | 0 |
+| compact master reset, copy draws | **0** | **0** |
+
+**The fragile parameters are the latch's loop weights together with its
+thresholds, which create the coincident fast mode. The controller draws that
+suppress the fifth inhibitor spike are also needed.** Neither alone suffices at
+these copies. Fan-out draws matter little.
+
+### Why a survivor blocks completion
+
+The master valid latch is re-ignited through `celement._ignite_from`. That edge
+relay fires once per OR activation, and each OR spike's edge inhibitor delivers
+2.2 × loop to it. The reset inhibits the OR gate, but a surviving rail restarts it.
+
+At copy 74's draws, with the old rail kept alive, the OR falls silent from +19 to
++574 steps after the trigger, a 555-step gap, and the relay never fires again. At
+nominal draws (five-spike reset) the gap runs from −61 to +674, 735 steps. The relay
+fires at +730, and the word completes.
+
+To test survivors directly, the reset's fan-out onto a single old rail was removed.
+The resulting forced survivor blocks completion on:
+- 4 / 11 bits for copy 17,
+- 6 / 11 for copy 74,
+- 5 / 11 for copy 11,
+- 10 / 11 for copy 24,
+- 0 / 11 at nominal draws (base words, and RR copy 11's word).
+
+The race depends on the draws. Base copies 17 and 74 block on no bit if their
+reset controller alone is made nominal. They also block on none if everything except
+their four-spike controller is made nominal. RR copy 11 blocks with five spikes. RR
+nominal draws with copy 24's four-spike controller block all 11 bits.
+
+Under strays the outcome varies: 26 of copy 74's 50 survivals re-lit valid3.
+Forced `b3r0` survival at copy 74's draws fires fault3 first at **master READY + 526**,
+then every **380–385** steps. The capture shows +528, then 382/383/385 steps.
+
+In copy 11's forced screen, surviving valid latches and internal tree latches never
+block. A surviving root would keep DONE's inhibitor firing, which the captures exclude.
+No valid- or tree-latch survivor appeared in any strayed realization.
+
+### RR copy 11: not established
+
+The forced-survivor screen shows which bits of copy 11's word could block. Flipping-bit
+survivors (`b2r1`, `b5r0`) would fire their conditioned RR fault gates, every 175–237
+steps, but the capture's master fault gates are silent. That leaves the unchanged bits
+`b7r0`, `b8r0` and `b9r0`. Each survives **0 / 40,000** reduced resets; the 95 % upper
+bound is 7.5 × 10⁻⁵ per reset.
+
+The whole path stalls in 0 / 1,600 realizations. Copy 11's controller keeps its
+fifth spike, even though `b7r0` spends 10.7 % of its strayed intervals in the fast
+mode. Either the same mechanism acts at a rate below these samples, or something
+outside the isolated path is responsible. The Juno recapture command above is
+still the way to settle copy 11.
+
+### Fix recommendation
+
+**Depth:** the staged master's reset train. Its kill margin is the first break.
+Do not "repair" the blocking half: re-arming the valid relay under a surviving
+old rail would convert these fail-stops into completions with a stale or
+double-railed master, which 26 / 1,600 copy-74 realizations already show.
+
+**Candidate:** an opt-in compact master reset that uses the
+`control.add_request_clear` form inside `add_register`, for staged masters only:
+- the trigger → relay1 → relay2 → relay3 links go from 18 to **0 steps** of delay;
+- inhibition onto every master **latch member** rises from 0.75 to **1.1 × loop**;
+- inhibition onto gates stays at 0.75.
+
+Isolated results:
+- full path: 0 / 1,600 stalls and 0 survivors for copy 74, on the seeds that gave 24 stalls;
+- reduced resets: 0 / 40,000 for each fragile latch (copy draws, compact reset);
+- inhibitor arrivals stay at four: nominal 0/43/81/138, copy 74 0/45/84/144, copy 24 0/48/89/149.
+
+**Reload:** COPY's rail ignitions arrive **976–992 steps after the trigger spike** at
+nominal and copy draws. All-phase reload bounds are on a 25-step grid with a nominal
+controller. They are measured from the trigger's input event, which precedes its
+spike, so the margins below are conservative:
+
+| Latch corner | Shipped reset | Compact reset |
+|---|---:|---:|
+| nominal | 675 | 650 |
+| loop −8 % / V_th +0.4 mV | 800 | 800 |
+| loop −12 % / V_th +0.6 mV | 925 | 900 |
+
+At the slow corner that leaves margins of **≥ +51** (shipped) and **≥ +76**
+(compact) steps. Noise-free master READY → DONE moves by at most ±45 steps.
+
+**Costs:**
+- **+0 neurons and +0 synapses.**
+- Per `tick2.c` build: 14 staged masters, 42 tap links set to 0 delay, and 1,214
+  latch-member fan-out edges strengthened from −2,716 to about −3,983 q.
+- The 288 gate edges are unchanged.
+- RR has 576 mirrored readout edges, and `mirror_inhibition` would scale them with
+  the fan-out (16 × gain). The evaluated candidate left them at shipped strength, so
+  that part is untested.
+- No added hops: master READY is the fixed 15-hop chain from the trigger.
+- Pinned netlist hashes move, and campaigns must be compared by per-seed totals.
+
+**Existing opt-ins:**
+- `zero_once` changes only Z0 ignition.
+- `robust_request_clear` changes only DONE-side request k1 trains; the master reset is untouched.
+- `rate_robust` does not cover it: copies 11 and 24 are RR builds, and RR leaves latches and resets unchanged.
+
+Only a compact or stronger master clear addresses the break. A plain ordinary
+4 × 1.0 master train was not evaluated here; the request analysis found that form
+loses slow-corner reload.
+
+**Qualification still needed:**
+- the noisy kernel campaign on Juno (seeds 108–110, both builds);
+- stage and other register resets, which are untouched;
+- `test_machine.py`, `test_mul_diag.py` and the build-option hash tests.
+
+### Regression test
+
+`tests/test_completion_stall.py` rebuilds both netlists in about a second; no external
+data is needed. The fast tests take about 17 s:
+- **Path match:** for all four copies, the role-mapped primitive path exactly matches
+  the kernel's subgraph and its only outside inputs.
+- **Inhibitor spike counts:** four for copies 17, 74 and 24; five for copy 11 and nominal.
+- **Noise-free commit:** copy 74's path commits on the captured schedule.
+- **Forced survivor:** at copy 74's draws, a forced `b3r0` survivor blocks DONE, leaves
+  valid3 dark and fires fault3 with the captured timing. At nominal draws the same
+  survivor completes.
+- **Replay:** seed 23 stalls through `b3r0` at copy 74's draws; the identical stimulus
+  and strays at nominal draws commit.
+- **Reduced reset:** 2,000 strayed resets give 8 survivors at copy 74's draws, 0 at
+  nominal. Compact candidate surveys are in `test_robust_reset.py`.
+
+A slow test (`-m slow`) repeats 400 full-path realizations for copies 74 and 17.
+At their own draws, every stall must have exactly one surviving old rail and that
+bit's valid latch dark. Nominal draws must give no stalls.
+
+### What the isolated model cannot establish
+
+- **Not a replay of the stall itself.** The CUDA stray stream, the captured reset
+  phase and the master trains at the stall are not replayed; the master rails are
+  unrecorded. The only direct link to a capture is copy 74's fault3 onset and period.
+- **Rates.** Rates are for the failing word pair only; other words light other rails.
+  They are not calibrated against the campaign's per-transaction frequency. Suppose
+  each copy's full-path rate applied to every earlier transaction. The chance of
+  reaching the failing tick without a stall would then be about 0.8 % (copy 74,
+  tick 323), 16 % (copy 17, tick 728) and 66 % (copy 24, tick 654). Copy 74's
+  average rate over other words must be lower; that is not measured.
+- **Stage word.** The stage word is ignited ideally. Arm qualification never failed
+  here, but the ALU relays' real timing is not modelled.
+- **Copy 11.** Its stall remains unexplained.
+- **The compact master reset.** It is evaluated only on this path and a single-latch
+  reload probe. Kernel-wide noise, the RR readout clears at scale, and its interaction
+  with the stage reset and readers are unqualified.
+- **Double-railed commits.** Their downstream consequence is not modelled.
+
+Commands run:
+
+```text
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_completion_stall.py
+```
+
+## Register reset qualification and opt-in (2026-10-04)
+
+**Review correction: the opt-in is withdrawn.** `robust_register_reset=True`
+now raises a descriptive `ValueError`, including through campaigns, diagnostic
+rebuilds and Stage D recheck. **No tested setting satisfies the requested full
+mix-B envelope.** A longer READY chain fixes the isolated rail recovery race,
+but does not qualify the entire extended reset domain. The experimental final
+pass remains available to the tests; it is not enabled by a kernel build.
+
+The option off preserves the ordered topology, weights, delays, biases and
+machine fingerprints. The preparatory whitelist is narrowed to exercised 2/8-bit
+ADD/SUB/AND/XOR/SEL kernels with cell/constant operands. MOV, OR, ROM LOAD,
+parameter operands, widths 1/4, RAM, multipliers, pacing and changed timing are
+rejected; even a whitelisted configuration cannot enable the withdrawn option.
+
+### Why the previous qualification was insufficient
+
+The old policy used four taps, zero-delay inter-tap links, 1.75 × loop
+inhibition and four 100-step READY links (+328 steps / 32.8 ms).
+Its advertised minimum recovery margin of 20 steps was an isolated, noise-free
+latch measurement with **zero tonic bias**, not an actual master COPY margin.
+The independent review added −0.2 mV storage bias and measured recovery at 975
+steps versus READY at 945: **−30 steps**, with **353/1,000** same-rail noisy
+reload failures. The committed full staged-cell path also lost its second DONE
+in base and RR. Those observations supersede the earlier recovery claims.
+
+The revised tests include log-normal weight sigma 0.04, threshold sigma 0.2 mV,
+tonic-bias sigma 0.2 mV and Bernoulli 5-Hz × 150-q strays. Explicit combined
+three-sigma corners use `exp(±3 × .04)` weights and ±0.6 mV thresholds **and**
+biases. These are finite conditional experiments, not a guarantee over the
+unbounded tails of a Gaussian distribution.
+
+### Kill evidence and actual reload frontier
+
+The four captured primitives retain role-mapped seed-108, B=100 draws from the
+original topology: master 74 `c5_sub.M.b3r0`, master 17 `c4_sel.M.b8r0`,
+master 24 `c2_sel.M.b6r0`, and stage 18 `c3_xor.Q.b9r0`.
+Four close initial ignitions, a later 300-q kick, random reset phases and strays
+challenge coincident modes. A survivor fires 1,500 steps after reset. Each
+configuration has 40,000 trials; the reset controller is simulated, not replaced
+by a prescribed list of inhibitory arrivals.
+
+The rejected 1.5 strength's **59/40,000** fast-storage/weak-clear/slow-controller
+survivors now have an explicit slow regression,
+`test_rejected_1_5_strength_has_59_survivors`. The 1.75 policy retains zero
+survivors at the captured draws and tested corners, including +0.6 mV fast
+storage against −0.6 mV slow controller bias. All **eighteen 40,000-trial
+settings passed: 0/720,000 survivors**. Delaying READY does not alter that kill
+experiment.
+
+| Primitive/draw settings | Trials per setting | Survivors per setting |
+|---|---:|---:|
+| Master 74, master 17, master 24, stage Z0 18 | 40,000 | 0 |
+| Nominal, slow8, slow12, fast20, fast30, asymmetric, mirror | 40,000 | 0 |
+| Combined slow/fast three-sigma, biased fast30 | 40,000 | 0 |
+| Fast30 with independent fast/slow controller | 40,000 | 0 |
+| Biased fast three-sigma/fast30 with biased slow controller | 40,000 | 0 |
+
+For recovery, eight final READY links at 100 steps add **656 steps / 65.6 ms**.
+No neurons or logical edges are added. In the slow-storage/fast-READY corner,
+the storage loop and ignition are `exp(-.12)`, reset edges `exp(.12)`,
+storage threshold +0.6 mV, storage bias −0.6 mV; READY drive is
+`exp(.12)`, threshold −0.6 mV, bias +0.6 mV.
+
+| 1.75 strength, delayed READY links | Added READY delay | Isolated recovery margin |
+|---|---:|---:|
+| 4 (withdrawn policy) | 32.8 ms | −17.8 ms |
+| 6 | 49.2 ms | −1.4 ms |
+| 8 (experimental candidate) | 65.6 ms | +15.0 ms |
+
+These margins are **asserted**, including the negative results. They use a
+conservative 25-step recovery grid; they are not mislabeled COPY-arrival margins.
+
+The actual-path test builds a real one-bit stage/master cell with FAULT,
+COMMIT, grant, selected-rail COPY arms, validity and DONE. It commits twice,
+loading the **same stage rail one step after the observed Q READY**. It observes
+every simulator step, so host polling cannot add hidden recovery time. Both Q
+READY and M READY are also advanced by 100 steps: successful reloads therefore
+demonstrate at least **10 ms of margin on actual stage loading and the real
+READY → COPY → master path**. No latch ignition is substituted for COPY.
+Ten thousand trials per build cover independently sampled mix-B static draws;
+another ten thousand per build hold the adverse three-sigma rail/READY corner
+and sample strays on every cell neuron. The full eleven-bit staged-cell
+regression separately repeats the −0.2/−0.6 mV bias failure and asserts two
+correctly decoded words with a 100-step advance of the second Q load.
+
+The eight-link trials finished with **0 failures, 0 faults, 0 survivors and no
+missing READY in all four 10,000-trial settings** (40,000 trials total). These
+one-bit trials isolate the reset contract. They **do not qualify the ALU,
+completion trees or whole extended domain**.
+
+| Compact strength / READY links | Hard kill corner survivors | Adverse actual-path failures, base | Adverse actual-path failures, RR |
+|---|---:|---:|---:|
+| 1.5 / any | 59/40,000 | not selected after kill failure | not selected after kill failure |
+| 1.75 / 4 | 0/40,000 | 1,000/1,000 | 998/1,000 |
+| 1.75 / 6 | 0/40,000 | 238/1,000 | 227/1,000 |
+| 1.75 / 8, READY advanced by 100 steps | 0/40,000 | 0/10,000 | 0/10,000 |
+
+The kill column is the same fast30/slow-controller experiment, independent of
+READY delay. Four/six-link rows load at actual READY+1 with no advance; the
+eight-link row imposes the additional 10-ms margin. The rejected path counts
+are pinned in slow tests. The additional eight-link random-static mix-B rows
+also gave 0/10,000 failures in each build.
+
+### The full-domain limit: no qualified setting
+
+`_extended_domain_trial` runs two actual 2-bit ADD transactions, using the same
+word twice so previously active state must rearm. The fully wired cell Q/M reset
+targets include rails, valid/completion latches, ALU state/gates, FAULT, ACT,
+COMMIT, grant/COPY, zero_once and rate-robust mirrors. All positive inputs to
+those targets are multiplied by `exp(-.12)`, negative inputs by `exp(.12)`,
+thresholds increase 0.6 mV and tonic biases decrease 0.6 mV **on top of compiled
+biases**. READY independently gets the opposite, fast corner.
+
+| Reset policy | Base outputs / 2 | RR outputs / 2 |
+|---|---:|---:|
+| Option off, ordinary reset | 0 | 0 |
+| 1.5, compact taps, four delayed READY links | 0 | 0 |
+| 1.75, compact taps, four delayed links | 0 | 0 |
+| 1.75, compact taps, eight delayed links | 0 | 0 |
+| 2.0, compact taps, eight delayed links | 0 | 0 |
+| 1.75, compact taps, sixteen delayed links | 0 | 0 |
+
+**Base fails before Q completion and before either cell reset fires.** Changing
+cell reset strength, tap timing or READY delay cannot repair an event that
+precedes those signals. RR reaches Q completion and resets M, but never
+completes M, even with all sixteen READY links delayed. Neither build clears Q
+after a successful commit. The tests assert these facts, not merely the absence
+of final outputs. This is an existing analogue/datapath limit, **not evidence
+that the eight-link policy has the old after-hyperpolarisation race**.
+
+Perturbing ALU state, ACT/COMMIT/grant/COPY, or RR mirrors as separate groups
+does allow both transactions. Separate adverse-FAULT tests discard two successive
+double-rail words, rearm FAULT, then accept a clean word, advancing each new
+load by 100 steps before Q READY. Those useful
+partial passes cannot replace the failing combined-domain experiment.
+No noisy 10,000-trial full-domain success is claimed: the deterministic corner
+already falsifies full qualification. Resolving that limit requires more than
+the reset timing/strength choices under review.
+
+Adding mix-B strays to this full-domain corner (seeds 0–3) also failed all four
+two-transaction trials in each build. Base produced no outputs in any trial;
+RR produced one output at seed 1 and none at seeds 0, 2 or 3. The slow regression
+asserts failure to complete both transactions. This is eight observed failures,
+not an estimated full-domain failure rate or a 10,000-trial success claim.
+
+### Cost, compatibility and reproducibility
+
+For the **previous four-link policy**, reviewers measured nominal tick2 steady
+tick intervals increasing **149–174 ms (+2.7–3.1%)**, and the three-tick probe's
+first completed tick increasing **311 ms**. A cell's Q READY is unread, so its
+extra delay is inert in the kernel. M READY gates COPY, and input-stage READY
+gates upstream loading; only consumed delays contribute to the critical path.
+The old statement that every cell pays two READY delays was incorrect.
+
+The experimental eight-link pass changes 84 tap delays and 224 READY delays in
+the tick build, still with 29,375 neurons / 52,808 edges (RR: 30,643 / 55,936).
+The same 6,322 base / 7,776 RR inhibitory edges are rescaled; absolute quanta rise
+by 22,891,962 / 92,813,472. Its per-tick cost has **not** been measured and cannot
+be inferred by doubling the four-link measurements. It is not a released policy.
+
+The compiler pass is idempotent, including overlapping domains, and rescales
+from retained original integer weights with one rounding. It validates the
+tap/READY chain shape before mutation and raises `ValueError` for short chains.
+The 100-step physical delay is a named timing choice, checked against the
+simulator limit rather than derived from it. The dead `tap_delay_steps` argument
+and duplicate 1.1 candidate implementation are removed.
+
+Stage D recheck uses nested `build_options` as authoritative, falling back to
+top-level fields only when absent. A missing top-level `rate_robust` retains a
+nested True; a record missing both fields rebuilds False. Small synthetic legacy
+records cover older guard/timing/drive policies and authoritative nested fields.
+Records requesting the withdrawn reset are rejected explicitly, including
+nested-only records; they cannot silently rebuild a different circuit.
+
+Copy 74's committed words are **197 → 187, C/Z/V all zero**. The earlier “C”
+annotation has been corrected. Historical isolated rates refer to these words,
+not to a newly reconstructed carry-set word or a replay of the CUDA strays.
+
+The requested uv command is blocked by the sandbox's default-cache denial:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_robust_reset.py tests/test_completion_stall.py tests/test_stage_d.py tests/test_build_options.py -m 'not slow'
+```
+
+Validation uses the existing repository virtualenv, this worktree on
+`PYTHONPATH=.:tests`, `PYTHONDONTWRITEBYTECODE=1`, and a writable task-local
+`TMPDIR`/pytest basetemp: **all 216 requested non-slow tests passed**, including
+the thirteen pinned default/machine topology fingerprints. All **32 slow tests
+in `test_robust_reset.py`** passed in separate selections: eighteen survivor
+settings, the 1.5 rejection, four 10,000-trial reload settings, four rejected
+READY settings, the candidate table, two full-domain frontiers and two noisy
+full-domain failures. The older 1,600-seed completion surveys were not rerun.
+`git diff --check` passes. Integration and committing belong to the orchestrator;
+no commit is attempted. A long noisy Stage D campaign and RR11's original
+completion stall remain outside these conditional experiments.

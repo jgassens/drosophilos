@@ -284,7 +284,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    request_clear_pulses: int | None = None, kernel_kill_pulses: int = 4,
                    true_guards: bool = True, relight_repair_delay: bool = True,
                    copy_requires_rail: bool = True, rate_robust: bool = False,
-                   zero_once: bool = False, robust_request_clear: bool = False) -> Pipeline:
+                   zero_once: bool = False, robust_request_clear: bool = False,
+                   robust_register_reset: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -320,7 +321,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     1.1-loop inhibition and zero-delay tap links. It requires the standard
     request-priority policy, four configured taps, 0.75 base kill strength,
     start_relight_hops=5, relight_repair_delay=True, true_guards=True and
-    no retry_clear; the other kill trains and handshake delays are unchanged."""
+    no retry_clear; the other kill trains and handshake delays are unchanged.
+    `robust_register_reset=True` is currently rejected: the former compact policy
+    fails biased READY reloads, and its replacement has not passed the full mix-B
+    envelope. The experimental primitive and measured frontier are retained in
+    tests/test_robust_reset.py and docs/stage_d_completion_stall.md. Producer and
+    machine resets retain their original policy; the option off is unchanged."""
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -334,6 +340,24 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         raise ValueError("robust_request_clear requires relight_requests, four request taps, "
                          "kill_strength=0.75, start_relight_hops=5, relight_repair_delay=True, "
                          "true_guards=True and retry_clear=False")
+    if robust_register_reset and (
+            params != Params() or drive != replace(Drive.from_params(params), kill_pulses=4,
+                                                  rate_robust=rate_robust) or
+            not all((relight_requests, true_guards, copy_requires_rail, powerup_veto,
+                     commit_reignite, relight_repair_delay)) or retry_clear or
+            (act_hops, idle_hops, watchdog_hops, in_watchdog_hops, start_relight_hops,
+             request_clear_pulses) != (11, 20, 170, None, 5, 4) or
+            n not in (2, 8) or phases or (streams and list(streams) != ["input"]) or mems or
+            any(cs["op"] not in {"ADD", "SUB", "AND", "XOR", "SEL"} for cs in spec) or
+            any(isinstance(cs.get(key), (tuple, list)) and cs[key][0] != "const"
+                for cs in spec for key in ("a", "b", "c"))):
+        raise ValueError("robust_register_reset requires default physics/drive, standard "
+                         "timing, true guards, selected-rail COPY, no retry_clear and a "
+                         "2/8-bit single-stream ADD/SUB/AND/XOR/SEL kernel with constant "
+                         "or cell operands, without memories, parameters or pacing")
+    if robust_register_reset:
+        raise ValueError("robust_register_reset is not qualified over the full mix-B reload envelope; "
+                         "see docs/stage_d_completion_stall.md for the measured frontier")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
@@ -899,6 +923,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "rate_robust": drive.rate_robust,
         "zero_once": zero_once,
         "robust_request_clear": robust_request_clear,
+        "robust_register_reset": robust_register_reset,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,
