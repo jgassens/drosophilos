@@ -22,11 +22,6 @@ VERIFY_WINDOW_LINKS = 4
 VERIFY_DELAY_STEPS = 100
 VERIFY_MAX_RETRIES = 3
 
-STABLE_LATCH_UNQUALIFIED = (
-    "stable_latch is not qualified: tested rate caps lose holding or gate/reload margins "
-    "under independent mix-B draws; see docs/stable_latch.md for the measured frontier"
-)
-
 
 @dataclass(frozen=True)
 class Latch:
@@ -39,10 +34,6 @@ class Latch:
 
 
 def add_latch(net: Netlist, drive: Drive, name: str) -> Latch:
-    if drive.stable_latch:
-        # Reject before allocating anything. A failed candidate must not silently
-        # become kernel storage (or reach the control machine through a Drive).
-        raise ValueError(STABLE_LATCH_UNQUALIFIED)
     u = net.neuron(f"{name}.u")
     v = net.neuron(f"{name}.v")
     net.synapse(u, v, drive.loop)

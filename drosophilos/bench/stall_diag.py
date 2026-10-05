@@ -156,7 +156,6 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
-        stable_latch = options.pop("stable_latch", campaign.get("stable_latch", False))
         zero_once = options.pop("zero_once", campaign.get("zero_once", False))
         robust_request_clear = options.pop("robust_request_clear", campaign.get("robust_request_clear", False))
         robust_register_reset = options.pop("robust_register_reset", campaign.get("robust_register_reset", False))
@@ -166,7 +165,6 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         if strength is not None:
             options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
         pl = build(k, params, datapath, rate_robust=rate_robust, zero_once=zero_once,
-                   stable_latch=stable_latch,
                    robust_request_clear=robust_request_clear,
                    robust_register_reset=robust_register_reset,
                    verified_register_reset=verified_register_reset,
@@ -208,7 +206,6 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             relight_repair_delay=campaign.get("relight_repair_delay", legacy["relight_repair_delay"]),  # recorded since 2026-09-25; older builds had the 14-hop ACT^d repair tap
             copy_requires_rail=campaign.get("copy_requires_rail", legacy["copy_requires_rail"]),
             rate_robust=campaign.get("rate_robust", False),  # older captures used raw latch rates
-            stable_latch=campaign.get("build_options", {}).get("stable_latch", campaign.get("stable_latch", False)),
             zero_once=campaign.get("zero_once", False),  # older captures used per-bit Z0 edges
             robust_request_clear=campaign.get("robust_request_clear", False),
             robust_register_reset=campaign.get("robust_register_reset", False),

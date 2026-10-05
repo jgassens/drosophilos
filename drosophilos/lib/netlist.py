@@ -51,7 +51,6 @@ class Drive:
     kill_pulses: int = KILL_PULSES
     kill_strength: float = KILL_STRENGTH
     rate_robust: bool = False  # kernel opt-in; preserve the control machine's original primitives
-    stable_latch: bool = False  # reserved; no candidate has passed qualification
 
     @classmethod
     def from_params(cls, params: Params, loop_margin=1.4, and_fraction=0.65, or_margin=2.0, reset_factor=1.5) -> "Drive":
