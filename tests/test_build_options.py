@@ -43,6 +43,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "robust_register_reset": False,
     "verified_register_reset": False,
     "experimental_register_reset": False,
+    "ready_interlock": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -148,6 +149,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "robust_register_reset": False,
         "verified_register_reset": False,
         "experimental_register_reset": False,
+        "ready_interlock": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -185,6 +187,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "robust_register_reset": False,
         "verified_register_reset": False,
         "experimental_register_reset": False,
+        "ready_interlock": False,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -335,6 +338,59 @@ def test_unqualified_register_reset_cannot_be_enabled(entry):
         else:
             _, pl, _, _ = kernel_campaign.block("tick", PARAMS)
             build_tick_pipeline({"block": "tick", **pl.build_options, "robust_register_reset": True})
+
+
+@pytest.mark.parametrize("verified", [False, True])
+@pytest.mark.parametrize("entry", ["kernel", "stage_d", "campaign", "recheck", "diagnostic", "stage_d_diagnostic"])
+def test_ready_interlock_qualification_is_enforced_at_every_entry(entry, verified, tmp_path):
+    from drosophilos.bench import stage_d
+
+    options = dict(ready_interlock=True, verified_register_reset=verified)
+    flag = "verified_register_reset" if verified else "ready_interlock"
+    cli = ["--ready-interlock"] + (["--verified-register-reset"] if verified else [])
+    with pytest.raises(ValueError, match=flag + " is not qualified"):
+        if entry == "kernel":
+            kernel_campaign.block("tick", PARAMS, **options)
+        elif entry == "stage_d":
+            stage_d.main([*cli, "--ticks", "1", "--c-ticks", "0"])
+        elif entry == "campaign":
+            kernel_campaign.main(["tick", *cli, "--copies", "1"])
+        elif entry == "recheck":
+            path = tmp_path / "candidate.json"
+            path.write_text(json.dumps({"build_options": options}))
+            stage_d.main(["--recheck", str(path)])
+        else:
+            _, pl, _, _ = kernel_campaign.block("tick", PARAMS)
+            record = {"block": "tick", **pl.build_options, **options}
+            if entry == "stage_d_diagnostic":
+                record.update(stage="D", build_options={**pl.build_options, **options})
+                record.update(ready_interlock=False, verified_register_reset=False)
+            build_tick_pipeline(record)
+
+
+@pytest.mark.parametrize("option", ["ready_interlock", "verified_register_reset"])
+def test_recheck_and_rebuild_preserve_authoritative_false_and_reject_top_level_true(option):
+    from drosophilos.bench import stage_d
+
+    k = stage_d.load_kernel(stage_d.PROGRAM)
+    pl = stage_d.build(k, PARAMS)
+    record = {"stage": "D", "build_options": dict(pl.build_options), option: True}
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
+    stage_d.recheck_record(dict(record))
+    record["build_options"].pop(option)
+    for rebuild in (build_tick_pipeline, stage_d.recheck_record):
+        with pytest.raises(ValueError, match=option + " is not qualified"):
+            rebuild(dict(record))
+
+
+@pytest.mark.parametrize("options", [{"idle_hops": 19}, {"copy_requires_rail": False},
+                                     {"true_guards": False}, {"retry_clear": True},
+                                     {"streams": ["other"]}])
+def test_ready_interlock_rejects_unsupported_kernel_policies(options):
+    with pytest.raises(ValueError, match="ready_interlock requires"):
+        build_pipeline(PARAMS, 2, [{"name": "out", "op": "ADD", "a": "input", "b": ("const", "k")}],
+                       consts={"k": 1}, ready_interlock=True, **options)
 
 
 def test_conditioned_rates_are_recorded_rebuilt_and_shared():

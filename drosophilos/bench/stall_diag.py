@@ -161,6 +161,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         robust_register_reset = options.pop("robust_register_reset", campaign.get("robust_register_reset", False))
         verified_register_reset = options.pop("verified_register_reset", campaign.get("verified_register_reset", False))
         experimental_register_reset = options.pop("experimental_register_reset", campaign.get("experimental_register_reset", False))
+        ready_interlock = options.pop("ready_interlock", campaign.get("ready_interlock", False))
         strength = options.pop("kill_strength", None)
         if strength is not None:
             options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
@@ -168,7 +169,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                    robust_request_clear=robust_request_clear,
                    robust_register_reset=robust_register_reset,
                    verified_register_reset=verified_register_reset,
-                   experimental_register_reset=experimental_register_reset, **options)
+                   experimental_register_reset=experimental_register_reset,
+                   ready_interlock=ready_interlock, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -211,6 +213,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             robust_register_reset=campaign.get("robust_register_reset", False),
             verified_register_reset=campaign.get("verified_register_reset", False),
             experimental_register_reset=campaign.get("experimental_register_reset", False),
+            ready_interlock=campaign.get("ready_interlock", False),
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

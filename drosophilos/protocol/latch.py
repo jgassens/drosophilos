@@ -162,8 +162,11 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
     when supplied. Only a new simulator/image clears exhaustion.
 
     This is a spiking circuit, not a host observer. Neither silence nor a bounded
-    retry count proves analogue recovery. It is retained for falsifiable tests;
-    ``verified_register_reset=True`` is rejected by the public kernel builder.
+    retry graph proves analogue recovery or exactly-once entry firing. The
+    fast three-sigma controller can amplify a repeated trigger into a READY
+    train (tests/test_verified_reset.py); wider fast storage can exhaust with
+    live survivors. Kernel READY/IDLE interlocking fixes nominal sequencing,
+    but does not qualify this controller. The public verified option is rejected.
     """
     if len(ready_chain) != 15:
         raise ValueError("reset verification requires a fifteen-hop recovery chain")

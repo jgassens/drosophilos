@@ -1074,6 +1074,273 @@ the existing repository virtualenv, `PYTHONPATH=.:tests`,
 All **209 requested non-slow tests pass** in separate file runs: 40 in
 `test_verified_reset.py`, 86 in `test_robust_reset.py`, and 83 in
 `test_build_options.py`, including the thirteen ordered default/machine hashes.
+
+## READY/IDLE interlock evaluation (2026-10-04)
+
+This section supersedes the preceding sequencing blocker. **The interlock fixes
+the nominal multi-cell overlap, but the verified reset remains unqualified.**
+The larger three-sigma controller survey exposes repeated READY pulses, and
+the ordinary four-tap 0.75 train, with three bounded retries, still leaves live
+terminal survivors at the wider fast entrained stress corners. As requested for a
+failed reset qualification, **both `ready_interlock=True` and
+`verified_register_reset=True` remain rejected**, individually and together.
+Neither flag silently enables a timed substitute. The full-domain three-sigma
+datapath failure is reported against the option-off baseline below; it is not
+used as an impossible additional qualification requirement.
+
+### Circuit and handshake ordering
+
+`kernel.interlock_cell_ready` is the directly testable qualification pass. Per
+cell it changes exactly one existing edge:
+
+```text
+old: idled.d15 -> idled.d16
+new: Q.ready   -> idled.d16 -> d17 -> d18 -> d19 -> IDLE.true
+```
+
+There are no added neurons or synapses, changed weights or delays, or new reset
+targets. The old DONE-fed prefix through `idled.d15` ends there; it can serve as
+a timing observation but has no route to IDLE. The ordinary Q READY prefix
+already supplies sixteen pulse hops. Keeping four IDLE tail hops preserves the
+old nominal recovery margin (about 21.2 ms after READY), rather than adding a
+second full twenty-hop wait. A late certificate or retry delays re-arm for as
+long as needed. There is **no timeout or fixed-delay bypass of READY**. These
+are measured analogue timing margins, not universal bounds under arbitrary
+perturbations. The helper requires the standard 20/15-hop IDLE/READY policy and
+validates all cells before mutation; applying it twice raises an error.
+
+The normal transaction has this causal order:
+
+```text
+pending requests + IDLE -> go -> START (consume requests, set busy, clear IDLE)
+ -> ACT^d -> operand sampling / ALU -> Q completion -> commit request
+ -> readers of the previous master have STARTed -> COMMIT -> guard / grant
+ -> M clear -> M READY -> COPY of the selected Q rails -> M completion -> DONE
+ -> Q clear (including ACT, datapath, COMMIT, grant, COPY and reader mirrors)
+ -> Q READY -> four recovery-tail hops -> IDLE -> next go / START
+```
+
+With verification installed, each READY in this chain requires the existing
+neural silence certificate; without it, READY retains the ordinary timed
+register policy. Merely interlocking a timed READY does not verify emptiness.
+M READY was already consumed by COPY. It must **not** be joined as a new
+empty-master condition after DONE: the committed master is then intentionally
+holding data, and its next clear requires a future transaction. Such a join
+would introduce the cycle this change avoids.
+
+The deadlock argument is conditional on a functioning datapath and successful
+reset, as for the existing handshake. START consumes the old requests before
+ACT^d; new requests remain latched while busy. A producer waits only for readers
+to START on its previous value, not for their future READY. Following DONE,
+Q clear and its verification are local: neither requires the next request,
+START, or a downstream acknowledgement. Thus a successful finite reset always
+re-arms IDLE; the added dependency cannot form a wait on a future transaction.
+The image still supplies the first IDLE and the initial feedback tokens.
+Exhaustion is an explicit failed reset, with READY withheld and a terminal
+fault/stall, not evidence of successful liveness.
+
+All sixteen nominal ADD/XOR combinations of verification, `rate_robust`,
+`zero_once`, and `robust_request_clear` produce **[0, 3, 1]** for inputs
+**[0, 1, 3]**, without faults, timeouts, missing values, or extra START/DONE
+pulses. Tests check every intermediate ordering above, including the next
+IDLE and START following Q READY. Natural full-domain settling exercises
+actual retry entries in every verified combination. Silencing Q READY after
+the first transaction leaves one START and one DONE, even after 8,000 ms:
+the old delay cannot release the second operation. The preceding un-interlocked
+counterexample remains a regression test, so the original **[0]** failure is
+still reproducible.
+
+### Qualification scope and remaining failure
+
+The primitive experiment retains the seed-108/B=100 captured old weights,
+thresholds and biases for master copies 74, 17, and 24 (the RR capture) and
+copy 18's stage Z0. Four initial ignitions, a later 300-q kick, both kicked
+members, randomized reset phases, and 5-Hz/150-q Bernoulli strays exercise the
+entrained modes. The new detector receives independent sigma .04 log-normal
+weights and sigma .2-mV thresholds/biases. The reproducible batch size is 1,000;
+changing it changes the RNG draw order. READY latencies are from the original
+reset-trigger spike, including every retry.
+
+All **four 40,000-trial captured-draw surveys completed: 0/160,000 terminal
+survivors, false READYs, exhausted resets, or undecided outcomes**. Every trial
+reached one READY and every attempt entry fired at most once. No trial used
+the final, third retry. These successful captured-draw results do not erase
+the independent controller failure below.
+
+| Draw | Trials with at least one retry | Trials using a second retry | Minimum certificate window, ms | Longest observed latch period, ms |
+|---|---:|---:|---:|---:|
+| Master 74 | 6,267 / 40,000 | 227 | 51.6 | 4.3 |
+| Master 17 | 31,183 / 40,000 | 4 | 51.3 | 4.3 |
+| Master 24, RR capture | 19,935 / 40,000 | 6 | 51.2 | 4.3 |
+| Stage Z0 18 | 5,663 / 40,000 | 14 | 51.4 | 4.5 |
+
+READY latency quantiles are **minimum / median / p95 / maximum**, in ms:
+
+| Draw | No retry | At least one retry |
+|---|---|---|
+| Master 74 | 138.9 / 143.0 / 145.4 / 150.1 | 307.4 / 315.1 / 323.3 / 498.7 |
+| Master 17 | 136.9 / 141.4 / 143.4 / 146.2 | 304.1 / 311.3 / 314.4 / 491.5 |
+| Master 24, RR capture | 138.6 / 143.5 / 145.7 / 149.1 | 307.7 / 314.3 / 317.4 / 497.5 |
+| Stage Z0 18 | 138.8 / 143.6 / 146.2 / 151.7 | 308.1 / 315.0 / 318.4 / 497.0 |
+
+**The fast three-sigma storage / biased-fast-controller corner also fails the
+READY contract.** The 32-trial seed-108 screen missed it. A small independent
+reproducer, seed 112 with 32 trials, fails on trial 15: the external reset is at
+step 3,392, the trigger spikes at **3,410 and 3,535**, and READY emits **24
+pulses**. With the original rounded +12%/-12% controller factors they span
+**4,597–5,497**; with exact **exp(+.12)/exp(-.12)** factors on every controller
+input they span **4,596–5,465**. Both use threshold −0.6 mV / bias +0.6 mV,
+and the storage's exact three-sigma draws. Thus rounding the weight corner is
+not the cause of this failure. The last latch spike is 3,528; this is a
+duplicate-completion failure, not an assertion that this trial certified a live
+latch. A long READY train can repeatedly re-arm IDLE or acknowledge multiple
+input loads. No interlock can treat it as a valid exactly-once completion.
+`test_three_sigma_controller_can_emit_a_ready_train` preserves these exact
+events. The survey's older `false_ready` counter combines duplicate READY and
+activity at/after the certificate; new diagnostic fields separate the two.
+This independent controller failure, inside the three-sigma stress setting,
+is sufficient to reject the verified policy even if wider kill corners were
+excluded. A statically unrolled attempt graph does not guarantee that each
+analogue attempt entry fires only once.
+
+The completed **40,000-trial** fast-storage / `fast_bias` controller survey
+(seed 108, batches of 1,000, the original rounded controller factors) has
+**404 READY-contract violations (1.01%)** and as many as **four spikes on one
+attempt entry**. All 40,000 reach READY and none exhausts or remains undecided;
+the aggregate counter alone does not distinguish duplicate certificates from
+activity at/after a certificate, so it is not labeled a live-latch count.
+Applying the slow survey's actual zero-violation/one-spike assertions to this
+result **fails qualification**. The exact-factor 32-trial reproducer above
+independently confirms that the controller defect is inside the requested
+three-sigma setting. Remaining broad corner sweeps are not claimed as passed;
+these counterexamples already prevent release.
+
+The wider entrained stress gates already have finite counterexamples:
+
+| Primitive / controller | Noisy trials | Safe READY | Exhausted, still live | Attempts in each trial |
+|---|---:|---:|---:|---|
+| fast20 / nominal | 32 | 1 | 31 | 4 |
+| biased fast30 / biased slow | 32 | 0 | 32 | 4 |
+| fast three-sigma / biased fast | 32 | 32 | 0 | 1 or 2 |
+
+In this 32-trial seed-108 table, none emits a false READY or remains undecided.
+fast20 exhaustion occurs at
+703.4–715.3 ms; biased fast30 at 969.6–980.7 ms. The third row has 27 retries;
+its minimum certificate propagation window is 48.3 ms, against a measured
+3.9-ms storage period. The first two rows extend beyond the combined
+three-sigma storage envelope and are explicitly not called three-sigma failure
+rates. They nevertheless fail the retained entrained-stress survivor gate:
+bounded retries do not provide stronger kill margin. The interlock cannot
+change this isolated failure, because no next START or reload occurs in it.
+
+The actual reload survey uses a real one-bit staged cell, the same adverse
+three-sigma **slow rail / fast READY** corner, and 5-Hz/150-q strays. It loads the
+same Q rail at observed Q READY + 1 step, then copies through M READY, the COPY
+latch, the selected arm, the M rail and completion. Loading at READY+1 is
+earlier than the kernel's interlocked re-arm. No host pulse substitutes for
+COPY or controls a retry. The full 32,000-step horizon covers bounded retries
+on both commits. The optimized harness coalesces simultaneous external integer
+events and retains the original RefSim equations; fast tests compare its
+outcomes and COPY timing with the previous harness at identical draws.
+
+Both **10,000-trial** surveys completed, seed 108, batches of 250:
+
+| Build | Trials with incorrect DONE count | Missing Q READY | Fault spikes | Nonempty M READY observations | Minimum COPY arrival after latest M READY, steps |
+|---|---:|---:|---:|---:|---:|
+| Base | 0 / 10,000 | 0 | 0 | 0 | 145 |
+| RR | 0 / 10,000 | 0 | 0 | **6** | 37 |
+
+**The base reload gate passes; the RR reload gate fails.** The counter named
+`survivors` increments at each M READY if the monitored M rail fired in the
+preceding 100 steps (10 ms). It counts observations, not distinct failing trials,
+and cannot alone distinguish an old rail surviving reset from a repeated READY
+after the new word has already been copied. Thus the RR result is reported as
+six nonempty-ready observations, not six proven surviving old rails. Either
+interpretation violates the required empty-register completion. Both requested
+transfers still produce DONE in every trial, illustrating why DONE counts alone
+are insufficient. The RR 37-step number is relative to the latest READY pulse
+and is **not** a proven recovery margin. There is no claim of zero failed RR
+reload safety checks. The slow test's zero-observation assertion fails on this
+result, independently of the primitive controller counterexample.
+
+For the complete two-bit ADD reset domain, the same combined three-sigma
+weights, thresholds and biases are applied to all incoming edges of the
+extended reset targets, including ALU gates and mirrors, with READY separately
+fast. **All three policies—option-off, interlock only, and interlock plus
+verification—produce zero of the requested two outputs**, in both base and RR.
+Base never completes Q or issues either register reset. RR completes Q and
+issues M reset but never DONE or Q reset. These identical qualitative outcomes
+are asserted together in `test_full_domain_corner_is_also_a_baseline_failure`.
+A local reset controller cannot fix the base datapath's failure before its
+first reset request.
+
+### Nominal tick2 latency
+
+Three ticks, inputs `[5, 5, 250]`, are compared against every canonical state
+field through Stage D's reference and commit checks. Each tick time is the last
+state-field commit, measured from the first input load. Per-tick latency is the
+mean of the two successive intervals; these short nominal runs are not noisy
+throughput estimates. All six runs complete correctly without faults/timeouts.
+
+| Rate mode | Policy | First tick, ms | Per tick, ms |
+|---|---|---:|---:|
+| Base | Option-off | 12,138.7 | 5,940.15 |
+| Base | READY interlock, ordinary reset | 12,138.7 | 5,941.85 |
+| Base | READY interlock + verified reset | 13,213.2 | 7,203.15 |
+| RR | Option-off | 11,589.8 | 5,682.10 |
+| RR | READY interlock, ordinary reset | 11,589.8 | 5,682.10 |
+| RR | READY interlock + verified reset | 12,666.4 | 6,939.90 |
+
+Versus option-off, verification plus the interlock adds **1,074.5 ms first-tick
+and 1,263.0 ms per tick** in base, and **1,076.6 / 1,257.8 ms** in RR. Ordinary
+READY interlocking alone changes base per-tick timing by 1.7 ms and RR by zero.
+Unlike the old unconsumed Q READY delay, verification latency is now paid on
+stage reuse as well as on the master's COPY path. Tick2's initialized feedback
+cells also complete, providing a nominal cyclic-graph liveness check beyond
+the feed-forward ADD/XOR regression.
+
+### Recording, rejection and compatibility
+
+`ready_interlock: False` is recorded in every kernel's `build_options` and in
+Stage D / kernel campaign records. Both CLIs accept `--ready-interlock` and
+`--verified-register-reset` and reject the unqualified requested build before
+simulation. `stall_diag` and Stage D `--recheck` honor the same flags, including
+nested records and older top-level fallbacks. Nested options are authoritative:
+an explicit nested False overrides a stale top-level True; a nested or fallback
+True raises the qualification error instead of rebuilding the option off.
+Unsupported timing, physics, COPY and kernel policies are rejected separately.
+Direct test candidates record their effective True options, so production
+rebuilds cannot silently misidentify them.
+
+The option-off netlist and image are unchanged. The existing thirteen ordered
+hashes include the control machine and unrelated kernels. No simulator or
+control-machine code is modified; `robust_register_reset` remains withdrawn
+and the separate timed experimental policy keeps its existing behavior.
+
+The exact requested command is blocked by the workspace sandbox while opening
+`~/.cache/uv/sdists-v9/.git` (Operation not permitted):
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_ready_interlock.py tests/test_verified_reset.py tests/test_build_options.py -m 'not slow'
+```
+
+Validation uses the existing repository Python environment without syncing it,
+a writable task cache/temp directory, and `PYTHONPATH=.` to select this worktree
+instead of the environment's editable checkout. Slow measurements are exposed
+by `test_40000_verified_reset_survey`,
+`test_10000_verified_actual_noisy_reload_paths`, and
+`test_tick2_latency_and_feedback_liveness`.
+
+The final-source fast suite passes **168 tests, 25 deselected**, with those
+sandbox-compatible environment settings. This includes all thirteen default /
+control-machine hashes and all rejection/rebuild/recheck cases. The six slow
+tick2 latency/liveness tests also pass. The final multi-cell tests additionally
+drain 1,000 ms after the last output and require exactly three STARTs, DONEs,
+Q READYs and M READYs, plus a completed final re-arm and no late faults. The
+four captured 40,000-trial gates and the base 10,000-reload gate pass; the
+40,000-trial controller gate and the RR 10,000-reload safety gate fail as
+reported above. Those failures are the evidence for retaining both rejections,
+not successful qualification results.
 The four additional 256-trial noisy capture screens completed as reported above.
 `git diff --check` passes.
 No simulator or machine source was changed. Integration and committing remain

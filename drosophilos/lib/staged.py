@@ -94,6 +94,9 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
         g, C = add_and_latched(net, drive, f"{name}.grant", [COMMIT2.u, W.u])
     connect_trigger(net, drive, C.u, M.reset_trigger, M.reset_edge)  # granted -> clear M
     COPY = add_latch(net, drive, f"{name}.copy")
+    # Master READY is already a prerequisite of COPY, hence of DONE and Q clear.
+    # Kernel READY/IDLE interlocking must wait for Q.READY after DONE; waiting for
+    # a second empty M there would deadlock while M holds the committed value.
     net.synapse(M.ready, COPY.u, drive.ignite)  # M empty and recovered -> copy enable
     copy_gates = []
     for i in range(n):

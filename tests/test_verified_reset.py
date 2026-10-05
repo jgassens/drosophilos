@@ -13,20 +13,22 @@ import pytest
 
 from drosophilos.bench import kernel_campaign, stage_d
 from drosophilos.bench.stall_diag import build_tick_pipeline
-from drosophilos.lib.kernel import build_pipeline, run_pipeline
+from drosophilos.lib.kernel import _NoProducer, _fault_latch, build_pipeline, run_pipeline
 from drosophilos.lib.netlist import Netlist
+from drosophilos.lib.staged import add_staged_commit
 from drosophilos.protocol.handshake import add_register, verify_register_resets
 from drosophilos.protocol.latch import (VERIFY_MAX_RETRIES, add_latch, add_ready, add_reset,
                                        add_reset_verification)
 from drosophilos.sim.ref64 import RefSim
 from test_robust_reset import (CAPTURES, CORNERS, DRIVE, PARAMS, _extended_domain_trial,
-                               _observed_run, _path_trials, _primitive, _sparse_strays)
+                               _observed_run, _primitive, _sparse_strays)
 
 
 def _verified_primitive(case="nominal", controller="nominal"):
     """Keep the captured old nodes/edges; new detector nodes have explicit draws."""
+    exact = controller == "fast_exact_bias"
     before, latch, trigger, inh, ready, q0, v0, b0, _ = _primitive(
-        case, compact=False, ready=True, controller=controller)
+        case, compact=False, ready=True, controller="nominal" if exact else controller)
     _, _, name, rail = CAPTURES.get(case, (None, False, "R", "L"))
     net = Netlist(PARAMS)
     add_latch(net, DRIVE, f"{name}.{rail}")
@@ -45,7 +47,16 @@ def _verified_primitive(case="nominal", controller="nominal"):
             q[e], new_edges[e] = old[s, ready], False
     vth = np.r_[v0, np.full(net.n - before.n, PARAMS.V_th)]
     bias = np.r_[b0, np.zeros(net.n - before.n)]
-    if controller != "nominal":
+    if exact:
+        # Exact three-sigma log-normal factors, alongside the original survey's
+        # rounded +/-12% controller. Keep the storage corner's existing draws.
+        controls = np.ones(topo.n, bool)
+        controls[list(latch.members)] = False
+        vth[controls] -= .6
+        bias[controls] += .6
+        edges = controls[topo.dst]
+        q[edges] = np.rint(q[edges] * np.where(q[edges] > 0, np.exp(.12), np.exp(-.12)))
+    elif controller != "nominal":
         fast = controller.startswith("fast")
         vth[before.n:] += -.6 if fast else .6
         if controller.endswith("bias"):
@@ -56,18 +67,21 @@ def _verified_primitive(case="nominal", controller="nominal"):
     return net, latch, trigger, inh, ready, verification, q, vth, bias, before.n, new_edges
 
 
-def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=108):
+def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=108,
+                         batch_size=1000, progress=False):
     net, latch, trigger, inh, ready, v, q, vth, bias, old_n, new_edges = _verified_primitive(case, controller)
     topo = net.topology()
     rng = np.random.default_rng(seed)
     result = dict(case=case, controller=controller, trials=n, ready=0, false_ready=0,
                   exhausted=0, undecided=0, terminal_survivors=0, max_attempt_spikes=0,
+                  duplicate_ready=0, live_at_ready=0, trigger_doublets=0, retry_doublets=0,
+                  first_failure=None,
                   attempts=[0] * 4, common_ms=[], retry_ms=[], exhausted_ms=[],
                   max_latch_period_ms=0., min_window_ms=None)
     recovery_ends = [i for i, role in enumerate(net.roles)
                      if role.endswith((".ready_delay14", ".recovery14"))]
-    for lo in range(0, n, 250):
-        count = min(250, n - lo)
+    for lo in range(0, n, batch_size):
+        count = min(batch_size, n - lo)
         resets = rng.integers(3000, 4500, count) if noisy else 3000 + np.arange(lo, lo + count)
         quanta = np.broadcast_to(q, (count, topo.nnz)).copy()
         thresholds = np.broadcast_to(vth, (count, topo.n)).copy()
@@ -95,6 +109,8 @@ def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=
             failures = t.neuron_steps(v.exhausted.u)
             counts = [len(t.neuron_steps(a)) for a in v.attempts]
             result["max_attempt_spikes"] = max(result["max_attempt_spikes"], max(counts))
+            result["trigger_doublets"] += int(counts[0] > 1)
+            result["retry_doublets"] += int(any(c > 1 for c in counts[1:]))
             for i, spikes in enumerate(counts):
                 result["attempts"][i] += int(spikes > 0)
             result["ready"] += int(bool(len(decisions)))
@@ -110,7 +126,16 @@ def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=
             if len(failures):
                 result["exhausted_ms"].append((int(failures[0]) - int(t.neuron_steps(trigger)[0])) * PARAMS.dt)
             if len(decisions):
-                result["false_ready"] += int(len(decisions) != 1 or np.any(live >= decisions[0] - 100))
+                duplicate = len(decisions) != 1
+                unsafe = bool(np.any(live >= decisions[0] - 100))
+                result["duplicate_ready"] += int(duplicate)
+                result["live_at_ready"] += int(unsafe)
+                result["false_ready"] += int(duplicate or unsafe)
+                if (duplicate or unsafe or max(counts) > 1) and result["first_failure"] is None:
+                    result["first_failure"] = dict(trial=lo + b, reset=int(reset),
+                                                   ready=decisions.tolist(),
+                                                   attempts=[t.neuron_steps(a).tolist() for a in v.attempts],
+                                                   last_latch_spike=int(live.max()))
                 start = t.neuron_steps(trigger)[0]
                 result["common_ms" if sum(c > 0 for c in counts) == 1 else "retry_ms"].append(
                     (int(decisions[0]) - int(start)) * PARAMS.dt)
@@ -120,10 +145,132 @@ def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=
                         window = float(check_times[0] - end_times[0]) * PARAMS.dt
                         old_window = result["min_window_ms"]
                         result["min_window_ms"] = window if old_window is None else min(window, old_window)
+        if progress:
+            print({key: value for key, value in result.items()
+                   if key not in ("common_ms", "retry_ms", "exhausted_ms")} | {"completed": lo + count},
+                  flush=True)
     for key in ("common_ms", "retry_ms", "exhausted_ms"):
         values = result[key]
         result[key] = (dict(count=len(values), quantiles=np.quantile(values, [0, .5, .95, 1]).tolist())
                        if values else dict(count=0, quantiles=[]))
+    return result
+
+
+def _coalesced_strays(sim, rng, steps):
+    """Exactly _sparse_strays' draws, without millions of tiny event arrays.
+
+    Keep one array per column/node, then group by time. Integer delivery is
+    unchanged; only the external schedule's storage differs. This bounds the
+    large reload surveys' setup memory as well as their observation memory.
+    """
+    columns = [[], [], []]
+    for node in range(sim.B):
+        times, neurons = [], []
+        for neuron in range(sim.n):
+            t = -1
+            while True:
+                t += int(rng.geometric(5 * PARAMS.dt / 1000))
+                if t >= steps:
+                    break
+                times.append(t)
+                neurons.append(neuron)
+        for column, values in zip(columns, (times, np.full(len(times), node), neurons)):
+            column.append(np.asarray(values, dtype=np.int64))
+    times, nodes, neurons = [np.concatenate(c) for c in columns]
+    order = np.argsort(times, kind="stable")
+    times, nodes, neurons = times[order], nodes[order], neurons[order]
+    unique, starts = np.unique(times, return_index=True)
+    ends = np.r_[starts[1:], len(times)]
+    quanta = np.full(len(times), 150, dtype=np.int64)
+    for step, lo, hi in zip(unique, starts, ends):
+        sim._events[int(step)].append((nodes[lo:hi], neurons[lo:hi], quanta[lo:hi]))
+
+
+def test_coalesced_strays_preserve_every_external_event():
+    net, *_ = _verified_primitive()
+    old, new = [RefSim(net.topology(), PARAMS, n_nodes=3) for _ in range(2)]
+    _sparse_strays(old, np.random.default_rng(108), 10000)
+    _coalesced_strays(new, np.random.default_rng(108), 10000)
+    assert old._events.keys() == new._events.keys()
+    for step in old._events:
+        for left, right in zip(zip(*old._events[step]), zip(*new._events[step])):
+            np.testing.assert_array_equal(np.concatenate(left), np.concatenate(right))
+
+
+def _verified_reload_trials(n, *, rate=False, seed=108, progress=False, batch_size=250):
+    """Actual Q READY+1 reload and M READY->COPY paths at the adverse rail corner.
+
+    Same two-commit experiment as test_robust_reset._path_trials(verified=True).
+    Coalesce simultaneous external events as _observed_run does; RefSim's
+    integer delivery, integration, strays and 32,000-step horizon are unchanged.
+    """
+    drive = replace(DRIVE, rate_robust=rate)
+    net = Netlist(PARAMS)
+    Q = add_register(net, drive, "cell.Q", 1, with_completion=True)
+    _fault_latch(net, drive, "cell", Q)
+    reg = add_staged_commit(net, drive, "cell", Q, _NoProducer(), ordered_grant=True,
+                            copy_requires_rail=True)
+    M = reg.master
+    verify_register_resets(net, drive, [Q, M])
+    topo = net.topology()
+    rails = {x for r in (Q, M) for pair in r.rails for latch in pair for x in latch.members}
+    ready = {x for r in (Q, M) for x in [*r.ready_chain, r.ready]}
+    ready.update(i for i, role in enumerate(net.roles)
+                 if ".verify." in role and (".quiet" in role or ".recovery" in role))
+    q = np.rint(topo.quanta * np.where(
+        np.isin(topo.dst, list(rails)), np.where(topo.quanta > 0, np.exp(-.12), np.exp(.12)),
+        np.where(np.isin(topo.dst, list(ready)) & (topo.quanta > 0), np.exp(.12), 1.)))
+    vth, bias = np.full(net.n, PARAMS.V_th), np.array(net.bias)
+    vth[list(rails)] += .6
+    bias[list(rails)] -= .6
+    vth[list(ready)] -= .6
+    bias[list(ready)] += .6
+    rng = np.random.default_rng(seed)
+    result = dict(trials=n, rate=rate, failures=0, ready_missing=0, faults=0, survivors=0,
+                  copy_arrival_after_ready=10**9)
+    cp = reg.copy_gates[0]
+    copy_delay = int(topo.delay[(topo.src == cp) & (topo.dst == M.rails[0][0].u)][0])
+    for lo in range(0, n, batch_size):
+        count = min(batch_size, n - lo)
+        sim = RefSim(topo, PARAMS, n_nodes=count,
+                     quanta=np.broadcast_to(q, (count, topo.nnz)), V_th=vth, bias=bias)
+        _coalesced_strays(sim, rng, 32000)
+        for b in range(count):
+            sim.add_events(b, [10, 3000, 6000], [M.rails[0][0].u, Q.rails[0][0].u, reg.commit_in],
+                           [DRIVE.ignite] * 3)
+        for step, groups in sim._events.items():
+            if len(groups) > 1:
+                sim._events[step] = [tuple(np.concatenate(c) for c in zip(*groups))]
+        loaded, dones = np.zeros(count, bool), np.zeros(count, int)
+        mready, last_m = np.full(count, -1), np.full(count, -1000)
+        for step in range(32000):
+            sim.step()
+            if not sim._spk_step:
+                continue
+            nodes, neurons = sim._spk_node[-1], sim._spk_neuron[-1]
+            if step > 6000:
+                dones[nodes[neurons == reg.done_relay]] += 1
+                result["faults"] += int(np.isin(neurons, Q.fault + M.fault).sum())
+                for b in nodes[neurons == M.ready]:
+                    result["survivors"] += int(last_m[b] >= step - 100)
+                    mready[b] = step
+                for b in nodes[neurons == cp]:
+                    if mready[b] >= 0:
+                        result["copy_arrival_after_ready"] = min(
+                            result["copy_arrival_after_ready"], int(step + copy_delay - mready[b]))
+                for b in nodes[neurons == Q.ready]:
+                    if not loaded[b]:
+                        sim.add_events(int(b), [step + 1, step + 1000], [Q.rails[0][0].u, reg.commit_in],
+                                       [round(np.exp(-.12) * DRIVE.ignite), DRIVE.ignite])
+                        loaded[b] = True
+            last_m[nodes[neurons == M.rails[0][0].u]] = step
+            sim._spk_step.clear()
+            sim._spk_node.clear()
+            sim._spk_neuron.clear()
+        result["failures"] += int(np.count_nonzero(dones != 2))
+        result["ready_missing"] += int(np.count_nonzero(~loaded))
+        if progress:
+            print(result | {"completed": lo + count}, flush=True)
     return result
 
 
@@ -175,6 +322,32 @@ def test_40000_verified_reset_survey(case, controller):
     # trials and survivors at exhaustion are reported separately and fail-stop.
     assert result["false_ready"] == 0, result
     assert result["max_attempt_spikes"] <= 1, result
+    if case in CAPTURES:
+        assert result["ready"] == result["trials"], result
+        assert result["exhausted"] == result["undecided"] == result["terminal_survivors"] == 0, result
+        assert result["min_window_ms"] > 5 * result["max_latch_period_ms"], result
+
+
+@pytest.mark.parametrize("case,controller,survivors", [
+    ("fast20", "nominal", 31), ("fast30_bias", "slow_bias", 32)])
+def test_entrained_survivors_still_prevent_release(case, controller, survivors):
+    result = _verification_survey(case, 32, controller=controller, noisy=True)
+    assert result["terminal_survivors"] == result["exhausted"] == survivors, result
+    assert result["false_ready"] == result["undecided"] == 0, result
+    assert result["attempts"] == [32] * 4, result
+
+
+@pytest.mark.parametrize("controller,first,last", [("fast_bias", 4597, 5497),
+                                                  ("fast_exact_bias", 4596, 5465)])
+def test_three_sigma_controller_can_emit_a_ready_train(controller, first, last):
+    result = _verification_survey("fast3sigma", 32, controller=controller, noisy=True, seed=112)
+    assert result["ready"] == 32 and result["false_ready"] == result["duplicate_ready"] == 1, result
+    assert result["live_at_ready"] == result["exhausted"] == result["undecided"] == 0, result
+    assert result["max_attempt_spikes"] == 2 and result["trigger_doublets"] == 1, result
+    failure = result["first_failure"]
+    assert failure["trial"] == 15 and failure["attempts"][0] == [3410, 3535], result
+    assert len(failure["ready"]) == 24, result
+    assert (failure["ready"][0], failure["ready"][-1], failure["last_latch_spike"]) == (first, last, 3528)
 
 
 @pytest.mark.parametrize("rate", [False, True])
@@ -190,14 +363,19 @@ def test_full_domain_corner_prevents_verified_release(rate):
 
 @pytest.mark.parametrize("rate", [False, True])
 def test_verified_actual_reload_is_observed_through_retry_windows(rate):
-    result = _path_trials(10, verified=True, rate=rate)
+    result = _verified_reload_trials(10, rate=rate)
     assert result["failures"] == result["ready_missing"] == result["faults"] == result["survivors"] == 0, result
+    # Check the optimized observation against the original actual-path harness.
+    from test_robust_reset import _path_trials
+    original = _path_trials(10, rate=rate, verified=True)
+    for key in ("failures", "ready_missing", "faults", "survivors", "copy_arrival_after_ready"):
+        assert result[key] == original[key]
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("rate", [False, True])
 def test_10000_verified_actual_noisy_reload_paths(rate):
-    result = _path_trials(10000, rate=rate, verified=True, progress=True)
+    result = _verified_reload_trials(10000, rate=rate, progress=True)
     assert result["failures"] == result["ready_missing"] == result["faults"] == result["survivors"] == 0, result
 
 

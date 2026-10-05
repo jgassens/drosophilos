@@ -33,7 +33,7 @@ def _upper95(errors: int, n: int) -> float:
 def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: bool = False,
           zero_once: bool = False, robust_request_clear: bool = False,
           robust_register_reset: bool = False, verified_register_reset: bool = False,
-          experimental_register_reset: bool = False):
+          experimental_register_reset: bool = False, ready_interlock: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -63,7 +63,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         zero_once=zero_once, robust_request_clear=robust_request_clear,
                         robust_register_reset=robust_register_reset,
                         verified_register_reset=verified_register_reset,
-                        experimental_register_reset=experimental_register_reset)
+                        experimental_register_reset=experimental_register_reset,
+                        ready_interlock=ready_interlock)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -89,6 +90,8 @@ def parser() -> argparse.ArgumentParser:
                     help="withdrawn: rejected until full mix-B reset/reload qualification passes")
     ap.add_argument("--verified-register-reset", action="store_true",
                     help="unqualified closed-loop prototype: rejected; see docs/stage_d_completion_stall.md")
+    ap.add_argument("--ready-interlock", action="store_true",
+                    help="unqualified READY/IDLE prototype: rejected; see docs/stage_d_completion_stall.md")
     ap.add_argument("--experimental-register-reset", action="store_true",
                     help="EXPERIMENTAL, known full-domain failures: 1.75-loop reset / eight delayed READY links")
     ap.add_argument("--robust-request-clear", action="store_true",
@@ -109,7 +112,8 @@ def main(argv=None):
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
                               robust_register_reset=a.robust_register_reset,
                               verified_register_reset=a.verified_register_reset,
-                              experimental_register_reset=a.experimental_register_reset)
+                              experimental_register_reset=a.experimental_register_reset,
+                              ready_interlock=a.ready_interlock)
     B = a.copies
     dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
     if any(dump_given) and not all(dump_given):

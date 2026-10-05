@@ -286,7 +286,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    copy_requires_rail: bool = True, rate_robust: bool = False,
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
-                   experimental_register_reset: bool = False) -> Pipeline:
+                   experimental_register_reset: bool = False, ready_interlock: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -327,9 +327,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     fails biased READY reloads, and its replacement has not passed the full mix-B
     envelope. The experimental primitive and measured frontier are retained in
     tests/test_robust_reset.py and docs/stage_d_completion_stall.md.
-    `verified_register_reset=True` is also rejected: the closed-loop prototype
-    does not meet the full-domain reload requirement. Its bounded retries and
-    silence window are evaluated in tests/test_verified_reset.py.
+    `ready_interlock=True` requests Q.READY before the next IDLE/START, with
+    M.READY still gating COPY. It and `verified_register_reset=True` remain
+    rejected: interlocked nominal kernels work, but the three-sigma controller
+    can emit repeated READY and the wider entrained corners retain survivors.
+    Direct qualification circuits are retained in tests/test_ready_interlock.py
+    and tests/test_verified_reset.py. The combined full-domain three-sigma
+    failure is also present in the option-off baseline, not a reset regression.
     `experimental_register_reset=True` permits campaigns of the unqualified
     four compact 1.75-loop taps / eight delayed READY links candidate. It is
     explicitly experimental, not an alias for either rejected robust option.
@@ -353,7 +357,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     if sum(bool(value) for value in reset_options.values()) > 1:
         raise ValueError("register reset options are mutually exclusive")
     reset_option = next((key for key, value in reset_options.items() if value), None)
-    if reset_option and (
+    policy_option = reset_option or ("ready_interlock" if ready_interlock else None)
+    if policy_option and (
             params != Params() or drive != replace(Drive.from_params(params), kill_pulses=4,
                                                   rate_robust=rate_robust) or
             not all((relight_requests, true_guards, copy_requires_rail, powerup_veto,
@@ -364,7 +369,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             any(cs["op"] not in {"ADD", "SUB", "AND", "XOR", "SEL"} for cs in spec) or
             any(isinstance(cs.get(key), (tuple, list)) and cs[key][0] != "const"
                 for cs in spec for key in ("a", "b", "c"))):
-        raise ValueError(f"{reset_option} requires default physics/drive, standard "
+        raise ValueError(f"{policy_option} requires default physics/drive, standard "
                          "timing, true guards, selected-rail COPY, no retry_clear and a "
                          "2/8-bit single-stream ADD/SUB/AND/XOR/SEL kernel with constant "
                          "or cell operands, without memories, parameters or pacing")
@@ -372,10 +377,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         raise ValueError("robust_register_reset is not qualified over the full mix-B reload envelope; "
                          "see docs/stage_d_completion_stall.md for the measured frontier")
     if verified_register_reset:
-        raise ValueError("verified_register_reset is not qualified: silence verification cannot "
-                         "repair the combined three-sigma datapath/reload frontier; see "
-                         "docs/stage_d_completion_stall.md. The unqualified timed candidate is "
-                         "available only as experimental_register_reset")
+        raise ValueError("verified_register_reset is not qualified even with ready_interlock: "
+                         "the three-sigma controller can emit repeated READY, and ordinary "
+                         "trains leave survivors at wider entrained corners; see "
+                         "docs/stage_d_completion_stall.md")
+    if ready_interlock:
+        raise ValueError("ready_interlock is not qualified for release: the paired verified "
+                         "reset still fails its completion/survivor gates; both options remain rejected. "
+                         "See docs/stage_d_completion_stall.md")
     net = Netlist(params)
     image: list = []
     streams = list(streams or ["input"])
@@ -949,6 +958,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "robust_register_reset": robust_register_reset,
         "verified_register_reset": verified_register_reset,
         "experimental_register_reset": experimental_register_reset,
+        "ready_interlock": ready_interlock,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,
@@ -959,6 +969,38 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
+
+
+def interlock_cell_ready(net: Netlist, cells: list[Cell], *, idle_hops: int = 20) -> None:
+    """Qualification circuit: consume each Q READY before re-arming IDLE.
+
+    Replace the input of the existing IDLE chain's recovery tail. The ordinary
+    READY already accounts for sixteen pulse hops; the remaining four retain
+    the original minimum recovery time. No timeout can bypass READY. The unused
+    DONE prefix is diagnostic only and has no path to IDLE. No state-holding
+    join is needed: DONE causes Q.clear, which causes Q.READY. M.READY is already
+    consumed by COPY *before* DONE; waiting for a newly empty M here would
+    deadlock because M must hold the committed value for its readers.
+
+    Direct qualification experiments use this final wiring pass; public builds
+    reject the option while reset qualification fails. It leaves every
+    reset domain and the control machine unchanged. Validate all cells before
+    changing any edge, including on accidental repeated installation.
+    """
+    if idle_hops != 20 or any(len(c.stage.ready_chain) != 15 for c in cells):
+        raise ValueError("READY interlock requires the standard 20/15-hop IDLE/READY timing")
+    roles = {role: i for i, role in enumerate(net.roles)}
+    changes = []
+    for cell in cells:
+        skip = len(cell.stage.ready_chain) + 1
+        target = roles[f"{cell.name}.idled.d{skip}"]
+        source = roles[f"{cell.name}.idled.d{skip - 1}"]
+        edges = [e for e in net.incoming[target] if net.src[e] == source]
+        if len(edges) != 1:
+            raise ValueError("READY interlock requires an unmodified IDLE chain")
+        changes.append((edges[0], cell.stage.ready))
+    for edge, ready in changes:
+        net.src[edge] = ready
 
 
 def _share_write_ports(net: Netlist, drive: Drive, name: str, mem: Memory, stores: list) -> None:

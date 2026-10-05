@@ -123,9 +123,11 @@ def compact_register_resets(net: Netlist, drive: Drive, registers: list[Register
 def verify_register_resets(net: Netlist, drive: Drive, registers: list[Register]) -> None:
     """Install the unqualified closed-loop prototype for direct experiments only.
 
-    No kernel flag enables this pass: silence does not qualify the complete
-    reload path. In particular the combined three-sigma datapath corner fails
-    before the first reset. See tests/test_verified_reset.py.
+    No kernel flag enables this pass. With kernel.interlock_cell_ready, nominal
+    multi-cell sequencing works, but the three-sigma controller can emit repeated
+    READY and ordinary trains retain survivors at wider entrained corners.
+    The combined three-sigma datapath corner also fails in the option-off baseline.
+    See tests/test_verified_reset.py and tests/test_ready_interlock.py.
     """
     if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
         raise ValueError("reset verification requires latch storage")
