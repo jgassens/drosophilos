@@ -14,10 +14,13 @@ from drosophilos.bench.tmr_model import (
     Model,
     analytic,
     binned_hazard,
+    cadence_hazard,
     campaign_failure,
+    first_stall_estimate,
     main,
     monte_carlo,
     observed_hazard,
+    sensitivity_table,
     unreplicated_failure,
 )
 
@@ -108,9 +111,11 @@ def test_tiny_probabilities_survive_floating_point_subtraction():
 
 
 def test_measured_scale_is_not_a_zero_failure_prediction():
-    assert unreplicated_failure() == pytest.approx(0.9932628952, abs=1e-9)
-    assert 0.49 < analytic(Model(recovery_ticks=None))["campaign_failure"] < 0.51
-    assert 0.002 < analytic(Model(recovery_ticks=2))["campaign_failure"] < 0.003
+    assert unreplicated_failure() == pytest.approx(0.9932628952197202, rel=1e-11, abs=0)
+    assert analytic(Model(recovery_ticks=None))["campaign_failure"] == pytest.approx(
+        0.499825019462443, rel=1e-11, abs=0)
+    assert analytic(Model(recovery_ticks=2))["campaign_failure"] == pytest.approx(
+        0.0022454261829047573, rel=1e-11, abs=0)
 
 
 @pytest.mark.parametrize("recovery", [1, 2, 4, None])
@@ -179,12 +184,159 @@ def test_observed_profile_preserves_event_indices_and_mission_risk():
     assert analytic(Model(hazard=normalized))["campaign_failure"] > analytic(Model())["campaign_failure"]
 
 
+@pytest.mark.parametrize("r, expected", [
+    (2, 0.0027774630362427722), (10, 0.017319341668159696), (100, 0.15396597592282002),
+])
+def test_observed_profile_numbers_are_pinned(r, expected):
+    assert analytic(Model(hazard=observed_hazard(), recovery_ticks=r))["campaign_failure"] == pytest.approx(
+        expected, rel=1e-11, abs=0)
+    np.testing.assert_allclose(observed_hazard(None)[::250],
+                               [2 / 49534, 2 / 49275, 4 / 48520, 1 / 47865], rtol=1e-13)
+
+
+def test_sensitivity_table_pins_every_scenario():
+    expected = [
+        0.0022454261829047573, 0.0002023297003127143,
+        0.0014973097688935526, 0.0023628132870629525, 0.0034362410086385374,
+        0.007963402416879078, 0.0058306294370005, 0.011073261292892246,
+        0.07764730679677306, 0.009430644425412686, 0.07153351777649868,
+        0.499825019462443, 0.009639301657169587, 0.1550120453021273,
+        0.5009481254597747, 0.012173250563826921, 0.09719437273408485,
+        0.00400231476637074, 0.02936058841882918, 0.002357042072461883,
+        0.21851584279045028,
+    ]
+    rows = sensitivity_table()
+    assert len(rows) == len(expected)
+    assert "floor" in rows[0]["scenario"]
+    np.testing.assert_allclose([row["campaign_failure"] for row in rows], expected,
+                               rtol=1e-11, atol=0)
+    assert rows[0]["f_repair"] == 0
+    assert rows[-1]["controller_hazard"] > 0
+    assert rows[-1]["f_repair"] > 0
+    assert rows[-1]["frailty_fraction"] < 1
+
+
+def test_unrepaired_controller_majority_and_static_writer_have_closed_forms():
+    controller = [0.01, 0.02, 0.03, 0.04]
+    p = 1 - math.prod(1 - h for h in controller)
+    majority = 3 * p**2 - 2 * p**3
+    model = Model(ticks=4, copies=7, hazard=0, controller_hazard=controller)
+    exact = analytic(model)
+    assert exact["controller_group_failure"] == pytest.approx(majority, rel=1e-12)
+    assert exact["campaign_failure"] == pytest.approx(1 - (1 - majority)**7, rel=1e-12)
+    writer = replace(model, controller_hazard=0, writer_hazard=0.001)
+    assert analytic(writer)["campaign_failure"] == pytest.approx(-math.expm1(28 * math.log1p(-0.001)))
+    kernel = replace(model, hazard=0.08, controller_hazard=0)
+    combined = replace(kernel, controller_hazard=controller, writer_hazard=0.001)
+    expected = 1 - (1 - analytic(kernel)["group_failure"]) * (1 - majority) * 0.999**4
+    assert analytic(combined)["group_failure"] == pytest.approx(expected, rel=1e-12)
+
+
+def enumerate_identity_mission(hazards, recovery, f_repair, multiplier):
+    """Short-mission oracle using actual per-lane dates and event/repair branches.
+
+    Repair coin is drawn when a stall occurs; failed repairs never return. Draws
+    remain independent so this is equivalent to drawing at completion, including
+    missions ending before completion. No H/P/countdown recurrence is used.
+    """
+    ticks = len(hazards)
+    states = {((0, 0, 0), (False, False, False)): 1.0}
+    failure = 0.0
+    for t, rates in enumerate(hazards):
+        following = {}
+        for (dates, rejoined), mass in states.items():
+            options = []
+            for lane in range(3):
+                if dates[lane] > t:
+                    options.append([(dates[lane], rejoined[lane], 1.0)])
+                    continue
+                h = 1 - (1 - rates[lane])**(multiplier if rejoined[lane] else 1)
+                options.append([(dates[lane], rejoined[lane], 1 - h),
+                                (t + recovery, True, h * (1 - f_repair)),
+                                (ticks + recovery, True, h * f_repair)])
+            for outcome in itertools.product(*options):
+                new_dates, flags, probabilities = zip(*outcome)
+                probability = mass * math.prod(probabilities)
+                if sum(date > t for date in new_dates) >= 2:
+                    failure += probability
+                else:
+                    key = (new_dates, flags)
+                    following[key] = following.get(key, 0.0) + probability
+        states = following
+    return failure
+
+
+@pytest.mark.parametrize("recovery, f_repair, multiplier", [(1, 0, 1), (2, 0.3, 2), (2, 1, 0)])
+def test_static_frailty_matches_identity_enumeration(recovery, f_repair, multiplier):
+    base = np.array([0.04, 0.06, 0.03])
+    q = 0.5
+    marginal = 1 - math.prod(1 - base)
+    # Preserve first-stall mission probability by scaling integrated intensity.
+    scale = math.log1p(-marginal / q) / math.log1p(-marginal)
+    weak = 1 - (1 - base)**scale
+    expected = 0.0
+    for susceptible in itertools.product((0, 1), repeat=3):
+        weight = math.prod(q if s else 1 - q for s in susceptible)
+        expected += weight * enumerate_identity_mission(weak[:, None] * susceptible,
+                                                        recovery, f_repair, multiplier)
+    result = analytic(Model(ticks=3, copies=1, hazard=base, recovery_ticks=recovery,
+                            recovery_failure=f_repair, frailty_fraction=q,
+                            post_rejoin_multiplier=multiplier))
+    assert result["group_failure"] == pytest.approx(expected, rel=1e-12, abs=0)
+
+
+def test_frailty_preserves_first_stall_marginal_without_repair():
+    model = Model(hazard=5e-5, recovery_ticks=None)
+    for q in (0.05, 0.1, 0.2):
+        frail = replace(model, frailty_fraction=q)
+        assert q * unreplicated_failure(frail.kernel_hazard(), copies=1) == pytest.approx(
+            unreplicated_failure(model.hazard, copies=1), rel=1e-12)
+        assert analytic(frail)["campaign_failure"] == pytest.approx(
+            analytic(model)["campaign_failure"], rel=1e-11)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"controller_hazard": 0.04, "writer_hazard": 0.01},
+    {"frailty_fraction": 0.4, "post_rejoin_multiplier": 2},
+    {"frailty_fraction": 0.4, "post_rejoin_multiplier": 0,
+     "controller_hazard": 0.02, "writer_hazard": 0.001},
+])
+def test_new_component_sampling_matches_exact_chain(kwargs):
+    model = Model(ticks=6, copies=3, hazard=0.04, recovery_ticks=2,
+                  recovery_failure=0.1, **kwargs)
+    p = analytic(model)["campaign_failure"]
+    sampled = monte_carlo(model, trials=25000, seed=812, batch_size=700)
+    assert abs(sampled["campaign_failure"] - p) < 6 * math.sqrt(p * (1 - p) / 25000)
+
+
+def test_cadence_scales_intensity_and_evidence_confidence_bounds():
+    h = 5e-5
+    assert float(cadence_hazard(h, time_fraction=0)) == pytest.approx(h, rel=1e-14)
+    assert float(cadence_hazard(h)) == pytest.approx(0.00011129795841264512, rel=1e-13)
+    assert math.log1p(-float(cadence_hazard(h))) == pytest.approx(math.log1p(-h) * 13 / 5.84)
+    np.testing.assert_allclose(cadence_hazard([0, 1]), [0, 1])
+    for n, expected, interval in [
+        (4, 4.0821161313974576e-5, (1.578714509835704e-5, 1.035464736221713e-4)),
+        (5, 5.129197890901781e-5, (2.1778894869290753e-5, 1.1849555119425793e-4)),
+        (6, 6.187348947477656e-5, (2.8179064614095293e-5, 1.332575818088725e-4)),
+    ]:
+        result = first_stall_estimate(n)
+        assert result["hazard"] == pytest.approx(expected, rel=1e-12)
+        np.testing.assert_allclose(result["hazard_confidence_95"], interval, rtol=1e-12)
+    assert first_stall_estimate(0)["hazard"] == 0
+    assert first_stall_estimate(100)["hazard"] == 1
+
+
 @pytest.mark.parametrize("kwargs", [
     {"ticks": 0}, {"ticks": 1.5}, {"copies": -1}, {"copies": True},
     {"recovery_ticks": 0}, {"recovery_ticks": 0.5}, {"recovery_failure": -0.1},
     {"recovery_failure": float("nan")}, {"hazard": -1}, {"hazard": float("inf")},
     {"hazard": [0.1]}, {"hazard": [[0.1] * 1000]}, {"voter_failure": 1.1},
     {"watchdog_failure": float("nan")}, {"global_common_mode": -0.1},
+    {"controller_hazard": -0.1}, {"controller_hazard": [0.1]}, {"writer_hazard": 1.1},
+    {"frailty_fraction": 0}, {"frailty_fraction": 1.1}, {"frailty_fraction": float("nan")},
+    {"frailty_fraction": 0.01}, {"post_rejoin_multiplier": -1},
+    {"post_rejoin_multiplier": float("inf")},
 ])
 def test_invalid_model_parameters(kwargs):
     with pytest.raises(ValueError):
@@ -213,3 +365,25 @@ def test_cli_report_and_validation(capsys):
         main(["--profile", "observed", "--ticks", "5"])
     with pytest.raises(ValueError):
         monte_carlo(Model(), trials=0)
+
+
+def test_cli_exposes_new_assumptions_and_sensitivity(capsys):
+    main(["--trials", "0", "--f-repair", "0.01", "--controller-hazard", "2.4e-5",
+          "--writer-hazard", "1e-7", "--frailty-fraction", "0.2", "--tick-seconds", "13"])
+    report = json.loads(capsys.readouterr().out)
+    assert report["analytic"]["campaign_failure"] == pytest.approx(0.21851584279045028, rel=1e-11)
+    assert "floor" in report["assumption"]
+    main(["--sensitivity"])
+    rows = json.loads(capsys.readouterr().out)
+    assert rows == sensitivity_table()
+    for args in (["--tick-seconds", "0"], ["--time-fraction", "2"],
+                 ["--frailty-fraction", "0.01"]):
+        with pytest.raises(SystemExit):
+            main(args)
+
+
+@pytest.mark.parametrize("kwargs", [{"source_seconds": 0}, {"tick_seconds": float("inf")},
+                                    {"time_fraction": -0.1}])
+def test_invalid_cadence(kwargs):
+    with pytest.raises(ValueError):
+        cadence_hazard(5e-5, **kwargs)

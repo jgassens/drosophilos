@@ -5,7 +5,10 @@ replica stalls with probability h[t] at tick t. Two unavailable replicas fail th
 service immediately; one is masked. A stall at t returns before t + R, i.e. R=1
 still cannot mask two stalls in the SAME tick. None means no recovery. Recovery
 failure leaves that replica permanently unavailable. All healthy outputs are
-assumed correct; see docs/stage_d_tmr.md for the fault-containment assumptions.
+assumed correct. Three additional controller/log lanes are unrepaired; a static
+single writer can fail liveness. Per-copy frailty draws persist through repair.
+The default perfect-protection/repair result is a conditional floor, not a
+forecast; see docs/stage_d_tmr.md for the fault-containment assumptions.
 
 The analytic solver propagates a finite-state distribution. Monte Carlo samples
 individual replica event times, repairs, and whole campaigns independently of
@@ -13,6 +16,7 @@ that recurrence. Both support time-varying hazards and explicit common modes.
 
     python -m drosophilos.bench.tmr_model --recovery-ticks 2 --trials 20000
     python -m drosophilos.bench.tmr_model --profile observed --recovery-ticks none
+    python -m drosophilos.bench.tmr_model --sensitivity
 """
 
 from __future__ import annotations
@@ -63,8 +67,16 @@ class Model:
     hazard: Rate = 5e-5
     recovery_ticks: int | None = 2
     recovery_failure: float = 0.0
+    # Three controller/voter/log lanes, with NO repair in this conservative model.
+    controller_hazard: Rate = 0.0
+    writer_hazard: Rate = 0.0  # static writer: one stall fails service liveness
+    # One independent, persistent draw per kernel replica, not per tick/repair.
+    # Fraction q has elevated hazard, others zero; preserve marginal first-stall
+    # mission probability, not mean instantaneous hazard. q=1 is homogeneous.
+    frailty_fraction: float = 1.0
+    post_rejoin_multiplier: float = 1.0  # intensity multiplier after first repair
     # Residual FATAL probabilities per logical group per tick, after protection.
-    # voter_failure includes commit controller/log. watchdog_failure is already
+    # voter_failure excludes raw controller/writer stalls. watchdog_failure is already
     # demand-weighted, not the failure probability of an individual timer.
     voter_failure: Rate = 0.0
     watchdog_failure: Rate = 0.0
@@ -80,13 +92,38 @@ class Model:
         if r.ndim != 0 or not np.isfinite(r) or not 0 <= r <= 1:
             raise ValueError("recovery_failure must be a probability in [0, 1]")
         object.__setattr__(self, "recovery_failure", float(r))
-        for name in ("hazard", "voter_failure", "watchdog_failure", "common_mode", "global_common_mode"):
+        q = self.frailty_fraction
+        if not np.isfinite(q) or not 0 < q <= 1:
+            raise ValueError("frailty_fraction must be in (0, 1]")
+        m = self.post_rejoin_multiplier
+        if not np.isfinite(m) or m < 0:
+            raise ValueError("post_rejoin_multiplier must be finite and >= 0")
+        for name in ("hazard", "controller_hazard", "writer_hazard", "voter_failure",
+                     "watchdog_failure", "common_mode", "global_common_mode"):
             object.__setattr__(self, name, _rates(name, getattr(self, name), self.ticks))
+        self.kernel_hazard()  # validate feasibility of marginal-preserving mixture
+
+    def kernel_hazard(self, *, rejoined: bool = False) -> np.ndarray:
+        """Hazard of a susceptible lane; its susceptibility survives every reset."""
+        intensity = -_log_survival(self.hazard)
+        p = -math.expm1(-float(intensity.sum()))
+        q = self.frailty_fraction
+        if q < 1:
+            if p >= q:
+                raise ValueError("frailty_fraction must exceed marginal first-stall probability")
+            if p:
+                intensity = intensity * (-math.log1p(-p / q) / float(intensity.sum()))
+        if rejoined:
+            if self.post_rejoin_multiplier == 0:
+                return np.zeros(self.ticks)
+            intensity = intensity * self.post_rejoin_multiplier
+        return -np.expm1(-intensity)
 
     def fatal_hazard(self) -> np.ndarray:
         """Independent group-level fatal events combined without cancellation."""
         return -np.expm1(sum(_log_survival(x) for x in
-                            (self.voter_failure, self.watchdog_failure, self.common_mode)))
+                            (self.writer_hazard, self.voter_failure,
+                             self.watchdog_failure, self.common_mode)))
 
 
 def campaign_failure(group_failure: float, copies: int, global_log_survival: float = 0.0) -> float:
@@ -108,7 +145,7 @@ def unreplicated_failure(hazard: Rate = 5e-5, *, ticks: int = 1000, copies: int 
     return -math.expm1(copies * float(_log_survival(_rates("hazard", hazard, ticks)).sum()))
 
 
-def analytic(model: Model) -> dict:
+def _homogeneous_curve(model: Model) -> np.ndarray:
     """Exact discrete-time recurrence; failure is absorbing, not just end downtime.
 
     State is all healthy, one permanently down, or one down with k more service
@@ -145,10 +182,89 @@ def analytic(model: Model) -> dict:
         permanent = next_permanent * (1 - fatal)
         pending *= 1 - fatal
         cdf[t] = failed
+    return cdf
+
+
+def _lane_curve(model: Model, susceptible: tuple[int, int, int]) -> np.ndarray:
+    """Identity-preserving chain: rejoined mask, unavailable lane and countdown.
+
+    Unlike a mean-hazard recurrence, this retains the same frailty draw when a
+    lane returns. Only one unavailable lane can exist in a surviving service.
+    """
+    r = model.recovery_ticks
+    if r is not None and r >= model.ticks:
+        r = None
+    healthy = np.zeros(8)
+    healthy[0] = 1
+    permanent = np.zeros((8, 3))
+    pending = np.zeros((8, 3, 0 if r is None else r - 1))
+    bits = (np.arange(8)[:, None] & (1 << np.arange(3))) != 0
+    base, renewed = model.kernel_hazard(), model.kernel_hazard(rejoined=True)
+    cdf = np.zeros(model.ticks)
+    failed = 0.0
+    for t, fatal in enumerate(model.fatal_hazard()):
+        h = np.where(bits, renewed[t], base[t]) * susceptible
+        live = 1 - h
+        live3 = live.prod(axis=1)
+        live2 = np.stack([live[:, [j for j in range(3) if j != lane]].prod(axis=1)
+                          for lane in range(3)], axis=1)
+        one = h * live2
+        # Explicit products retain tiny double-stall probabilities.
+        multi = (h[:, 0] * h[:, 1] * live[:, 2] + h[:, 0] * h[:, 2] * live[:, 1]
+                 + h[:, 1] * h[:, 2] * live[:, 0] + h.prod(axis=1))
+        lost2 = np.stack([h[:, j] + h[:, k] - h[:, j] * h[:, k]
+                         for j, k in ((1, 2), (0, 2), (0, 1))], axis=1)
+        degraded = permanent + pending.sum(axis=2)
+        lost = float(healthy @ multi + (degraded * lost2).sum())
+        new = healthy[:, None] * one
+        next_healthy = healthy * live3
+        next_permanent = permanent * live2
+        if r is None:
+            next_permanent += new
+        else:
+            repairing = new if r == 1 else pending[:, :, 0] * live2
+            next_permanent += repairing * model.recovery_failure
+            for mask in range(8):
+                for lane in range(3):
+                    next_healthy[mask | (1 << lane)] += repairing[mask, lane] * (1 - model.recovery_failure)
+            if r > 1:
+                pending[:, :, :-1] = pending[:, :, 1:] * live2[:, :, None]
+                pending[:, :, -1] = new
+        surviving = float(next_healthy.sum() + next_permanent.sum() + pending.sum())
+        failed = min(1.0, failed + lost + surviving * fatal)
+        healthy = next_healthy * (1 - fatal)
+        permanent = next_permanent * (1 - fatal)
+        pending *= 1 - fatal
+        cdf[t] = failed
+    return cdf
+
+
+def analytic(model: Model) -> dict:
+    """Exact kernel frailty mixture × unrepaired controller majority survival.
+
+    Static writer and residual protection hazards are service-fatal. Frailty
+    draws are independent across physical kernel copies, retained after repair.
+    Controller draws are homogeneous and independent of the kernel/writer.
+    """
+    q = model.frailty_fraction
+    if q == 1 and model.post_rejoin_multiplier == 1:
+        cdf = _homogeneous_curve(model)
+    else:
+        cdf = np.zeros(model.ticks)
+        # Symmetric lane permutations: solve four configurations, not eight.
+        for count in range(4) if q < 1 else (3,):
+            weight = math.comb(3, count) * q**count * (1 - q)**(3 - count)
+            if weight:
+                cdf += weight * _lane_curve(model, tuple(int(i < count) for i in range(3)))
+    p_controller = -np.expm1(np.cumsum(_log_survival(model.controller_hazard)))
+    controller_cdf = p_controller**2 * (3 - 2 * p_controller)
+    cdf = -np.expm1(_log_survival(cdf) + _log_survival(controller_cdf))
+    failed = float(cdf[-1])
     global_log = float(_log_survival(model.global_common_mode).sum())
     return {
-        "group_failure": float(failed),
-        "campaign_failure": campaign_failure(float(failed), model.copies, global_log),
+        "group_failure": failed,
+        "controller_group_failure": float(controller_cdf[-1]),
+        "campaign_failure": campaign_failure(failed, model.copies, global_log),
         "group_failure_by_tick": cdf,
     }
 
@@ -199,15 +315,23 @@ def monte_carlo(model: Model, *, trials: int = 20000, seed: int = 108,
     _integer("trials", trials, 1)
     _integer("batch_size", batch_size, 1)
     rng = np.random.default_rng(seed)
-    stalls = _EventSampler(model.hazard)
+    stalls = _EventSampler(model.kernel_hazard())
+    renewed_stalls = _EventSampler(model.kernel_hazard(rejoined=True))
+    controllers = _EventSampler(model.controller_hazard)
     fatal = _EventSampler(model.fatal_hazard())
     global_shocks = _EventSampler(model.global_common_mode)
     failures = group_failures = 0
     for offset in range(0, trials, batch_size):
         count = min(batch_size, trials - offset)
         groups = count * model.copies
+        susceptible = (rng.random((groups, 3)) < model.frailty_fraction
+                       if model.frailty_fraction < 1 else np.ones((groups, 3), dtype=bool))
         next_stall = stalls.draw(np.zeros((groups, 3), dtype=int), rng)
+        next_stall[~susceptible] = model.ticks
         failed_at = fatal.draw(np.zeros(groups, dtype=int), rng)
+        if np.any(model.controller_hazard):
+            controller_events = controllers.draw(np.zeros((groups, 3), dtype=int), rng)
+            failed_at = np.minimum(failed_at, np.partition(controller_events, 1, axis=1)[:, 1])
         while True:
             lane = np.argmin(next_stall, axis=1)
             first = next_stall[np.arange(groups), lane]
@@ -227,7 +351,7 @@ def monte_carlo(model: Model, *, trials: int = 20000, seed: int = 108,
             # failed_at prevents further renewal of that group.
             next_stall[active, lane[active]] = model.ticks
             renew = ~overlap & (back < failed_at[active])
-            next_stall[active[renew], lane[active[renew]]] = stalls.draw(back[renew], rng)
+            next_stall[active[renew], lane[active[renew]]] = renewed_stalls.draw(back[renew], rng)
         group_failed = failed_at < model.ticks
         group_failures += int(group_failed.sum())
         global_failed = global_shocks.draw(np.zeros(count, dtype=int), rng) < model.ticks
@@ -292,6 +416,85 @@ def observed_hazard(normalize_to: float | None = 5e-5) -> np.ndarray:
                          normalize_to=normalize_to)
 
 
+def cadence_hazard(hazard: Rate, *, source_seconds: float = 5.84,
+                   tick_seconds: float = 13.0, time_fraction: float = 1.0) -> np.ndarray:
+    """Split integrated hazard into transaction-driven and elapsed-time terms.
+
+    alpha=0 preserves hazard per transaction; alpha=1 scales all exposure with
+    cadence, including idle holds. The split is an assumption, not a fit.
+    """
+    if (not math.isfinite(source_seconds) or source_seconds <= 0
+            or not math.isfinite(tick_seconds) or tick_seconds <= 0
+            or not math.isfinite(time_fraction) or not 0 <= time_fraction <= 1):
+        raise ValueError("positive finite cadence and time_fraction in [0, 1] required")
+    h = np.asarray(hazard, dtype=float)
+    if not np.all(np.isfinite(h)) or np.any((h < 0) | (h > 1)):
+        raise ValueError("hazard must be in [0, 1]")
+    scale = 1 - time_fraction + time_fraction * tick_seconds / source_seconds
+    return -np.expm1(_log_survival(h) * scale)
+
+
+def first_stall_estimate(stalls: int, *, copies: int = 100, ticks: int = 1000) -> dict:
+    """Campaign first-stall fraction and Wilson 95% interval mapped to constant h.
+
+    Assumes independent copies, one fixed build, and a constant active hazard.
+    This does not pool different builds/seeds or infer confidence in a TMR fit.
+    """
+    _integer("copies", copies, 1)
+    _integer("ticks", ticks, 1)
+    _integer("stalls", stalls, 0)
+    if stalls > copies:
+        raise ValueError("stalls must not exceed copies")
+
+    def to_h(p: float) -> float:
+        return 1.0 if p == 1 else -math.expm1(math.log1p(-p) / ticks)
+
+    interval = _wilson(stalls, copies)
+    return {"mission_failure": stalls / copies, "confidence_95": interval,
+            "hazard": to_h(stalls / copies),
+            "hazard_confidence_95": tuple(to_h(p) for p in interval)}
+
+
+def sensitivity_table() -> list[dict]:
+    """Reproducible assumptions for the design table; all are scenarios, not fits."""
+    scenarios = [
+        ("Ideal R=2 floor at h=5e-5", {}),
+        ("Low evidence envelope", {"hazard": 1.5e-5}),
+        ("4/100 constant-h estimate", {"hazard": first_stall_estimate(4)["hazard"]}),
+        ("5/100 constant-h estimate", {"hazard": first_stall_estimate(5)["hazard"]}),
+        ("6/100 including zero_once", {"hazard": first_stall_estimate(6)["hazard"]}),
+        ("9/100 old build", {"hazard": first_stall_estimate(9)["hazard"]}),
+        ("Half time-driven, 13s", {"hazard": float(cadence_hazard(5e-5, time_fraction=0.5))}),
+        ("Fully time-driven, 13s", {"hazard": float(cadence_hazard(5e-5))}),
+        ("Wide cadence/evidence envelope", {"hazard": 3e-4}),
+        ("1% failed repairs", {"recovery_failure": 0.01}),
+        ("10% failed repairs", {"recovery_failure": 0.1}),
+        ("No qualified repair: all fail", {"recovery_failure": 1.0}),
+        ("Unrepaired controllers, low", {"controller_hazard": 5e-6}),
+        ("Unrepaired controllers, illustrative", {"controller_hazard": 2.4e-5}),
+        ("Unrepaired controllers, kernel-scale", {"controller_hazard": 5e-5}),
+        ("Static writer, 1e-7", {"writer_hazard": 1e-7}),
+        ("Static writer, 1e-6", {"writer_hazard": 1e-6}),
+        ("10% persistent susceptible lanes", {"frailty_fraction": 0.1}),
+        ("5% persistent susceptible lanes", {"frailty_fraction": 0.05}),
+        ("Post-rejoin intensity x2", {"post_rejoin_multiplier": 2.0}),
+        ("Joint illustrative assumptions", {"hazard": float(cadence_hazard(5e-5)),
+          "recovery_failure": 0.01, "controller_hazard": 2.4e-5,
+          "writer_hazard": 1e-7, "frailty_fraction": 0.2}),
+    ]
+    rows = []
+    for label, kwargs in scenarios:
+        model = Model(**kwargs)
+        rows.append({"scenario": label, "hazard": float(model.hazard[0]),
+                     "f_repair": model.recovery_failure,
+                     "controller_hazard": float(model.controller_hazard[0]),
+                     "writer_hazard": float(model.writer_hazard[0]),
+                     "frailty_fraction": model.frailty_fraction,
+                     "post_rejoin_multiplier": model.post_rejoin_multiplier,
+                     "campaign_failure": analytic(model)["campaign_failure"]})
+    return rows
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticks", type=int, default=1000)
@@ -299,7 +502,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--hazard", type=float, default=5e-5)
     parser.add_argument("--profile", choices=("constant", "observed"), default="constant")
     parser.add_argument("--recovery-ticks", default="2", help="lost service ticks including failure tick, or none")
-    parser.add_argument("--recovery-failure", type=float, default=0.0)
+    parser.add_argument("--recovery-failure", "--f-repair", type=float, default=0.0)
+    parser.add_argument("--controller-hazard", type=float, default=0.0)
+    parser.add_argument("--writer-hazard", type=float, default=0.0)
+    parser.add_argument("--frailty-fraction", type=float, default=1.0)
+    parser.add_argument("--post-rejoin-multiplier", type=float, default=1.0)
+    parser.add_argument("--tick-seconds", type=float, default=5.84)
+    parser.add_argument("--time-fraction", type=float, default=1.0)
+    parser.add_argument("--sensitivity", action="store_true", help="print design sensitivity table")
     parser.add_argument("--voter-failure", type=float, default=0.0)
     parser.add_argument("--watchdog-failure", type=float, default=0.0)
     parser.add_argument("--common-mode", type=float, default=0.0)
@@ -307,14 +517,21 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--trials", type=int, default=20000, help="whole Monte Carlo campaigns; 0 skips sampling")
     parser.add_argument("--seed", type=int, default=108)
     args = parser.parse_args(argv)
+    if args.sensitivity:
+        print(json.dumps(sensitivity_table(), indent=2, allow_nan=False))
+        return
     try:
         _integer("trials", args.trials, 0)
         if args.profile == "observed" and args.ticks != 1000:
             raise ValueError("observed profile is defined only for 1000 ticks")
         h = observed_hazard(args.hazard) if args.profile == "observed" else args.hazard
+        h = cadence_hazard(h, tick_seconds=args.tick_seconds, time_fraction=args.time_fraction)
         r = None if args.recovery_ticks.lower() == "none" else int(args.recovery_ticks)
         model = Model(ticks=args.ticks, copies=args.copies, hazard=h, recovery_ticks=r,
                       recovery_failure=args.recovery_failure, voter_failure=args.voter_failure,
+                      controller_hazard=args.controller_hazard, writer_hazard=args.writer_hazard,
+                      frailty_fraction=args.frailty_fraction,
+                      post_rejoin_multiplier=args.post_rejoin_multiplier,
                       watchdog_failure=args.watchdog_failure, common_mode=args.common_mode,
                       global_common_mode=args.global_common_mode)
     except (ValueError, TypeError) as error:
@@ -322,7 +539,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     exact = analytic(model)
     exact.pop("group_failure_by_tick")
     report = {
-        "assumption": "independent replica stalls; healthy results correct; repair restores readiness",
+        "assumption": "sensitivity only; ideal case is a floor, not a forecast; static frailty; "
+                      "healthy results correct; unrepaired controller lanes; static single writer",
         "parameters": vars(args),
         "unreplicated_stalls_only": unreplicated_failure(model.hazard, ticks=model.ticks, copies=model.copies),
         "analytic": exact,
