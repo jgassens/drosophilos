@@ -1,9 +1,22 @@
 # Stable storage with rate-conditioned readers: measured frontier
 
-**None of the evaluated combinations qualifies. The reserved `stable_latch`
-option has been removed from Drive, builders, records, CLIs, diagnostics and
-Stage D rechecks.** Production storage and the control machine are unchanged.
-Candidate circuits exist only in `tests/test_stable_latch.py`.
+**None of the evaluated combinations meets all six qualification requirements.**
+The 0.2-loop autapse is available for Stage D measurement as the recorded,
+explicitly EXPERIMENTAL `build_pipeline(..., experimental_autapse=True)` opt-in.
+It **requires `rate_robust=True`** and remains **unqualified on the 44-step rate
+floor and reload margin**. Defaults retain their ordered netlist fingerprints;
+the control machine is unchanged.
+
+Both `stage_d` and `kernel_campaign` expose `--experimental-autapse` with
+`--rate-robust`. Campaign records retain the choice in build options,
+`stall_diag` rebuilds it, and Stage D `--recheck` honours saved options.
+Missing flags in older records default to false. All eight combinations of
+`zero_once`, `robust_request_clear` and `experimental_register_reset` are
+allowed, subject to those options' existing restrictions. Each combination
+builds and computes 0, 3, 1 on the 2-bit ADD → XOR kernel; two-copy full mix-B
+checks cover autapse alone and all three options together. The rejected
+`robust_register_reset` and `verified_register_reset` policies remain rejected.
+These finite checks authorize measurement, not qualification.
 
 The earlier claim that the autapse fails with `rate_robust` readers was a **probe
 artifact**. `_modify` passed local inhibitory feedback to `net.synapse`, which
@@ -11,8 +24,9 @@ also copied it at gain 16 into existing readers and into required-rail qualifier
 A latch spike consequently suppressed its own consumers. The fixed transform
 builds all consumers first, suppresses mirroring only while adding local feedback,
 and preserves genuine reset/kill mirrors. A regression checks pre-existing resets
-and resets added after the transform. This construction order is a test-fixture
-constraint, not a new production Netlist API.
+and resets added after the transform. The kernel builder applies the same
+transform after all consumers and controllers are wired, including compact
+register resets. No reader is installed afterward.
 
 With that correction, autapse + readers computes **0, 3, 1 with zero faults** in
 the multi-cell kernel, including with the other options enabled. It remains
@@ -23,7 +37,8 @@ inputs, and the kernel stops after its first output.
 
 ## The six requirements
 
-All six must pass before an opt-in implementation is justified:
+All six are qualification gates. The experimental campaign opt-in does not claim
+to pass them:
 
 1. **Rate floor:** settled storage intervals are at least 44 steps, including
    independent three-sigma weight, threshold and bias corners, both ignition
@@ -51,14 +66,18 @@ Finite stochastic probes do not prove indefinite holding or absolute bounds
 under unbounded Gaussian tails. Failures below are concrete refutations; passes
 are limited to the stated exposures and conditions.
 
-| Requirement, with readers | Autapse | High gain | More rate margin |
-|---|---|---|---|
-| 1. Storage interval ≥44 | fails: 36 | measured floor 46 | measured floor 54 |
-| 2. Holding | no observed dropout | no observed dropout | no observed dropout |
-| 3. Ordinary clear | zero survivors in all eight surveys | fails | fails |
-| 4. Recovery versus legacy | worse in all eight comparisons | undefined after failed clears in seven | undefined after failed clears in seven |
-| 5. Gate inputs | passes tested cases | misses slow-corner conjunctions | misses slow-corner conjunctions |
-| 6. Multi-cell kernel | correct with options off/on | only first output | only first output |
+| Requirement, with readers | Legacy | Autapse | High gain | More rate margin |
+|---|---|---|---|---|
+| 1. Storage interval ≥44 | fails: 32 | fails: 36 | measured floor 46 | measured floor 54 |
+| 2. Holding | no observed dropout | no observed dropout | no observed dropout | no observed dropout |
+| 3. Ordinary clear | fails captures: 51 / 1220 / 10 / 39 / 80; mix B: 0 | zero survivors in all eight surveys | fails | fails |
+| 4. Recovery versus legacy | comparison baseline | worse in all eight comparisons | undefined after failed clears in seven | undefined after failed clears in seven |
+| 5. Gate inputs | passes tested cases | passes tested cases | misses slow-corner conjunctions | misses slow-corner conjunctions |
+| 6. Multi-cell kernel | correct with options off/on | correct with options off/on | only first output | only first output |
+
+Clear counts are survivors per 40,000 trials, ordered request28, master74,
+master17, master24, stage18. Autapse improves clears over legacy; its remaining
+qualification failures are the absolute rate floor and lost reload margin.
 
 ## Circuits, methods and search coverage
 
@@ -159,9 +178,11 @@ live storage in the 200 steps before it. A suppressed reader does not excuse
 live storage behind it.
 
 The five captures are request RR copy 28, master base copies 74/17, master RR
-copy 24 and stage Z0 base copy 18. Old edges, thresholds and biases retain their
-reconstructed seed-108, B=100 draws. Added feedback/reader edges receive new
-independent mix-B draws; new reader threshold/bias draws are independent too.
+copy 24 and stage Z0 base copy 18. Storage/controller edges, thresholds and
+biases retain their reconstructed seed-108, B=100 draws. Feedback edges receive
+independent mix-B draws. Readers and their edges are rebuilt and sampled
+independently, including master24, whose capture already had rate readers;
+its captured reader parameters are not replayed.
 Reader reset mirrors are genuine controller edges. New mirrors start at nominal
 weights, including in request 28, whose fixture stores old captured weights
 directly in its netlist. The captured old draws are reapplied only to old edges.
@@ -175,10 +196,13 @@ in each of eight scenarios**, 320,000 trials per design. Autapse has zero storag
 and reader survivors in every scenario. Both high-gain candidates leave
 40,000/40,000 storage survivors at fast three sigma; legacy leaves 14/40,000,
 despite clearing all 256 smoke trials. At slow three sigma, high gain clears
-all trials, but the longer-delay candidate leaves 6/40,000 survivors; that rare
-failure also escapes the smoke test. Captured and mix-B scenarios refute both
-high-gain designs as well. The exceptions and their matching reader-survivor
-counts are asserted. Autapse's clear success cannot remove its separate
+all trials, but the longer-delay candidate leaves 6/40,000 survivors.
+Captured and mix-B scenarios refute both high-gain designs as well. Legacy
+storage-survivor counts on the five captures and mix B are asserted as
+51 / 1220 / 10 / 39 / 80 / 0. Exact matching reader-survivor counts are asserted
+for legacy, autapse and the slow-corner high-gain cases; the other high-gain
+cases assert storage and reader survivors are nonzero, without claiming equal
+counts. Autapse's clear success cannot remove its separate
 rate-floor and recovery failures.
 
 Recovery uses the same ordinary controller and a 25-step offset grid, with 15
@@ -256,35 +280,42 @@ actual-path reload behavior.
 
 Autapse and both high-gain designs add **0 neurons / 2 feedback synapses per
 latch**. An isolated candidate is 2 neurons / 4 synapses, or 3 / 5 with one reader
-before reset fan-out. The whole kernel adds **0 neurons / 498 synapses**, with
-or without readers. The earlier +630 count included 132 erroneous feedback
+before reset fan-out. The 2-bit ADD → XOR kernel adds **0 neurons / 498 synapses**,
+with or without readers. The earlier +630 count included 132 erroneous feedback
 mirrors and is withdrawn. Existing reader/qualifier reset fan-out stays intact.
 High gain also multiplies both excitatory loop weights by 8 and adds two 6-loop
 inhibitory weights; its charge cost is much larger despite the same edge count.
 
-Since no combination qualifies, no stable-latch flag, Drive field, build-option
-record key or rebuild plumbing is retained. The previous source and
-`test_build_options.py` additions are reverted; only this document and the
-qualification probes extend the pre-experiment code. Existing ordered
-kernel/machine fingerprints check the unchanged production circuits.
+The 8-bit tick kernel has **3,215 latch pairs**. With rate readers and the
+experimental autapse it has **30,643 neurons / 62,366 synapses**: **+0 neurons /
++6,430 synapses** versus the rate-reader baseline (30,643 / 55,936), or +1,268 /
++9,558 versus the default kernel. Ordered probe equality and these counts are
+asserted.
 
-Required command:
+A nominal float64 RefSim Stage D run, generic datapath, other options off,
+tokens 5, 5, 250, 3 (`tokens_for(4, 0)`), matches all four canonical states with
+zero faults, timeouts and bad decodes. Tick completion times relative to the
+first input load are 11,802.7 / 17,170.8 / 23,369.8 / 28,738.4 ms. The first tick
+takes **11,802.7 ms**; mean subsequent per-tick latency is **5,645.2 ms**
+((last minus first) / 3). This short nominal measurement is not Stage D
+qualification. Reproduce with:
 
 ```sh
-TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
+python -m drosophilos.bench.stage_d --backend ref --mix none --ticks 4 --seed 0 --c-ticks 0 --max-ms 120000 --rate-robust --experimental-autapse
 ```
 
-The sandbox blocks uv's default cache (`~/.cache/uv/sdists-v9/.git`). Validation
-uses `uv run --no-sync`, the existing repository virtualenv, this worktree on
-`PYTHONPATH`, and task-local cache/temp directories. Slow tests retain every
-screen-passer refutation, 40,000-trial scenarios, holding/distribution exposures,
-gate controls, recovery comparisons and the corrected multi-cell results.
+The tick-kernel transform is checked edge-for-edge against the committed probe,
+including ordered edges, weights, delays, biases, image and mirror registry.
+Default kernel and control-machine fingerprints remain regression checks.
+`tests/test_experimental_autapse.py` covers the allowed combinations and small
+noisy kernels; `tests/test_build_options.py` exercises both CLIs, saved records,
+diagnostic rebuilds and recheck.
 
-The final fast selection passes **131 tests**, with 89 slow tests deselected.
-All **88 stable-latch slow cases** pass across scenario partitions and targeted
-reruns: 32 clear cases (1,280,000 trials), 21 search/recovery cases and 35
-gate/holding/distribution/kernel cases. The request-draw preservation and
-recovery checks were rerun after correcting its new-mirror weights. Production
-source and `test_build_options.py` match `9f2190c^` exactly; relative to that
-pre-experiment commit, only this document and `test_stable_latch.py` differ.
-No commit is attempted; the orchestrator owns integration and commits.
+Required fast validation:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_experimental_autapse.py tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
+```
+
+Slow qualification probes retain search-passer refutations, 40,000-trial
+surveys, holding/distribution exposures, gate controls and recovery comparisons.

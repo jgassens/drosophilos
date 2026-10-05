@@ -35,7 +35,6 @@ ASYMMETRIC = ("none", .95, 0., 24, 60, 0.)
 HIGH_GAIN = ("auto22", 8., 6., 22, 22, 0.)
 HIGH_MARGIN = ("auto22", 8., 6., 26, 26, 0.)
 COMBINATIONS = (AUTAPSE, HIGH_GAIN, HIGH_MARGIN)
-REPRESENTATIVES = (LEGACY, AUTAPSE, ZERO_DELAY, SHARED, ASYMMETRIC, HIGH_GAIN)
 # Correlated corners are only an initial screen. Independent signs follow below.
 SCREEN_CORNERS = (
     (1., 1., 0., 0.),
@@ -276,7 +275,11 @@ RELOAD_ROWS = (("nominal", 675, 700), ("fast3sigma", 425, 500),
 
 
 def clear_fixture(config, case, *, ready=False, rate=False):
-    """Keep reconstructed OLD-edge draws; new feedback edges have no capture draw."""
+    """Keep reconstructed storage/controller draws; sample feedback/readers afresh.
+
+    Even master24, captured with rate readers, uses a rebuilt reader with fresh
+    independent parameters here. This is a storage-conditioned probe, not replay.
+    """
     from test_completion_stall import _map
     from test_request_clear_entrainment import _circuit
     from test_robust_reset import CAPTURES as REGISTERS
@@ -458,9 +461,10 @@ def kernel_probe(config, *, rate=False, other_options=False, max_ms=6000):
 
 
 def false_fault_probe(config, *, rate=False):
-    """The fast_latch copy-73 gate probe, driven by a real fast30 source latch.
+    """The synthetic copy-73 gate stress, driven by real candidate source latches.
 
-    Its ±.8 mV/+.5 mV gate offsets are the earlier synthetic reproduction,
+    Its loop x1.3, -1.2/+0.6 mV source and -0.8/+0.5 mV gate offsets
+    reproduce the earlier synthetic stress,
     not captured gate draws and not a combined three-sigma corner.
     """
     net = Netlist(P)
@@ -717,16 +721,17 @@ def test_40000_ordinary_clears_with_readers(config, case):
     assert result["copies"] == 40_000 and result["not_live_before_clear"] == 0
     if config == AUTAPSE:
         assert result["survivors"] == result["reader_survivors"] == 0
+    elif config == LEGACY:
+        expected = dict(zip(CAPTURES, (51, 1220, 10, 39, 80)))
+        expected.update(fast3sigma=14, slow3sigma=0, mix_b=0)
+        assert result["survivors"] == result["reader_survivors"] == expected[case]
     elif case == "slow3sigma":
-        # The smoke test misses this rare failure of the longer-delay candidate.
         assert result["survivors"] == result["reader_survivors"] == (6 if config == HIGH_MARGIN else 0)
     elif config in (HIGH_GAIN, HIGH_MARGIN):
         assert result["survivors"] > 0
+        assert result["reader_survivors"] > 0
         if case == "fast3sigma":
             assert result["survivors"] == 40_000
-    elif case == "fast3sigma":
-        # Legacy is a control, not an assumption of perfection under strays.
-        assert result["survivors"] == result["reader_survivors"] == 14
 
 
 @pytest.mark.slow

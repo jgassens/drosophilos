@@ -33,7 +33,7 @@ def _upper95(errors: int, n: int) -> float:
 def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: bool = False,
           zero_once: bool = False, robust_request_clear: bool = False,
           robust_register_reset: bool = False, verified_register_reset: bool = False,
-          experimental_register_reset: bool = False):
+          experimental_register_reset: bool = False, experimental_autapse: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -63,7 +63,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         zero_once=zero_once, robust_request_clear=robust_request_clear,
                         robust_register_reset=robust_register_reset,
                         verified_register_reset=verified_register_reset,
-                        experimental_register_reset=experimental_register_reset)
+                        experimental_register_reset=experimental_register_reset,
+                        experimental_autapse=experimental_autapse)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -83,6 +84,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--experimental-autapse", action="store_true",
+                    help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
@@ -109,7 +112,8 @@ def main(argv=None):
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
                               robust_register_reset=a.robust_register_reset,
                               verified_register_reset=a.verified_register_reset,
-                              experimental_register_reset=a.experimental_register_reset)
+                              experimental_register_reset=a.experimental_register_reset,
+                              experimental_autapse=a.experimental_autapse)
     B = a.copies
     dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
     if any(dump_given) and not all(dump_given):

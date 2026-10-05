@@ -43,6 +43,7 @@ CURRENT_PIPELINE_OPTIONS = {
     "robust_register_reset": False,
     "verified_register_reset": False,
     "experimental_register_reset": False,
+    "experimental_autapse": False,
     "request_clear_pulses": 4,
     "kernel_kill_pulses": 4,
     "true_guards": True,
@@ -148,6 +149,7 @@ def test_build_options_record_every_netlist_shaping_option():
         "robust_register_reset": False,
         "verified_register_reset": False,
         "experimental_register_reset": False,
+        "experimental_autapse": False,
         "request_clear_pulses": 5,
         "kernel_kill_pulses": 6,
         "true_guards": False,
@@ -185,6 +187,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "robust_register_reset": False,
         "verified_register_reset": False,
         "experimental_register_reset": False,
+        "experimental_autapse": False,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -366,8 +369,13 @@ def test_conditioned_rates_are_recorded_rebuilt_and_shared():
 
 @pytest.mark.parametrize("rate_robust", [False, True])
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse"])
 def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, datapath, option):
+    if option == "experimental_autapse" and not rate_robust:
+        with pytest.raises(ValueError, match="experimental_autapse requires rate_robust=True"):
+            kernel_campaign.block("tick", PARAMS, rate_robust=False, datapath=datapath,
+                                  experimental_autapse=True)
+        return
     _, pl, _, _ = kernel_campaign.block("tick", PARAMS, rate_robust=rate_robust,
                                        datapath=datapath, **{option: True})
     assert pl.build_options[option] is True
@@ -385,7 +393,7 @@ def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, 
         _assert_conditioned_train_inputs(pl.net, pl.drive)
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse"])
 def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch, option):
     real_block = kernel_campaign.block
     seen = {}
@@ -408,7 +416,8 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     monkeypatch.setattr(kernel_campaign, "run_pipeline_batched", fake_run)
     out = tmp_path / "campaign.json"
     kernel_campaign.main(["tick", "--copies", "1", "--max-ms", "1",
-                          "--" + option.replace("_", "-"), "--out", str(out)])
+                          "--" + option.replace("_", "-"), "--out", str(out),
+                          *(["--rate-robust"] if option == "experimental_autapse" else [])])
     record = json.loads(out.read_text())
     assert seen[option] is seen["build"][1].build_options[option] is True
     assert record[option] is True
@@ -416,7 +425,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse"])
 def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 
