@@ -134,15 +134,18 @@ def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
 
 def build_tick_pipeline(campaign: dict[str, Any]):
     """Rebuild kernel_campaign tick or Stage D, including its output selection."""
-    # Compiled build options take precedence over top-level CLI fields.
-    campaign = {**campaign, **campaign.get("build_options", {})}
+    # Stage D records store compiled options separately from top-level metadata.
+    # Keep the historical top-level precedence for kernel_campaign records.
+    if campaign.get("stage") == "D":
+        campaign = {**campaign, **campaign.get("build_options", {})}
     if campaign.get("block", "tick") != "tick":
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
     from ..lib.kernel import TRUE_GUARD_VERSION
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
 
     recorded_autapse_version = campaign.get("experimental_autapse_version", 1)
-    if recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION:
+    if (campaign.get("experimental_autapse", False) and
+            recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION):
         raise ValueError("unsupported experimental-autapse circuit: recorded "
                          f"experimental_autapse_version is {recorded_autapse_version!r}, "
                          f"while the current circuit is version {EXPERIMENTAL_AUTAPSE_VERSION}")

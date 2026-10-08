@@ -333,7 +333,7 @@ diagnostic rebuilds and recheck.
 Required fast validation:
 
 ```sh
-uv run pytest -q tests/test_experimental_autapse.py tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_experimental_autapse.py tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
 ```
 
 Slow qualification probes retain search-passer refutations, 40,000-trial

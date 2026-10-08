@@ -218,8 +218,10 @@ def test_version_enforced_by_rebuild_and_recheck(stage):
 
 
 def test_nested_version_takes_precedence():
-    record = {"experimental_autapse_version": 2,
-              "build_options": {"experimental_autapse_version": 1}}
+    k = stage_d.load_kernel(stage_d.PROGRAM)
+    pl = stage_d.build(k, P, "generic", rate_robust=True, experimental_autapse=True)
+    record = {"stage": "D", "experimental_autapse_version": 2,
+              "build_options": dict(pl.build_options)}
     build_tick_pipeline(record)
     stage_d.recheck_record(record)
     record["experimental_autapse_version"] = 1
@@ -228,3 +230,31 @@ def test_nested_version_takes_precedence():
         build_tick_pipeline(record)
     with pytest.raises(ValueError, match="unsupported experimental-autapse circuit"):
         stage_d.recheck_record(record)
+
+
+@pytest.mark.parametrize("version", [None, 2])
+@pytest.mark.parametrize("stage", [False, True])
+def test_autapse_off_ignores_version_for_rebuild_and_recheck(stage, version):
+    if stage:
+        k = stage_d.load_kernel(stage_d.PROGRAM)
+        pl = stage_d.build(k, P, "generic", rate_robust=True, experimental_autapse=False)
+        options = dict(pl.build_options)
+        if version is None:
+            options.pop("experimental_autapse_version", None)
+        else:
+            options["experimental_autapse_version"] = version
+        record = {"stage": "D", "build_options": options}
+    else:
+        _, pl, _, _ = kernel_campaign.block("tick", P, rate_robust=True,
+                                            experimental_autapse=False)
+        record = {"block": "tick", **pl.build_options}
+        if version is None:
+            record.pop("experimental_autapse_version", None)
+        else:
+            record["experimental_autapse_version"] = version
+
+    if stage:
+        build_tick_pipeline(record)
+        stage_d.recheck_record(record)
+    else:
+        build_tick_pipeline(record)
