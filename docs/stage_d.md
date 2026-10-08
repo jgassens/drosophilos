@@ -300,7 +300,21 @@ internal pending-cell/request state; those fields are explicitly `null`, rather 
 empty list that would claim nothing was pending. Raw load and commit events remain available
 for rechecking, which preserves the saved stall evidence.
 
-## 8. What this does NOT cover
+## 8. Campaign D result (2026-10-08)
+
+**The Stage D 1,000-tick mix-B exit is met with `--rate-robust --experimental-autapse` on two seeds.** This is the exit defined above: 0 faults, 0 timeouts, 0 wrong, 0 missing, and not truncated, with exactly-once commits checkable from the saved events.
+
+Campaign D used generic `tick2.c`, 1,000 ticks × 100 copies, mix B, commit `f71538c` (merged `28caa66`). The integrator reran `stage_d --recheck` on both passing records. Seed 108 (Juno 443026) and seed 109 (Juno 443063) each report 100/100 copies matched, 100,000/100,000 ticks, and 0 wrong, faults, timeouts, stalls, refusals, or retries. The build has 30,643 neurons and 6,430 added autapse synapses versus the rate-reader build; nominal measured steady tick time is about 5,645 ms.
+
+For seed 108 with the same scorer: no fix (Juno 426357, `ad4046d`) had 96 matched, 4 stalled and 1 fault; `rate_robust` only (Juno 426358) had 95 matched, 5 stalled and 1 fault; `zero_once` only (Juno 441839, `7ec3ddf`) had 94 matched, 6 stalled and 0 faults; campaign C, `zero_once + robust_request_clear + experimental_register_reset` (Juno 442659, `c8e94c6`), had 99 matched, 1 stalled (copy 77 at 517 ticks), 3 faults, 1 refusal and 1 retry, so did not meet exit. The older build (Juno 425033) had 91 matched, 9 stalled and 5 faults.
+
+With 0 stalled of 200 copies, the exact one-sided 95% binomial upper bound on the per-copy 1,000-tick stall probability is `1 - 0.05^(1/200) = 0.0148670` (1.4867%). One-sided Fisher exact tests for fewer stalls in Campaign D give p=0.00040724 against the pooled seed-108 no-autapse baselines (15/300: 4+5+6), and p=0.00137452 when campaign C is included (16/400). The seeds draw different noise; changed builds also re-draw noise by index. These are rate comparisons, not paired-copy comparisons.
+
+All reviewed `stage_d_*_stall.md` classes reduce to a fast or entrained latch surviving a four-pulse clear: stage Z0, request latch, or master rail. Completion's mechanism was confirmed by capture Juno 441837. The autapse caps the failure at the latch itself.
+
+Open items: the autapse is formally unqualified on the isolated 44-step rate floor and reload margin; it is applied to all 3,215 kernel latches while the 40,000-trial surveys cover only request, master and stage cases; only two seeds have passed; the nominal 1,000-tick run is queued (Juno 448740) and must pass before changing the default; and the option remains non-default. Review follow-ups remain: restrict the transform to the reviewed kernel construction order (after all consumers/controllers, including compact resets, with no later reader installation), and add a version key for the experimental-autapse netlist so diagnostic rebuild/recheck can reject an ambiguous future transform.
+
+## 9. What this does NOT cover
 
 - **TMR and the commit log**: the plan's Stage D puts `minidoom` `p_*` on control nodes with
   triple modular redundancy and a commit log. Neither exists; this is the resident-kernel form
