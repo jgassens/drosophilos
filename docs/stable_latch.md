@@ -7,6 +7,12 @@ It **requires `rate_robust=True`** and remains **unqualified on the 44-step rate
 floor and reload margin**. Defaults retain their ordered netlist fingerprints;
 the control machine is unchanged.
 
+## Campaign result (2026-10-08)
+
+The option fails two isolated proxy requirements — the 44-step rate floor and reload margin — but meets the Stage D exit. Campaign D, `tick2.c` mix B, 1,000 ticks × 100 copies, `--rate-robust --experimental-autapse` (`f71538c`, merged `28caa66`), was rechecked by the integrator on seed 108 (Juno 443026) and seed 109 (Juno 443063): each was 100/100 matched and 100,000/100,000 ticks, with 0 wrong, faults, timeouts, stalls, refusals and retries. This is a Stage D result, not qualification or a default change.
+
+The build has 30,643 neurons and +6,430 synapses versus rate readers; the autapse is applied to all 3,215 kernel latches. It caps the reviewed four-pulse-clear failure classes at the latch (stage Z0, request and master rail; completion capture Juno 441837), but 40,000-trial surveys cover only those request/master/stage cases. Two seeds are insufficient; nominal 1,000-tick Juno 448740 remains queued and must pass before a default change. Keep the transform restricted to the reviewed construction order — after all consumers/controllers, including compact resets, and before no later reader installation — and add an experimental-autapse version key for future identity-gated rebuild/recheck.
+
 Both `stage_d` and `kernel_campaign` expose `--experimental-autapse` with
 `--rate-robust`. Campaign records retain the choice in build options,
 `stall_diag` rebuilds it, and Stage D `--recheck` honours saved options.

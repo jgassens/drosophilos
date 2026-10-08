@@ -1127,6 +1127,16 @@ writes. Validation used the same tests with
 `PYTHONPATH=. UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv TMPDIR="$PWD/.tmp" uv run --no-sync --no-cache pytest`,
 plus `-o addopts='' -q` for counts/timings. Work remains uncommitted for integration.
 
+## Campaign D Stage D exit (2026-10-08)
+
+**The Stage D 1,000-tick mix-B exit is met with `--rate-robust --experimental-autapse` on two seeds.** Campaign D is `tick2.c`, 1,000 ticks × 100 copies, mix B, `f71538c` / merged `28caa66`. Integrator `stage_d --recheck` on seed 108 (Juno 443026) and seed 109 (Juno 443063) verified exactly-once/count evidence and, for each record, 100/100 copies matched, 100,000/100,000 ticks, 0 wrong, faults, timeouts, stalls, refusals and retries; neither run is truncated. The configuration has 30,643 neurons and +6,430 autapse synapses versus rate readers; nominal steady tick time is ~5,645 ms.
+
+Seed-108 comparisons under the same scorer are: no fix (Juno 426357, `ad4046d`) 96 matched / 4 stalled / 1 fault; `rate_robust` only (426358) 95 / 5 / 1; `zero_once` only (441839, `7ec3ddf`) 94 / 6 / 0; campaign C, `zero_once + robust_request_clear + experimental_register_reset` (442659, `c8e94c6`) 99 / 1 stalled (copy 77 at 517 ticks) / 3 faults / 1 refusal / 1 retry, exit not met; older build (425033) 91 / 9 / 5.
+
+The exact one-sided 95% binomial upper bound from 0/200 stalled copies is 1.4867%. One-sided Fisher exact p is 0.00040724 against the 15/300 pooled no-autapse seed-108 baselines, and 0.00137452 against 16/400 when campaign C is included. Seeds draw different noise and build changes redraw it by index, so these compare rates, not matched copies.
+
+All reviewed `stage_d_*_stall.md` classes are fast or entrained latches surviving a four-pulse clear: stage Z0, request latch or master rail; Juno 441837 confirmed the completion mechanism. The autapse caps the fault at that latch. It remains experimental and non-default: it fails isolated 44-step-floor and reload-margin qualification, is installed on all 3,215 kernel latches although 40,000-trial surveys cover only request/master/stage, has two passing seeds only, and awaits the queued nominal 1,000-tick run (Juno 448740) before any default change. Follow-ups are the reviewed kernel-construction-order restriction (apply after all consumers/controllers, including compact resets, and add no reader afterward) and an experimental-autapse version key for unambiguous rebuild/recheck.
+
 ## Stage D exit and replay status (2026-10-01)
 
 The Stage D scorer was corrected in `c9f5a83` (sol). It now orders each field by its
