@@ -12,6 +12,12 @@ from ..lib.netlist import Drive, Netlist
 from ..sim.model import D_MAX
 
 
+# Version 1 is the circuit built by f71538c..63c41f8. Bump on retuning.
+EXPERIMENTAL_AUTAPSE_VERSION = 1
+EXPERIMENTAL_AUTAPSE_GAIN = 0.2
+EXPERIMENTAL_AUTAPSE_DELAY_STEPS = 0
+
+
 # Physical timing choices, independent of the simulator's delay-ring capacity.
 COMPACT_READY_DELAY_STEPS = 100
 COMPACT_READY_TAIL_LINKS = 8
@@ -59,7 +65,8 @@ def add_experimental_autapses(net: Netlist, drive: Drive) -> None:
     try:
         for latch in latches:
             for member in latch.members:
-                net.synapse(member, member, -round(drive.loop * .2), 0)
+                net.synapse(member, member, -round(drive.loop * EXPERIMENTAL_AUTAPSE_GAIN),
+                            EXPERIMENTAL_AUTAPSE_DELAY_STEPS)
     finally:
         net.inhibition_mirrors = mirrors
 

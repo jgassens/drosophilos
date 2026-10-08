@@ -50,7 +50,10 @@ import numpy as np
 
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
-from ..protocol.latch import Latch, add_edge_relay, add_experimental_autapses, add_latch, connect_trigger
+from ..protocol.latch import (
+    EXPERIMENTAL_AUTAPSE_VERSION, Latch, add_edge_relay, add_experimental_autapses,
+    add_latch, connect_trigger,
+)
 from ..protocol.token import decode_recent, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
@@ -335,13 +338,20 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     explicitly experimental, not an alias for either rejected robust option.
     Producer and machine resets retain their original policy; off is unchanged.
     `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
-    It adds zero-delay, 0.2-loop inhibitory feedback to each kernel latch member,
+    Memories/RAM, phases/pacing, multiple streams and multipliers are rejected;
+    generic and specialized datapaths are allowed. It adds zero-delay, 0.2-loop
+    inhibitory feedback to each kernel latch member,
     without mirroring feedback onto readers. It is unqualified on the 44-step
     rate floor and reload margin. All combinations of zero_once,
     robust_request_clear and experimental_register_reset are allowed, subject
     to their existing restrictions; the control machine is unchanged."""
     if experimental_autapse and not rate_robust:
         raise ValueError("experimental_autapse requires rate_robust=True")
+    if experimental_autapse and (mems or phases or (streams and len(streams) != 1) or
+                                 any(cs["op"] in {"MUL", "MULP", "MULP_ROW"} for cs in spec)):
+        raise ValueError("experimental_autapse supports only single-stream kernels without "
+                         "memories/RAM, phases/pacing or multipliers; these shapes have no "
+                         "probe or campaign evidence (generic and specialized datapaths allowed)")
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:
@@ -960,6 +970,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "verified_register_reset": verified_register_reset,
         "experimental_register_reset": experimental_register_reset,
         "experimental_autapse": experimental_autapse,
+        "experimental_autapse_version": EXPERIMENTAL_AUTAPSE_VERSION,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,

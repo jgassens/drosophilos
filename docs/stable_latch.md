@@ -11,12 +11,25 @@ the control machine is unchanged.
 
 The option fails two isolated proxy requirements — the 44-step rate floor and reload margin — but meets the Stage D exit. Campaign D, `tick2.c` mix B, 1,000 ticks × 100 copies, `--rate-robust --experimental-autapse` (`f71538c`, merged `28caa66`), was rechecked by the integrator on seed 108 (Juno 443026) and seed 109 (Juno 443063): each was 100/100 matched and 100,000/100,000 ticks, with 0 wrong, faults, timeouts, stalls, refusals and retries. This is a Stage D result, not qualification or a default change.
 
-The build has 30,643 neurons and +6,430 synapses versus rate readers; the autapse is applied to all 3,215 kernel latches. It caps the reviewed four-pulse-clear failure classes at the latch (stage Z0, request and master rail; completion capture Juno 441837), but 40,000-trial surveys cover only those request/master/stage cases. Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse`, Juno 448740, commit `474a8ee`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 30,643 neurons, 5,736.6 s neural, 3 h 10 min wall on one H200. Stage D's exit (nominal plus 100-copy mix B on seeds 108 and 109) is now met with this configuration. Only two mix-B seeds have passed; the option remains experimental and non-default, and the isolated 44-step rate floor and reload margin remain unqualified. Keep the transform restricted to the reviewed construction order — after all consumers/controllers, including compact resets, and before any later reader installation — and add an experimental-autapse version key for future identity-gated rebuild/recheck. Toy tick results remain labeled as such.
+The build has 30,643 neurons and +6,430 synapses versus rate readers; the autapse is applied to all 3,215 kernel latches. It caps the reviewed four-pulse-clear failure classes at the latch (stage Z0, request and master rail; completion capture Juno 441837), but 40,000-trial surveys cover only those request/master/stage cases. Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse`, Juno 448740, commit `474a8ee`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 30,643 neurons, 5,736.6 s neural, 3 h 10 min wall on one H200. Stage D's exit (nominal plus 100-copy mix B on seeds 108 and 109) is now met with this configuration. Only two mix-B seeds have passed; the option remains experimental and non-default, and the isolated 44-step rate floor and reload margin remain unqualified. Keep the transform restricted to the reviewed construction order — after all consumers/controllers, including compact resets, and before any later reader installation — with version-gated rebuild/recheck. Toy tick results remain labeled as such.
 
 Both `stage_d` and `kernel_campaign` expose `--experimental-autapse` with
 `--rate-robust`. Campaign records retain the choice in build options,
 `stall_diag` rebuilds it, and Stage D `--recheck` honours saved options.
-Missing flags in older records default to false. All eight combinations of
+Build options also record `experimental_autapse_version = 1`: gain 0.2,
+delay zero. Diagnostic rebuild and Stage D recheck reject a version differing
+from the current circuit. Records without the version key mean version 1,
+because commits f71538c..63c41f8 built exactly that circuit; missing boolean
+flags still default to false.
+
+The opt-in rejects memories/RAM, phases/pacing, multiple input streams and
+multipliers (array or pipelined): no probe or campaign evaluated those shapes.
+Both generic and specialized `tick2.c` datapaths remain allowed; the specialized
+Stage D campaign is in progress. Same-seed autapse and legacy campaigns are
+not paired copy for copy: the extra edges change the weight-draw shape and
+shift subsequent weight, threshold and bias draws. Compare aggregate rates.
+
+All eight combinations of
 `zero_once`, `robust_request_clear` and `experimental_register_reset` are
 allowed, subject to those options' existing restrictions. Each combination
 builds and computes 0, 3, 1 on the 2-bit ADD → XOR kernel; two-copy full mix-B
@@ -320,7 +333,7 @@ diagnostic rebuilds and recheck.
 Required fast validation:
 
 ```sh
-TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_experimental_autapse.py tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
+uv run pytest -q tests/test_experimental_autapse.py tests/test_stable_latch.py tests/test_build_options.py -m 'not slow'
 ```
 
 Slow qualification probes retain search-passer refutations, 40,000-trial

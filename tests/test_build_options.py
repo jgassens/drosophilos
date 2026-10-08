@@ -161,6 +161,7 @@ def test_build_options_record_every_netlist_shaping_option():
     )
     assert pl.build_options == {
         **options,
+        "experimental_autapse_version": 1,
         "kill_strength": 0.9,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -188,6 +189,7 @@ def test_stall_diag_keeps_legacy_fallbacks_for_old_campaign_records():
         "verified_register_reset": False,
         "experimental_register_reset": False,
         "experimental_autapse": False,
+        "experimental_autapse_version": 1,
         "kill_strength": 0.75,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
@@ -421,6 +423,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     record = json.loads(out.read_text())
     assert seen[option] is seen["build"][1].build_options[option] is True
     assert record[option] is True
+    assert record["experimental_autapse_version"] == 1
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
@@ -460,6 +463,7 @@ def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch
                            "--rate-robust", "--out", str(out)])
     original = seen[-1]
     assert record[option] is record["build_options"][option] is True
+    assert record["experimental_autapse_version"] == record["build_options"]["experimental_autapse_version"] == 1
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(original) == _pipeline_fingerprint(rebuilt)
     stage_d.main(["--recheck", str(out)])
