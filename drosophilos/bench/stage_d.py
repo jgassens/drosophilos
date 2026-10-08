@@ -773,7 +773,8 @@ def recheck_record(rec: dict) -> dict:
 
     recorded_autapse_version = options.pop("experimental_autapse_version",
                                            rec.get("experimental_autapse_version", 1))
-    if recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION:
+    if (flags["experimental_autapse"] and
+            recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION):
         raise ValueError("unsupported experimental-autapse circuit: recorded "
                          f"experimental_autapse_version is {recorded_autapse_version!r}, "
                          f"while the current circuit is version {EXPERIMENTAL_AUTAPSE_VERSION}")
