@@ -769,6 +769,14 @@ def recheck_record(rec: dict) -> dict:
     flags = {key: bool(options.pop(key, rec.get(key, False)))
              for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
                          "verified_register_reset", "experimental_register_reset", "experimental_autapse")}
+    from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
+
+    recorded_autapse_version = options.pop("experimental_autapse_version",
+                                           rec.get("experimental_autapse_version", 1))
+    if recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION:
+        raise ValueError("unsupported experimental-autapse circuit: recorded "
+                         f"experimental_autapse_version is {recorded_autapse_version!r}, "
+                         f"while the current circuit is version {EXPERIMENTAL_AUTAPSE_VERSION}")
     for key in ("true_guard_version", "rate_robust_version"):
         options.pop(key, None)
     strength = options.pop("kill_strength", None)
@@ -962,6 +970,7 @@ def main(argv=None):
         "verified_register_reset": pl.build_options["verified_register_reset"],
         "experimental_register_reset": pl.build_options["experimental_register_reset"],
         "experimental_autapse": pl.build_options["experimental_autapse"],
+        "experimental_autapse_version": pl.build_options["experimental_autapse_version"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),

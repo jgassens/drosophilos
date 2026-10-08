@@ -134,13 +134,18 @@ def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
 
 def build_tick_pipeline(campaign: dict[str, Any]):
     """Rebuild kernel_campaign tick or Stage D, including its output selection."""
-    if campaign.get("stage") == "D":
-        # Stage D stores options together and decodes health as a third output.
-        # Never use legacy campaign defaults for this netlist.
-        campaign = {**campaign, **campaign.get("build_options", {})}
+    # Compiled build options take precedence over top-level CLI fields.
+    campaign = {**campaign, **campaign.get("build_options", {})}
     if campaign.get("block", "tick") != "tick":
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
     from ..lib.kernel import TRUE_GUARD_VERSION
+    from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
+
+    recorded_autapse_version = campaign.get("experimental_autapse_version", 1)
+    if recorded_autapse_version != EXPERIMENTAL_AUTAPSE_VERSION:
+        raise ValueError("unsupported experimental-autapse circuit: recorded "
+                         f"experimental_autapse_version is {recorded_autapse_version!r}, "
+                         f"while the current circuit is version {EXPERIMENTAL_AUTAPSE_VERSION}")
 
     if campaign.get("true_guards", False) and campaign.get("true_guard_version") != TRUE_GUARD_VERSION:
         raise ValueError("unsupported true-guard circuit: rebuild this capture at its recorded commit; "
@@ -152,7 +157,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         program = Path(campaign.get("program", PROGRAM))
         k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
         options = dict(campaign.get("build_options", {}))
-        for metadata in ("true_guard_version", "rate_robust_version"):
+        for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version"):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))

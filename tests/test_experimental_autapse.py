@@ -9,7 +9,7 @@ import pytest
 from drosophilos.bench import kernel_campaign, stage_d
 from drosophilos.bench.stall_diag import build_tick_pipeline
 from drosophilos.lib.kernel import build_pipeline, run_pipeline, run_pipeline_batched
-from drosophilos.protocol.latch import Latch
+from drosophilos.protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION, Latch
 from drosophilos.sim.model import Params
 from drosophilos.sim.ref64 import RefSim
 from test_build_options import _pipeline_fingerprint
@@ -106,6 +106,7 @@ def test_recorded_flag_rebuild_and_explicit_false():
     _, enabled, _, _ = kernel_campaign.block("tick", P, rate_robust=True,
                                               experimental_autapse=True)
     assert enabled.build_options["experimental_autapse"] is True
+    assert enabled.build_options["experimental_autapse_version"] == EXPERIMENTAL_AUTAPSE_VERSION == 1
     _, _, rebuilt = build_tick_pipeline({"block": "tick", **enabled.build_options})
     assert _pipeline_fingerprint(enabled) == _pipeline_fingerprint(rebuilt)
     record = {"block": "tick", **enabled.build_options}
@@ -135,3 +136,95 @@ def test_cli_help_states_qualification_limits(module):
     help_text = module.parser().format_help()
     assert "--experimental-autapse" in help_text
     assert "44-step" in help_text and "reload margin" in help_text
+
+
+@pytest.mark.parametrize("datapath", ["generic", "specialized"])
+def test_every_role_named_latch_and_only_latches_have_autapses(datapath):
+    # Enumerate roles first, independently of the transform's edge/weight predicate.
+    _, pl, _, _ = kernel_campaign.block("tick", P, datapath=datapath,
+                                        rate_robust=True, experimental_autapse=True)
+    net = pl.net
+    roles = {role: i for i, role in enumerate(net.roles)}
+    pairs = {}
+    for role, member in roles.items():
+        if role.endswith((".u", ".v")):
+            pairs.setdefault(role[:-2], {})[role[-1]] = member
+    assert pairs
+    members = set()
+    for name, pair in pairs.items():
+        assert set(pair) == {"u", "v"}, name
+        u, v = pair["u"], pair["v"]
+        # Every role pair really is a two-neuron excitatory storage loop.
+        for src, dst in ((u, v), (v, u)):
+            weights = [net.quanta[e] for e in net.incoming[dst] if net.src[e] == src]
+            assert weights == [pl.drive.loop], name
+        members.update((u, v))
+    self_edges = [(src, q, delay) for src, dst, q, delay
+                  in zip(net.src, net.dst, net.quanta, net.delay) if src == dst]
+    assert Counter(src for src, _, _ in self_edges) == Counter(dict.fromkeys(members, 1))
+    # Literal circuit identity: changing both production constants and selection
+    # must not silently make this independent v1 assertion pass.
+    assert all(q == -round(pl.drive.loop * 0.2) and delay == 0
+               for _, q, delay in self_edges)
+    if datapath == "generic":
+        assert len(pairs) == 3215
+
+
+@pytest.mark.parametrize("shape", [
+    {"mems": {"ram": (2, {})}},
+    {"phases": [("input", None, "each")]},
+    {"streams": ["input", "second"]},
+    *({"spec": [{"name": "out", "op": op, "a": "input", "b": ("const", "one")}]}
+      for op in ("MUL", "MULP", "MULP_ROW")),
+])
+def test_unevaluated_shapes_rejected(shape):
+    options = dict(shape)
+    spec = options.pop("spec", SPEC)
+    with pytest.raises(ValueError, match="experimental_autapse supports only single-stream"):
+        build_pipeline(P, 2, spec, consts={"one": 1}, rate_robust=True,
+                       experimental_autapse=True, **options)
+
+
+@pytest.mark.parametrize("stage", [False, True])
+def test_version_enforced_by_rebuild_and_recheck(stage):
+    if stage:
+        k = stage_d.load_kernel(stage_d.PROGRAM)
+        pl = stage_d.build(k, P, "generic", rate_robust=True, experimental_autapse=True)
+        record = {"stage": "D", "build_options": dict(pl.build_options)}
+    else:
+        _, pl, _, _ = kernel_campaign.block("tick", P, rate_robust=True,
+                                            experimental_autapse=True)
+        record = {"block": "tick", **pl.build_options}
+    options = record["build_options"] if stage else record
+    assert options["experimental_autapse_version"] == 1
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(pl)
+    if stage:
+        stage_d.recheck_record(record)
+
+    # Pre-version captures built exactly v1, including when the opt-in was on.
+    options.pop("experimental_autapse_version")
+    _, _, old = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(old) == _pipeline_fingerprint(pl)
+    if stage:
+        stage_d.recheck_record(record)
+
+    for version in (0, 2, None, "1"):
+        options["experimental_autapse_version"] = version
+        with pytest.raises(ValueError, match="unsupported experimental-autapse circuit"):
+            build_tick_pipeline(record)
+        with pytest.raises(ValueError, match="unsupported experimental-autapse circuit"):
+            stage_d.recheck_record(record)
+
+
+def test_nested_version_takes_precedence():
+    record = {"experimental_autapse_version": 2,
+              "build_options": {"experimental_autapse_version": 1}}
+    build_tick_pipeline(record)
+    stage_d.recheck_record(record)
+    record["experimental_autapse_version"] = 1
+    record["build_options"]["experimental_autapse_version"] = 2
+    with pytest.raises(ValueError, match="unsupported experimental-autapse circuit"):
+        build_tick_pipeline(record)
+    with pytest.raises(ValueError, match="unsupported experimental-autapse circuit"):
+        stage_d.recheck_record(record)
