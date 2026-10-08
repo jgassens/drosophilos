@@ -312,7 +312,9 @@ With 0 stalled of 200 copies, the exact one-sided 95% binomial upper bound on th
 
 All reviewed `stage_d_*_stall.md` classes reduce to a fast or entrained latch surviving a four-pulse clear: stage Z0, request latch, or master rail. Completion's mechanism was confirmed by capture Juno 441837. The autapse caps the failure at the latch itself.
 
-Open items: the autapse is formally unqualified on the isolated 44-step rate floor and reload margin; it is applied to all 3,215 kernel latches while the 40,000-trial surveys cover only request, master and stage cases; only two seeds have passed; the nominal 1,000-tick run is queued (Juno 448740) and must pass before changing the default; and the option remains non-default. Review follow-ups remain: restrict the transform to the reviewed kernel construction order (after all consumers/controllers, including compact resets, with no later reader installation), and add a version key for the experimental-autapse netlist so diagnostic rebuild/recheck can reject an ambiguous future transform.
+Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse`, Juno 448740, commit `474a8ee`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 30,643 neurons, 5,736.6 s neural, 3 h 10 min wall on one H200. Stage D's exit (nominal plus 100-copy mix B on seeds 108 and 109) is now met with this configuration.
+
+Open items: the autapse is formally unqualified on the isolated 44-step rate floor and reload margin; it is applied to all 3,215 kernel latches while the 40,000-trial surveys cover only request, master and stage cases; only two mix-B seeds have passed; the option remains experimental and non-default. Review follow-ups remain: restrict the transform to the reviewed kernel construction order (after all consumers/controllers, including compact resets, and before any later reader installation), and add a version key for the experimental-autapse netlist so diagnostic rebuild/recheck can reject an ambiguous future transform. Toy tick results remain labeled as such.
 
 ## 9. What this does NOT cover
 
