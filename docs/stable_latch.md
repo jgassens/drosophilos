@@ -7,11 +7,11 @@ It **requires `rate_robust=True`** and remains **unqualified on the 44-step rate
 floor and reload margin**. Defaults retain their ordered netlist fingerprints;
 the control machine is unchanged.
 
-## Campaign result (2026-10-08)
+## Campaign result (2026-10-09)
 
-The option fails two isolated proxy requirements — the 44-step rate floor and reload margin — but meets the Stage D exit. Campaign D, `tick2.c` mix B, 1,000 ticks × 100 copies, `--rate-robust --experimental-autapse` (`f71538c`, merged `28caa66`), was rechecked by the integrator on seed 108 (Juno 443026) and seed 109 (Juno 443063): each was 100/100 matched and 100,000/100,000 ticks, with 0 wrong, faults, timeouts, stalls, refusals and retries. This is a Stage D result, not qualification or a default change.
+The option fails two isolated proxy requirements — the 44-step rate floor and reload margin — and meets the Stage D exit on generic seeds 108, 109 and 111 and specialized-datapath seed 108, but not generic seed 110. Campaign D, `tick2.c` mix B, 1,000 ticks × 100 copies, `--rate-robust --experimental-autapse` (`f71538c`, merged `28caa66`), was rechecked by the integrator on generic seed 108 (Juno 443026) and seed 109 (Juno 443063): each was 100/100 matched and 100,000/100,000 ticks, with 0 wrong, faults, timeouts, stalls, refusals and retries. This is a Stage D result, not qualification or a default change.
 
-The build has 30,643 neurons and +6,430 synapses versus rate readers; the autapse is applied to all 3,215 kernel latches. It caps the reviewed four-pulse-clear failure classes at the latch (stage Z0, request and master rail; completion capture Juno 441837), but 40,000-trial surveys cover only those request/master/stage cases. Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse`, Juno 448740, commit `474a8ee`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 30,643 neurons, 5,736.6 s neural, 3 h 10 min wall on one H200. Stage D's exit (nominal plus 100-copy mix B on seeds 108 and 109) is now met with this configuration. Only two mix-B seeds have passed; the option remains experimental and non-default, and the isolated 44-step rate floor and reload margin remain unqualified. Keep the transform restricted to the reviewed construction order — after all consumers/controllers, including compact resets, and before any later reader installation — with version-gated rebuild/recheck. Toy tick results remain labeled as such.
+The build has 30,643 neurons and +6,430 synapses versus rate readers; the autapse is applied to all 3,215 kernel latches. It caps the reviewed four-pulse-clear failure classes at the latch (stage Z0, request and master rail; completion capture Juno 441837), but 40,000-trial surveys cover only those request/master/stage cases. Additional commit `63c41f8`: generic seed 110 (Juno 449070) **exit not met** — 99 matched, copy 82 stalled after 352 completed ticks, 1 run-level fault, 99,352 matched ticks, 0 wrong, 648 missing, 0 refusals/retries; generic seed 111 (Juno 449071) **exit met** — 100/100, 0 wrong/faults/timeouts/stalls; specialized datapath seed 108 (Juno 449072) **exit met** — 100/100, 0 wrong/faults/timeouts/stalls, 26,683 neurons. Total: 4 of 5 100-copy campaigns met exit; 1 stalled copy in 500 (0.2%); 0 wrong values in 499,352 matched ticks. The exact one-sided 95% Clopper-Pearson upper bound from 1/500 is 0.009452282208 (0.9452282208%); one-sided Fisher exact 1/500 versus pooled no-autapse seed-108 baselines 15/300 is p=0.00000344134. The observed stall rate is about 25× lower, not zero; a spike-dump replay of generic seed-110 copy 82 is queued. Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse`, Juno 448740, commit `474a8ee`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 30,643 neurons, 5,736.6 s neural, 3 h 10 min wall on one H200. The configuration's mix-B exit is met on generic seeds 108, 109 and 111 and specialized seed 108, not generic seed 110. The option remains experimental and non-default, and the isolated 44-step rate floor and reload margin remain unqualified. Keep the transform restricted to the reviewed construction order — after all consumers/controllers, including compact resets, and before any later reader installation — with version-gated rebuild/recheck. Toy tick results remain labeled as such.
 
 Both `stage_d` and `kernel_campaign` expose `--experimental-autapse` with
 `--rate-robust`. Campaign records retain the choice in build options,
@@ -24,8 +24,9 @@ flags still default to false.
 
 The opt-in rejects memories/RAM, phases/pacing, multiple input streams and
 multipliers (array or pipelined): no probe or campaign evaluated those shapes.
-Both generic and specialized `tick2.c` datapaths remain allowed; the specialized
-Stage D campaign is in progress. Same-seed autapse and legacy campaigns are
+Both generic and specialized `tick2.c` datapaths remain allowed; specialized
+Stage D seed 108 (Juno 449072) met exit with 100/100 copies and 26,683 neurons.
+Same-seed autapse and legacy campaigns are
 not paired copy for copy: the extra edges change the weight-draw shape and
 shift subsequent weight, threshold and bias draws. Compare aggregate rates.
 
