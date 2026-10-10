@@ -275,3 +275,67 @@ def test_copy34_fast_single_z_rail_can_trip_fault_with_background_input():
     assert not len(sim.trace.neuron_steps(0, node=0))  # fast rail alone
     assert len(sim.trace.neuron_steps(0, node=1)) > 0  # fast rail + background
     assert not len(sim.trace.neuron_steps(0, node=2))  # ordinary rate + same background
+
+
+def test_autapse_copy82_sum_veto_loses_to_second_carry_pulse():
+    """Captured inputs reproduce the unwanted R6 sum-0 ignition without strays.
+
+    Receiver 27771 is fa6.s.y0.a.edge, vetoed by the already-live x6=0.
+    Static draws use seed 110, B=100, 30,643 neurons and 62,366 sorted edges.
+    Controls retain its noisy threshold/bias: nominal weights, one driver pulse,
+    or source inhibition delivered one step earlier. These are local probes,
+    not proposed fixes or replays of the campaign's unrecorded CUDA strays.
+    """
+    inputs = [
+        (4919, 4655, [20486829, 20486871, 20486913, 20486957]),  # carry tap 27754
+        (-8177, -7966, [20486889, 20486938, 20486984]),  # source inhibitor 27772
+        (-1655, -1810, [20486692, 20486762, 20486828, 20486891, 20486952]),  # veto 27773
+    ]
+    params = Params()
+    begin = 20485000
+    sim = RefSim(Topology.empty(1), params, n_nodes=4,
+                 V_th=-45.235698207123605, bias=0.38859703129223355)
+    for node in range(4):
+        for source, (weight, nominal, steps) in enumerate(inputs):
+            steps = np.asarray(steps)
+            if node == 1:
+                weight = nominal
+            if node == 2 and source == 0:
+                steps = steps[:1]
+            if node == 3 and source == 1:
+                steps = steps - 1
+            sim.add_events(node, steps + params.default_delay_steps - begin,
+                           np.zeros(len(steps), dtype=int), np.full(len(steps), weight))
+    sim.run(2001)
+    # The first -8177-q arrival is at this very step, AFTER threshold evaluation.
+    assert (sim.trace.neuron_steps(0, node=0) + begin).tolist() == [20486907]
+    for node in (1, 2, 3):
+        assert not len(sim.trace.neuron_steps(0, node=node))
+
+
+def test_autapse_copy82_fault_reads_two_live_rails():
+    """The captured rate taps suffice for the real fault; either tap alone does not."""
+    inputs = [
+        (267, [20487137, 20487163, 20487193, 20487219, 20487244, 20487272,
+               20487296, 20487321, 20487349, 20487374, 20487401, 20487425,
+               20487451, 20487474, 20487499]),  # R6=0 reader 8236
+        (238, [20487099, 20487125, 20487154, 20487185, 20487210, 20487238,
+               20487262, 20487287, 20487315, 20487339, 20487365, 20487394,
+               20487419, 20487446, 20487470, 20487495]),  # R6=1 reader 8237
+    ]
+    params = Params()
+    begin = 20485000
+    # Receiver 8241, same seed-110 static reconstruction as the sum-relay probe.
+    sim = RefSim(Topology.empty(1), params, n_nodes=3,
+                 V_th=-45.23007967072197, bias=-6.903151280267016)
+    for node in range(3):
+        for rail, (weight, steps) in enumerate(inputs):
+            if node and rail != node - 1:
+                continue
+            steps = np.asarray(steps)
+            sim.add_events(node, steps + params.default_delay_steps - begin,
+                           np.zeros(len(steps), dtype=int), np.full(len(steps), weight))
+    sim.run(2523)  # through the observed fault, 20,487,522 inclusive
+    assert (sim.trace.neuron_steps(0, node=0) + begin).tolist() == [20487522]
+    for node in (1, 2):
+        assert not len(sim.trace.neuron_steps(0, node=node))
