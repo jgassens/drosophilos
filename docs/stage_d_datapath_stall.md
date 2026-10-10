@@ -922,3 +922,136 @@ virtualenv, task-local `UV_CACHE_DIR` and pytest `--basetemp`, `PYTHONPATH=.`,
 `PYTHONDONTWRITEBYTECODE=1`, and `-p no:cacheprovider`.
 `git diff --check` passes. Only this document and the specified test file changed;
 integration and committing remain with the orchestrator.
+
+## Ordered sum-XOR transaction one-shot (2026-10-10)
+
+The candidate consumes each sum XOR's LATE rail once, using a real resettable
+spiking circuit. It preserves the existing operand XORs, generate/kill and
+propagate relays, carry delays, output veto weights and control machine.
+This is a local mechanism qualification; it does not constitute a rerun of
+the 500-copy Stage D campaign or a CUDA replay with its missing strays.
+
+### Circuit and candidate selection
+
+For each LATE rail, `add_transaction_edge` places an ordinary edge relay before
+the sum's two alternative veto relays. Its first spike ignites a **spent latch**
+and delivers **zero-delay −4.4-loop feedback** to itself. The spent latch drives
+a separate inhibitory interneuron with **−0.75-loop** output onto the edge.
+The ordinary **−2.2-loop source inhibition** remains. Local feedback covers the
+initial doublet window; the spent latch holds consumption across long source
+gaps. Both spent members join `Gates.latches` and therefore the owning stage's
+reset fan-out. The source and hold inhibitors drain naturally; resetting the
+source inhibitor while a delayed carry is still draining would reopen the edge.
+
+The enabled path is **only the ripple adder's sum XORs**, including bit zero
+(whose LATE rail is x0). One extra edge adds about **4.2 ms** to a sum; it is
+outside the carry recurrence and therefore does not add that delay per carry
+bit. Applying the same gate to operand XORs was also explored: long operand
+delay tails made their reload margin worse, without being necessary to address
+the captured sum failure.
+
+| Candidate | Measured rejection / result |
+|---|---|
+| Spent latch, ordinary source inhibitor, −1.0-loop local feedback | 7/128 corner trials emitted a second carry edge. Output exclusivity alone would have hidden this defect. |
+| Same, −2.2-loop feedback | 1/128 emitted a second carry edge. |
+| Spent latch, faster source inhibitor, −2.2-loop feedback | Copy-82 reconstruction with corner draws on new components: 673/40,000 missing outputs. The faster inhibitor can beat the first wanted pulse. |
+| Spent latch, ordinary source inhibitor, −4.4-loop feedback | 0 doubles, missing outputs, wrong rails, repeated carry edges or repeated sum-ignition edges in each 40,000-trial survey below. |
+
+`test_rejected_candidates_preserve_the_frontier` retains small failing probes
+for the light-feedback and fast-inhibitor candidates. These are rejection
+tests, not skipped or expected-failure acceptance checks.
+
+### RefSim surveys and limits
+
+`tests/test_ordered_xor.py` uses the real gate, latch, feedback, reset and delay
+primitives. `SurveySim` calls the unmodified RefSim step and replaces retained
+trace history with counts, first and last spike times, to bound survey memory.
+All random surveys are reproducible (`seed=882` for the XOR, 718 for arithmetic,
+912 for reset/gap probes). No external capture files are required.
+
+| XOR scenario | Trials | Doubles / missing / wrong / repeated carry / repeated ignition | First sum latency |
+|---|---:|---|---|
+| Copy-82 reconstructed receiving circuit; new components at corners; timing jitter | 40,000 | 0 / 0 / 0 / 0 / 0 | 11.6–13.6 ms |
+| Independent ±3-sigma weight endpoints and ±0.6-mV threshold/bias endpoints | 40,000 | 0 / 0 / 0 / 0 / 0 | 10.5–15.9 ms |
+| Mix-B static Gaussian/log-normal draws, pulse jitter | 40,000 | 0 / 0 / 0 / 0 / 0 | 11.4–14.0 ms |
+
+Weight endpoints are `exp(−0.12)` and `exp(+0.12)`, rounded to integer quanta;
+threshold and bias endpoints vary independently on every neuron. This samples
+40,000 combinations of endpoints, not all exponentially many combinations.
+EARLY is exclusive, stable and established at least 15 ms before LATE. All four
+truth-table cases occur. LATE contains multiple pulses, bursts with independent
+±5-step jitter, and gaps. The separate four-transaction corner test adds a
+**221.6-ms source gap**, changes both rail polarities, and executes real stage
+reset before each next word. It verifies exactly one consumed edge and an
+exclusive output on every transaction.
+
+The copy-82 fixture rebuilds the **old** 30,643-neuron / 62,366-edge topology,
+draws all B=100 static rows in the original seed-110 order and selects row 82.
+Existing receivers and synapses retain those draws; an inserted edge inherits
+the old carry-to-sum branch weight, while genuinely new components receive
+independent corner draws. It prescribes the captured carry and wrong-branch
+veto spike times (origin 20,486,200), with synthetic later pulses to test
+retention. Carry timing shifts by ±10 steps and veto timing by ±5; each batch
+also includes the unshifted case. The legacy control prescribes its captured
+source-inhibitor train and reproduces the double rail. The fixed circuit's
+source inhibitors run as real neurons. The other surveys also run the veto
+interneurons themselves. These local XOR surveys omit background strays;
+the arithmetic and pipeline noisy tests include them.
+
+Four-bit ADD/SUB covers **all 512 operand/op combinations**, followed by their
+swapped-operand second words through the same state: **1,024 transactions**,
+zero wrong rails, double rails, missing sums/carries or repeated consumed edges.
+The eight-bit survey adds **4,096 random ADD/SUB transactions** (2,048 independently
+perturbed copies, two words each), also with **zero** of those failures. It uses
+full mix B: 4% log-normal weights, 0.2-mV threshold and bias sigmas, independent
+5-Hz / 150-q background input on all neurons, and 0–100-step per-bit arrival
+jitter. The first sum/carry latencies span 96.3–367.9 ms across bits and words;
+four-bit nominal latencies span 100.9–218.2 ms. These include operand and ripple
+delays, unlike the local XOR latencies in the table.
+The arithmetic fixture uses the kernel's actual 6/17-hop operand delays,
+5-hop carry delays and fixed SUB image rail; it checks the carry/no-borrow bit
+as well as every sum bit. Its reset-to-next-load interval is 200 ms. The 100-ms
+stress schedule fails in both the legacy and candidate datapaths and is **not
+qualified** by this change. Small ADD → SUB → XOR pipelines additionally use
+the actual ready/load/commit controller, with nominal and full mix-B input.
+
+The long-gap corner reset test fails without storage autapses. Accordingly,
+`ordered_xor_oneshot=True` requires both `rate_robust=True` and
+`experimental_autapse=True`. `zero_once` is allowed, with repeated-word tests
+in generic and specialized pipelines. Nondefault timing/reset policies,
+memories, pacing, multiple streams, multipliers and widths outside 1..8 are
+rejected. Experimental storage feedback's previously documented qualification
+limits remain; this option is not a general storage/reset repair.
+
+### Build record and cost
+
+The implemented option defaults false and records `ordered_xor_oneshot` in
+`build_options`; enabled builds also record `ordered_xor_oneshot_version=1`.
+Both campaign CLIs accept `--ordered-xor-oneshot`; `stall_diag` and Stage D
+`--recheck` rebuild it, honor nested options and reject unknown/missing enabled
+circuit versions. Historical records default false. Existing ordered-byte
+fingerprint checks cover the disabled path and the unchanged control machine.
+
+Each sum bit adds **10 neurons / 22 synapses**, plus **four storage autapses**
+in the supported configuration (26 total). The reset links are included.
+The largest new edge is −15,932 q; the existing conditioned circuit's largest
+edge remains larger. Measured tick build costs with rate robustness and
+experimental autapses:
+
+| Datapath | Off neurons / edges | On neurons / edges | Additional anatomical k4 synapses |
+|---|---|---|---:|
+| Generic | 30,643 / 62,366 | 31,363 / 64,238 | 129,744 |
+| Specialized | 26,683 / 53,926 | 27,083 / 54,966 | 72,080 |
+
+The exact requested uv command is blocked before collection by the sandbox's
+denial of `~/.cache/uv/sdists-v9/.git`. Validation uses the existing virtualenv,
+a task-local uv cache and pytest temporary directory, with `python -m pytest`
+so imports resolve to this isolated worktree rather than the virtualenv's
+editable source checkout. No commit is attempted; the orchestrator owns it.
+
+Final validation: **141 passed, 6 slow tests deselected** in the requested
+three-file fast suite, using the sandbox-compatible environment described
+above. The three 40,000-trial XOR surveys and both large arithmetic surveys
+also passed; the eight-bit noisy survey was rerun after expanding load jitter
+to mix B's full 0–100-step range. `git diff --check` passes. Only the task's
+owned files are modified.

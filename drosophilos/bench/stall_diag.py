@@ -142,6 +142,10 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
     from ..lib.kernel import TRUE_GUARD_VERSION
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
+    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION
+
+    if campaign.get("ordered_xor_oneshot", False) and campaign.get("ordered_xor_oneshot_version") != ORDERED_XOR_ONESHOT_VERSION:
+        raise ValueError("unsupported ordered-XOR one-shot circuit version")
 
     recorded_autapse_version = campaign.get("experimental_autapse_version", 1)
     if (campaign.get("experimental_autapse", False) and
@@ -160,7 +164,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         program = Path(campaign.get("program", PROGRAM))
         k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
         options = dict(campaign.get("build_options", {}))
-        for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version"):
+        for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version", "ordered_xor_oneshot_version"):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
@@ -170,6 +174,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         verified_register_reset = options.pop("verified_register_reset", campaign.get("verified_register_reset", False))
         experimental_register_reset = options.pop("experimental_register_reset", campaign.get("experimental_register_reset", False))
         experimental_autapse = options.pop("experimental_autapse", campaign.get("experimental_autapse", False))
+        ordered_xor_oneshot = options.pop("ordered_xor_oneshot", campaign.get("ordered_xor_oneshot", False))
         strength = options.pop("kill_strength", None)
         if strength is not None:
             options["drive"] = replace(Drive.from_params(params), kill_strength=float(strength))
@@ -178,7 +183,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                    robust_register_reset=robust_register_reset,
                    verified_register_reset=verified_register_reset,
                    experimental_register_reset=experimental_register_reset,
-                   experimental_autapse=experimental_autapse, **options)
+                   experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -222,6 +227,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             verified_register_reset=campaign.get("verified_register_reset", False),
             experimental_register_reset=campaign.get("experimental_register_reset", False),
             experimental_autapse=campaign.get("experimental_autapse", False),
+            ordered_xor_oneshot=campaign.get("ordered_xor_oneshot", False),
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

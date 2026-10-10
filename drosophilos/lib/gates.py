@@ -14,8 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..protocol.celement import _ignite_from, add_and_latched, add_completion_tree, add_delay_chain, add_or_latched, add_veto_relay
-from ..protocol.latch import Latch, add_latch
+from ..protocol.latch import Latch, add_latch, add_transaction_edge
 from .netlist import Drive, Netlist
+
+
+# Bump when the qualified circuit or timing policy changes.
+ORDERED_XOR_ONESHOT_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -53,8 +57,9 @@ def add_maj_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) ->
 class Gates:
     """Collects every internal latch and gate neuron so a reset domain can claim them."""
 
-    def __init__(self, net: Netlist, drive: Drive):
+    def __init__(self, net: Netlist, drive: Drive, *, ordered_xor_oneshot: bool = False):
         self.net, self.drive = net, drive
+        self.ordered_xor_oneshot = ordered_xor_oneshot
         self.latches: list[Latch] = []
         self.gates: list[int] = []
 
@@ -98,7 +103,19 @@ class Gates:
         self.veto(f"{name}.y0.a", LATE.r0.u, [EARLY.r1.u], y0)  # E0 and L0
         return Rail2(y0, y1)
 
-    def xor2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2) -> Rail2:
+    def xor2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2, *, oneshot: bool = False) -> Rail2:
+        """Ordered XOR; optionally consume each LATE rail once until stage reset.
+
+        The ripple adder opts in only for sums. Operand XORs and carry generation
+        retain their timing. Returned spent latches belong to this reset domain.
+        """
+        if oneshot:
+            taps = []
+            for r, source in enumerate(LATE.taps):
+                edge, spent = add_transaction_edge(self.net, self.drive, f"{name}.once{r}", source)
+                self.latches.append(spent)
+                taps.append(Tap(edge))
+            LATE = Rail2(*taps)
         y1, y0 = self.latch(f"{name}.y1"), self.latch(f"{name}.y0")
         self.veto(f"{name}.y1.a", LATE.r0.u, [EARLY.r0.u], y1)  # E1 and L0
         self.veto(f"{name}.y1.b", LATE.r1.u, [EARLY.r1.u], y1)  # E0 and L1
@@ -150,12 +167,12 @@ class Gates:
             if i == 0:
                 self.veto(f"{name}.fa0.p1", x[0].r1.u, [Cin.r0.u], c1)  # propagate with cin=1
                 self.veto(f"{name}.fa0.p0", x[0].r1.u, [Cin.r1.u], c0)  # propagate with cin=0
-                s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0])
+                s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0], oneshot=self.ordered_xor_oneshot)
             else:
                 cd = self.delayed(f"{name}.fa{i}.cin", carries[-1], carry_hops)
                 self.veto(f"{name}.fa{i}.p1", cd.r1.u, [x[i].r0.u], c1)
                 self.veto(f"{name}.fa{i}.p0", cd.r0.u, [x[i].r0.u], c0)
-                s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd)
+                s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd, oneshot=self.ordered_xor_oneshot)
                 cds.append(cd)
             sums.append(s_)
             carries.append(Rail2(c0, c1))

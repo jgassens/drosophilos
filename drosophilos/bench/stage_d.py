@@ -677,6 +677,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--datapath", choices=("generic", "specialized"), default="generic")
     ap.add_argument("--rate-robust", action="store_true",
                     help="use refractory-limited rate readers (opt-in; changes the netlist)")
+    ap.add_argument("--ordered-xor-oneshot", action="store_true",
+                    help=("consume sum-XOR carry once per stage reset; requires --rate-robust "
+                          "and --experimental-autapse (default timing, widths 1..8; "
+                          "no RAM/pacing/multipliers)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--zero-once", action="store_true",
@@ -768,8 +772,13 @@ def recheck_record(rec: dict) -> dict:
     datapath = options.pop("datapath", rec.get("datapath", "generic"))
     flags = {key: bool(options.pop(key, rec.get(key, False)))
              for key in ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
-                         "verified_register_reset", "experimental_register_reset", "experimental_autapse")}
+                         "verified_register_reset", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot")}
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
+    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION
+
+    recorded_xor_version = options.pop("ordered_xor_oneshot_version", rec.get("ordered_xor_oneshot_version"))
+    if flags["ordered_xor_oneshot"] and recorded_xor_version != ORDERED_XOR_ONESHOT_VERSION:
+        raise ValueError("unsupported ordered-XOR one-shot circuit version")
 
     recorded_autapse_version = options.pop("experimental_autapse_version",
                                            rec.get("experimental_autapse_version", 1))
@@ -916,7 +925,7 @@ def main(argv=None):
                robust_request_clear=a.robust_request_clear, robust_register_reset=a.robust_register_reset,
                verified_register_reset=a.verified_register_reset,
                experimental_register_reset=a.experimental_register_reset,
-               experimental_autapse=a.experimental_autapse)
+               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -972,6 +981,7 @@ def main(argv=None):
         "experimental_register_reset": pl.build_options["experimental_register_reset"],
         "experimental_autapse": pl.build_options["experimental_autapse"],
         "experimental_autapse_version": pl.build_options["experimental_autapse_version"],
+        "ordered_xor_oneshot": pl.build_options["ordered_xor_oneshot"],
         "build_options": dict(pl.build_options),
         "spike_dumps": st.get("spike_dumps", {}),
         "spike_dump_errors": st.get("spike_dump_errors", {}),
