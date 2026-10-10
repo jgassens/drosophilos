@@ -693,3 +693,232 @@ are unchanged. The old policy's measured steady tick cost was +149–174 ms
 (+2.7–3.1%), with +311 ms first-tick latency in the three-tick probe. Cell-stage
 READY is unread and adds no critical-path delay; master COPY and input READY
 consume the relevant delays. The eight-link candidate's tick cost is unmeasured.
+
+## Autapse seed 110, copy 82: real R6 double rail (2026-10-10)
+
+**The fault is real: both R6 data latches are live before fault gate 8241 fires.**
+The first erroneous pulse is in the ordered ripple adder's sum XOR, not its
+rate-robust fault reader. More specifically, a vetoed sum-0 relay escapes on the
+second delayed-carry pulse, despite exclusive arithmetic inputs and an already
+active veto. The intended sum-1 appears first; sum-0 is then latched alongside it.
+This is a datapath pulse/veto timing-margin failure, not evidence that a changing
+borrow logically required the opposite result. It shares base34/rr34's discard
+sequence, but base34's false Z fault is a different initiating mechanism.
+
+### Capture and static reconstruction
+
+Read by absolute path under
+`/Users/jeremiahgassensmith/programming/drosophilos/data/stage_d/`:
+
+- `mixB_s110_c100_autapse_dp82.json`
+- `mixB_s110_c100_autapse_dp82_copy82.npz`
+- `reports/autapse_s110_copy82.md` and `reports/autapse_s110_copy82_dp.md`
+
+The datapath recapture is Juno **450661**, following original **449070** and
+replay **449820**. Rebuilding the record gives **30,643 neurons / 62,366 synapses**,
+with **zero recorded role/ID drift**, rate-robust v2, experimental autapse v1,
+and `zero_once=robust_request_clear=experimental_register_reset=False`.
+The NPZ contains **31,719,091 spikes**, **9,893 explicitly selected IDs** (8,517
+firing), and inclusive steps **20,280,099–21,299,999**. Its `max_ms` truncation
+does not erase the observed failed transaction or imply successful recovery.
+Steps are 0.1 ms; IDs below belong to this rebuild, including repeated `out.*`
+names resolved by their edges.
+
+The reconstructed quanta use `make_perturbed_sim`'s exact static draw order:
+`topo = pl.net.topology()` sorts edges by **(source, destination, delay)**; then
+`default_rng(110)` draws weight normals of shape **(100, 62366)** with sigma
+**0.04**, threshold normals **(100, 30643)** with sigma **0.2 mV**, and bias
+normals of the same shape/sigma. Compute
+`rint(topo.quanta * exp(weight_noise))`, add threshold noise to **−45 mV** and
+bias noise to **topo.bias**, then select row **82** (zero-based). Do not draw for
+one copy or use netlist insertion order. The CUDA 5-Hz, 150-q background stream
+and membrane states are not in this dump and are not reconstructed here.
+Every weight below is **nominal / reconstructed quanta**; every listed delay is
+**18 steps**, except the explicitly zero-delay autapses.
+
+### Operands: 252 minus constant 10, not minus c10_xor
+
+The rebuilt cell is `SUB(a=c12_sel, b=('const', 'k10'))`.
+The intended result is **252 − 10 = 242 = 0xF2**, **C=1 (no borrow), Z=0, V=0**.
+At ACT^d **26662: 20,485,555**, both members of every live c12 master rail
+bracket the sampling step; neither member of its opposite rail fires from START
+**8795: 20,484,983** through the fault at **20,487,522**.
+
+| Bit | Exclusive c12 master rail u/v | Last u/v spikes at or before ACT^d | First u/v spikes after ACT^d |
+|---|---|---|---|
+| 0=0 | 9061 / 9062 | 20,485,516 / 20,485,543 | 20,485,572 / 20,485,599 |
+| 1=0 | 9065 / 9066 | 20,485,551 / 20,485,522 | 20,485,613 / 20,485,584 |
+| 2=1 | 9071 / 9072 | 20,485,547 / 20,485,520 | 20,485,608 / 20,485,582 |
+| 3=1 | 9075 / 9076 | 20,485,545 / 20,485,517 | 20,485,599 / 20,485,571 |
+| 4=1 | 9079 / 9080 | 20,485,519 / 20,485,546 | 20,485,573 / 20,485,600 |
+| 5=1 | 9083 / 9084 | 20,485,549 / 20,485,521 | 20,485,606 / 20,485,578 |
+| 6=1 | 9087 / 9088 | 20,485,531 / 20,485,555 | 20,485,587 / 20,485,611 |
+| 7=1 | 9091 / 9092 | 20,485,544 / 20,485,509 | 20,485,604 / 20,485,569 |
+
+The captured **c10_xor master is also exclusive**, encoding **94 (0x5E)**;
+its live u IDs, bit 0 first, are **7739, 7745, 7749, 7753, 7757, 7759, 7765,
+7767**, v=u+1. Each live member brackets ACT^d within 62 steps; all opposite
+members are silent from START through fault. It supplies **c12's condition**,
+not c11's B operand. In particular, `252 - 94` is not this instruction.
+
+The actual B source **K.k10's 32 latch members (832–863) are omitted**. Its
+exclusivity at ACT^d cannot be established directly. The captured sampled B
+tokens exclusively encode **10**, with live u IDs **26695, 26717, 26735, 26757,
+26775, 26795, 26815, 26835** (v=u+1), first u spikes **20,485,637–20,485,644**;
+both members of every opposite token are silent. Sampled A likewise exclusively
+encodes 252. Thus both captured masters are exclusive, but the capture must not
+be described as directly observing both SUB source words at ACT^d.
+
+### First error: the sum-0 veto loses to a second driver pulse
+
+The active path is `kernel.add_alu_logic_tokens` →
+`Gates.ripple_adder_ordered` → `Gates.xor2_ordered` →
+`celement.add_veto_relay` / `latch.add_edge_relay`.
+For bit 6, A=1 and complemented B=1, so **x6=0**, carry-in=1 and **sum6=1**.
+The local inputs do not switch polarity:
+
+| Signal | Captured first events / exclusivity |
+|---|---|
+| sampled A6=1, **26807/26808** | u first **20,485,634**; A6=0 **26805/26806** silent |
+| bx6=1, **27061/27062** | u first **20,486,040**; bx6=0 **27063/27064** silent |
+| delayed A6=1, **27330** | **20,486,547** |
+| x6=0, **27463/27464** | **20,486,637 / 20,486,690**; x6=1 **27461/27462** silent |
+| bit-5 carry=1, **27693/27694** | **20,486,579 / 20,486,627**; carry=0 **27695/27696** silent |
+| delayed carry=1, **27754** (`fa6.cinr1.d4`) | **20,486,829; 20,486,871; 20,486,913**; all carry-0 delay taps **27745–27749** silent |
+| sum-0 veto, **27773** | **20,486,692; 20,486,762; 20,486,828; 20,486,891** |
+| correct sum-1 edge, **27768** | **20,486,868; 20,486,902** (a doublet) |
+| sum-0 source inhibitor, **27772** | first **20,486,889**, arriving at its edge at **20,486,907** |
+| **incorrect sum-0 edge, 27771** | **20,486,907**, exactly one spike |
+
+Here `s.y0.a` implements **carry1 AND NOT(x0)**. The x0 rail leads the carry
+driver by **192 steps (19.2 ms)**, exceeding `add_veto_relay`'s approximate
+15-ms ordering requirement. Its first three veto arrivals are **20,486,710,
+20,486,780, 20,486,846**. The carry pulses arrive at **20,486,847** and
+**20,486,889**, only 42 steps apart. Thus this is not an absent or reversed
+EARLY/LATE input: the inhibition is present but loses the analogue race.
+
+| Edge | Nominal / copy-82 quanta |
+|---|---:|
+| x0 **27463 → 27773** veto interneuron | +3621 / +3563 |
+| veto **27773 → 27771** | −1810 / **−1655** |
+| delayed carry **27754 → 27771** | +4655 / **+4919** |
+| delayed carry **27754 → 27772** source inhibitor | +3621 / **+3266** |
+| source inhibitor **27772 → 27771** | −7966 / −8177 |
+| erroneous edge **27771 → 27763** sum-0 latch | +4655 / +4989 |
+| delayed carry **27754 → 27768** correct sum edge | +4655 / +4985 |
+| carry **27754 → 27769 → 27768** source inhibition | +3621 / +3451; −7966 / −7940 |
+| correct edge **27768 → 27761** sum-1 latch | +4655 / +4471 |
+
+Receiver **27771** has reconstructed **Vth=−45.235698207 mV** and
+**bias=+0.388597031 mV**. Prescribe its three captured incoming spike trains
+to a one-neuron RefSim starting at **20,485,000**, with the weights/delays above
+and no target strays. It fires **exactly at 20,486,907**. Its calculated
+pre-threshold voltage on that step is **−44.950928 mV**, **0.284770 mV above
+threshold**. Synaptic delivery follows threshold evaluation: the first strong
+source inhibition arriving on step 907 is too late to prevent that pulse.
+The same prescribed inputs with nominal weights (retaining noisy threshold and
+bias) remain silent, peaking at **−47.050266 mV**, **1.814568 mV below threshold**.
+Keeping only the first carry pulse, or advancing the source-inhibitor train by
+one step, also prevents the pulse in this local calculation. Those controls
+isolate the race; they are not qualified circuit fixes. Receiver **27768** likewise
+reproduces its two captured spikes without target strays.
+
+These are model voltages, not recorded voltages. The captured input times already
+include upstream noise. Nevertheless, a cold receiving neuron reproduces the
+error with the reconstructed static parameters alone; retained state from the
+previous transaction and an invented target stray are unnecessary explanations.
+The previous reset-inhibitor train ended at **20,441,265**, READY was
+**20,441,817**, and the old carry-delay tail ended at **20,441,407**. The R6
+stage/reader and sum trains are silent for thousands of milliseconds before the
+new computation. There is no observed surviving R6 rail bridging transactions.
+
+An ordered XOR relies on finite inhibition, rather than positive confirmation of
+both selected rails. Its two output latches are independent and have no mutual
+exclusion or retraction when the wrong relay escapes. Consequently the encoded
+output goes **empty → correct 1 → invalid {0,1}**; it does not safely settle by
+withdrawing the earlier rail. The delayed-carry train and the weakened veto / slow
+source-inhibitor combination break the intended monotonic, exclusive evaluation.
+The storage autapses do not protect this relay: they only inhibit each latch
+member after it spikes, and are not installed on 27771 or its inhibitors.
+
+### Propagation, readers and discard
+
+| Path | Captured events | Positive link weights, nominal / reconstructed |
+|---|---|---|
+| incorrect sum-0 → mux-0 | **27763** first **20,486,947** → edge **28363** at **20,486,987** → mux **28361** at **20,487,028** | +4655 / +4631; +4655 / +4677 |
+| mux-0 → stage R6=0 | **28479** output edge **20,487,073** → **8159/8160** first **20,487,116 / 20,487,167** | +4655 / +4682; +4655 / +4481 |
+| correct sum-1 → mux-1 | **27761** first **20,486,911** → edge **28380** at **20,486,949; 20,486,986** → mux **28378** first **20,486,993** | +4655 / +4690; +4655 / +4236 |
+| mux-1 → stage R6=1 | **28481** output edge **20,487,033** → **8161/8162** first **20,487,078 / 20,487,130** | +4655 / +4785; +4655 / +4237 |
+
+Both stage rails continue firing across the fault at **20,487,522**: r0 u
+**8159** fires at **20,487,452; 510; 567; 624; 685**, and r1 u **8161** at
+**20,487,441; 504; 567; 629** (short entries retain the 20,487, prefix).
+Both v partners also sustain their trains. The reciprocal loop edges are
+**8159→8160 +3621/+3807**, **8160→8159 +3621/+3697**,
+**8161→8162 +3621/+3460**, **8162→8161 +3621/+3526**.
+Their zero-delay autapses are nominal **−724**, reconstructed **−725, −733,
+−775, −723** for IDs **8159–8162** respectively. Both rails are genuinely stored,
+not merely an extra reader spike.
+
+| Reader path | First spike | Nominal / reconstructed quanta |
+|---|---:|---:|
+| **8159 → 8236**, `Q.b6r0.u.rate` | **20,487,137** | +28968 / +29946 |
+| **8161 → 8237**, `Q.b6r1.u.rate` | **20,487,099** | +28968 / +29308 |
+| **8236 → 8241**, `Q.fault6.and` | fault **20,487,522** | +264 / +267 |
+| **8237 → 8241** | same fault | +264 / +238 |
+| **8236 / 8237 → 8233**, valid OR | **20,487,240** | +814 / +834; +814 / +768 |
+| reset **8359 → 8236 / 8237** | reset inhibitor first **20,487,659** | −43456 / −43534; −43456 / −44832 |
+
+The readers have no mirrored autapse input (by design). The fault gate's nominal
+bias is **−7 mV**, reconstructed **−6.903151280 mV**, with
+**Vth=−45.230079671 mV**. Prescribing both recorded reader trains and their
+reconstructed weights, again without target strays, reproduces the fault
+**exactly at 20,487,522**. Either train alone stays subthreshold through that
+step. There is no false-reader fault or single-live-rail margin to assign here.
+
+Fault **8241 → FAULT u 8398** is **+4655/+4645**; u fires at **20,487,561;
+20,487,643**, v **8399** at **20,487,614**. FAULT drives reset **8358** through
+**+4655/+4647**, producing its spike at **20,487,601**. Reset inhibitor **8359**
+fires at **20,487,659; 20,487,709; 20,487,752; 20,487,800; 20,487,885**;
+its first inhibition arrives at **20,487,677**. READY **8379** fires at
+**20,488,425**. R4's data-1 latch **8153** did ignite at **20,487,449**, but
+valid OR **8215** and valid members **8216/8217** never fire. Thus missing R4
+validity is not a missing R4 result. Completion **8351**, commit **30171**, DONE
+**8755**, and any subsequent START are absent through capture end: the internal
+stage is discarded without retry.
+
+### Campaign E implication and regression
+
+Campaign E's reported seed-110 pass is useful campaign evidence, but does not
+establish a repair of this mechanism; seed 112 was still running when this
+analysis was requested. `zero_once` changes Z0 generation, which is downstream
+of the erroneous R6 sum. `robust_request_clear` changes request clearing, not
+the sum-veto path. `experimental_register_reset` strengthens/retimes register
+clears, including ALU storage, and delays READY; it does not alter the three
+incoming edges of **27771** or make ordered XOR outputs exclusive. This capture
+has clean operands and a long quiet interval after clear, and its pulse escape
+reproduces from a cold receiver. Stronger prior reset cannot directly remove it.
+
+These options can change scheduling, input phases and the static/device random
+draw assignment, so they can plausibly avoid this particular campaign trajectory.
+They do **not** provide mechanism-based coverage of the remaining datapath
+hazard or add an internal-cell retry. A datapath primitive fix/qualification is
+needed: establish robust veto and source-inhibition timing for repeated delayed
+carry pulses, or use positively qualified/exclusive evaluation. Merely increasing
+the veto or speeding its inhibitor is not qualified here; either can affect
+legitimate ignition and reload. **No netlist change is made.**
+
+Two small, artifact-independent receiving-neuron regressions in
+`tests/test_datapath_stall.py` preserve the captured sum-relay race and the
+two-reader fault, with nominal-weight / pulse-timing and single-reader controls.
+They test the established mechanism, not a whole-copy CUDA replay.
+
+Validation: the requested
+`TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_datapath_stall.py`
+is blocked before collection by sandbox denial of
+`~/.cache/uv/sdists-v9/.git`. **All 13 tests pass** with the same `TMPDIR`,
+`uv run --no-sync`, `UV_PROJECT_ENVIRONMENT` pointing to the existing repository
+virtualenv, task-local `UV_CACHE_DIR` and pytest `--basetemp`, `PYTHONPATH=.`,
+`PYTHONDONTWRITEBYTECODE=1`, and `-p no:cacheprovider`.
+`git diff --check` passes. Only this document and the specified test file changed;
+integration and committing remain with the orchestrator.
