@@ -318,6 +318,25 @@ def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength:
     return relay
 
 
+def add_transaction_edge(net: Netlist, drive: Drive, name: str, source: int) -> tuple[int, Latch]:
+    """Remember consumption until the caller resets the returned latch.
+
+    Local zero-delay inhibition suppresses the initial doublet before either
+    feed-forward inhibitor can arrive (4.4 loop: 1.0 and 2.2 failed corner
+    bursts). Retain the ordinary, slower source inhibitor: speeding it up
+    can suppress the FIRST spike. The spent latch's 0.75-loop hold bridges
+    gaps in the source train. Only the latch joins the reset domain: resetting
+    the source inhibitor would expose the still-draining delayed input.
+    Qualification is for sum-XOR carry inputs with experimental storage
+    autapses and ordinary stage reset/recovery, not arbitrary reset schedules.
+    """
+    spent = add_latch(net, drive, f"{name}.spent")
+    edge = add_edge_relay(net, drive, name, source, hold_from=[spent.u], hold_strength=0.75)
+    net.synapse(edge, edge, -round(4.4 * drive.loop), 0)
+    net.synapse(edge, spent.u, drive.ignite)
+    return edge, spent
+
+
 def connect_trigger(net: Netlist, drive: Drive, source: int, trigger: int, edge: int) -> None:
     """Edge detector: the source's first spike fires the trigger; from the second spike on,
     `edge` (driven by the same source) holds the trigger down for as long as the train lasts.

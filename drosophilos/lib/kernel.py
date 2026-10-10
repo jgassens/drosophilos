@@ -60,7 +60,7 @@ from ..sim.ref64 import RefSim
 from .adder import extend_reset
 from .control import add_kill_pair, add_kill_train, add_request_clear
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
-from .gates import Gates, Rail2
+from .gates import ORDERED_XOR_ONESHOT_VERSION, Gates, Rail2
 from .netlist import Drive, Netlist
 from ..protocol.rate import RATE_ROBUST_VERSION, condition_rate_gate
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
@@ -289,7 +289,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    copy_requires_rail: bool = True, rate_robust: bool = False,
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
-                   experimental_register_reset: bool = False, experimental_autapse: bool = False) -> Pipeline:
+                   experimental_register_reset: bool = False, experimental_autapse: bool = False,
+                   ordered_xor_oneshot: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -344,7 +345,30 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     without mirroring feedback onto readers. It is unqualified on the 44-step
     rate floor and reload margin. All combinations of zero_once,
     robust_request_clear and experimental_register_reset are allowed, subject
-    to their existing restrictions; the control machine is unchanged."""
+    to their existing restrictions; the control machine is unchanged.
+    `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
+    stage resets its spent latch. Operand XORs and carry-generation timing are
+    unchanged. Only the default timing/reset policy, widths 1..8, single-stream
+    memory-free, non-multiplying kernels are supported. Requires rate_robust
+    and experimental_autapse: without latch feedback the corner reset/re-arm
+    survey fails. zero_once may be combined with it."""
+    if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
+        raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
+    if ordered_xor_oneshot and (
+            params != Params() or not 1 <= n <= 8 or mems or phases or
+            (streams and len(streams) != 1) or
+            any(cs["op"] in {"MUL", "MULP", "MULP_ROW", "RING", "LOAD", "STORE"} for cs in spec) or
+            drive not in (None, Drive.from_params(params)) or
+            act_hops != 11 or idle_hops != 20 or watchdog_hops != 170 or
+            in_watchdog_hops is not None or not relight_requests or
+            not powerup_veto or not commit_reignite or retry_clear or
+            start_relight_hops != 5 or request_clear_pulses not in (None, 4) or
+            kernel_kill_pulses != 4 or not true_guards or not relight_repair_delay or
+            not copy_requires_rail or robust_request_clear or robust_register_reset or
+            verified_register_reset or experimental_register_reset):
+        raise ValueError("ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
+                         "single-stream kernels without memories, pacing or multipliers; "
+                         "untested shapes and reset policies are rejected")
     if experimental_autapse and not rate_robust:
         raise ValueError("experimental_autapse requires rate_robust=True")
     if experimental_autapse and (mems or phases or (streams and len(streams) != 1) or
@@ -666,7 +690,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, repair_hops)
             for src, pr in c.reqs.items():
                 add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u, pr[0].u], pr[0])
-        G = Gates(net, drive)
+        G = Gates(net, drive, ordered_xor_oneshot=ordered_xor_oneshot)
         Sc = c.stage
         name = c.name
         if c.op == "MULP_ROW":
@@ -971,6 +995,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "experimental_register_reset": experimental_register_reset,
         "experimental_autapse": experimental_autapse,
         "experimental_autapse_version": EXPERIMENTAL_AUTAPSE_VERSION,
+        "ordered_xor_oneshot": ordered_xor_oneshot,
         "request_clear_pulses": request_clear_pulses,
         "kernel_kill_pulses": drive.kill_pulses,
         "kill_strength": drive.kill_strength,
@@ -979,6 +1004,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     }
     if drive.rate_robust:
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
+    if ordered_xor_oneshot:
+        pl.build_options["ordered_xor_oneshot_version"] = ORDERED_XOR_ONESHOT_VERSION
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 
