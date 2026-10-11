@@ -1022,6 +1022,8 @@ in generic and specialized pipelines. Nondefault timing/reset policies,
 memories, pacing, multiple streams, multipliers and widths outside 1..8 are
 rejected. Experimental storage feedback's previously documented qualification
 limits remain; this option is not a general storage/reset repair.
+Later wider-shape surveys qualify the listed F shapes; see the qualification in
+ [stable_latch.md](stable_latch.md) for the current limits, including `zero_once`.
 
 ### Build record and cost
 

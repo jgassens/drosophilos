@@ -397,14 +397,15 @@ Measured checks:
   Expanded RAM surveys passed **256 writes / 1,024 reads** in each of the
   4-bit nominal, 4-bit mix-B and 8-bit mix-B conditions, with all five failure
   counters zero. The 4-bit nominal sample covers every address/value pair.
-* Two-bit MUL exhausts all 16 operand pairs, then complements both operands on
-  the same physical copies: 32 transactions each nominal/noisy, no failures.
+* Two-bit MUL tests all 16 operand pairs nominally, then complements both operands
+  on the same physical copies. The noisy survey uses 16 random pairs; each condition
+  has 32 transactions and no failures.
   Every actual multiplier latch is inspected after the ordinary clear and
   200 ms recovery; spent-edge counts detect repeated one-shot firing.
 * **Four-bit array MUL fails:** exhaustive nominal 256 pairs plus their
   complemented reloads gives **16 missing high rails / 512 transactions**,
   zero wrong/double rails, repeated one-shots or reset survivors. The 128-draw
-  mix-B survey gives **4 missing high rails / 256 transactions**. The smallest
+  reported mix-B measurement gives **4 missing high rails / 256 transactions**. The smallest
   retained witness is 7 × 1, with the ordinary kernel B/SUB XOR and A/B delays.
   The same two-transaction witness passes with autapse/rate readers but without
   sum one-shots: this exposes a first-edge timing issue in the retimed array,
@@ -438,6 +439,7 @@ Build records retain all effective flags and the existing circuit-version keys.
 campaign blocks and strictly checks every recorded build option and version,
 plus neuron/edge counts if present. Missing versions are rejected there;
 historical tick captures still use `stall_diag`'s existing compatibility rules.
+With configuration F plus `zero_once`, only tick2.c-shaped kernels are allowed because wider-shape combinations remain unsurveyed.
 
 ### Costs and the next campaign
 
