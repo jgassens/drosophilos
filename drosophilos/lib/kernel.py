@@ -339,8 +339,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     explicitly experimental, not an alias for either rejected robust option.
     Producer and machine resets retain their original policy; off is unchanged.
     `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
-    Memories/RAM, phases/pacing, multiple streams and multipliers are rejected;
-    generic and specialized datapaths are allowed. It adds zero-delay, 0.2-loop
+    Memories/RAM, phases/pacing, multiple streams and multipliers require the
+    complete configuration F (also ordered_xor_oneshot); autapse alone remains
+    rejected on those shapes. Generic and specialized datapaths are allowed.
+    It adds zero-delay, 0.2-loop
     inhibitory feedback to each kernel latch member,
     without mirroring feedback onto readers. It is unqualified on the 44-step
     rate floor and reload margin. All combinations of zero_once,
@@ -348,16 +350,23 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     to their existing restrictions; the control machine is unchanged.
     `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
     stage resets its spent latch. Operand XORs and carry-generation timing are
-    unchanged. Only the default timing/reset policy, widths 1..8, single-stream
-    memory-free, non-multiplying kernels are supported. Requires rate_robust
+    unchanged. Only the default timing/reset policy and widths 1..8 are supported.
+    Wider shapes use the same v1 circuits and ordinary reset domains, including
+    multiplier-row spent latches and RAM COPY/word latches. This bounded RefSim
+    qualification is not a game-kernel campaign exit (docs/stable_latch.md).
+    Array MUL above two bits remains rejected after missing-rail failures in
+    its retimed rows; MULP/MULP_ROW use separately reset rows instead.
+    Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
+    if ordered_xor_oneshot and n > 2 and any(cs["op"] == "MUL" for cs in spec):
+        raise ValueError("configuration F rejects array MUL above 2 bits: the retimed array "
+                         "misses the high output rail (4-bit 7 * 1, RefSim nominal); "
+                         "MULP uses separately reset pipelined rows")
     if ordered_xor_oneshot and (
-            params != Params() or not 1 <= n <= 8 or mems or phases or
-            (streams and len(streams) != 1) or
-            any(cs["op"] in {"MUL", "MULP", "MULP_ROW", "RING", "LOAD", "STORE"} for cs in spec) or
+            params != Params() or not 1 <= n <= 8 or
             drive not in (None, Drive.from_params(params)) or
             act_hops != 11 or idle_hops != 20 or watchdog_hops != 170 or
             in_watchdog_hops is not None or not relight_requests or
@@ -367,15 +376,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             not copy_requires_rail or robust_request_clear or robust_register_reset or
             verified_register_reset or experimental_register_reset):
         raise ValueError("ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
-                         "single-stream kernels without memories, pacing or multipliers; "
                          "untested shapes and reset policies are rejected")
     if experimental_autapse and not rate_robust:
         raise ValueError("experimental_autapse requires rate_robust=True")
-    if experimental_autapse and (mems or phases or (streams and len(streams) != 1) or
+    if experimental_autapse and not ordered_xor_oneshot and (mems or phases or (streams and len(streams) != 1) or
                                  any(cs["op"] in {"MUL", "MULP", "MULP_ROW"} for cs in spec)):
         raise ValueError("experimental_autapse supports only single-stream kernels without "
-                         "memories/RAM, phases/pacing or multipliers; these shapes have no "
-                         "probe or campaign evidence (generic and specialized datapaths allowed)")
+                         "memories/RAM, phases/pacing or multipliers when used alone; wider shapes "
+                         "require configuration F with ordered_xor_oneshot and its default timing/width policy")
     if datapath not in ("generic", "specialized"):
         raise ValueError("datapath must be 'generic' or 'specialized'")
     if not relight_requests and true_guards:

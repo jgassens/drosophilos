@@ -680,7 +680,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--ordered-xor-oneshot", action="store_true",
                     help=("consume sum-XOR carry once per stage reset; requires --rate-robust "
                           "and --experimental-autapse (default timing, widths 1..8; "
-                          "no RAM/pacing/multipliers)"))
+                          "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--zero-once", action="store_true",

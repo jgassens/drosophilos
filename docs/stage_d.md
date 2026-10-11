@@ -335,3 +335,69 @@ Campaign F, `tick2.c`, 1,000 ticks × 100 copies, mix B, commit `c2464d7` (merge
   than being generalized to doom4"); doom4's netlist nondeterminism is a separate open item.
 - **Per-copy faults and timeouts**: the runner reports them for the batch only.
 - **Timestep refinement and CUDA transaction-level certification**: outstanding (§6).
+
+## Render campaign after the wider-shape surveys
+
+Configuration F now permits ROM/LOAD, RAM ports, multiple streams, phases and
+MULP rows at widths 1–8 under the default timing/reset policy. Two-bit array MUL
+passes; larger arrays remain rejected after nominal RefSim missing-rail
+failures. The 16-bit doom2/doom4 kernels are still rejected. See
+[the per-shape evidence and exact costs](stable_latch.md#configuration-f-wider-kernel-qualification-2026-10-11).
+No wider-kernel noisy campaign exit has been claimed.
+
+The next runnable campaign is the **8-bit column kernel of examples/render.c**,
+heading 3, eight addresses per pass. Its F generic build is 11,768 neurons /
+24,228 synapses (specialized: 8,318 / 16,730). This is a column/ROM composition
+campaign, not a full game or a RAM/pacing campaign. A full-source, neurally paced
+doom2 F *cost-only candidate* would be 1,050,604 / 2,298,941 generic or
+962,044 / 2,107,085 specialized; those counts do not override its width and
+array-MUL gates.
+
+`kernel_campaign --repeats` repeats the block's input sequence and recomputes
+the oracle over the entire sequence (including state for stateful blocks).
+Start with a short calibration and then compare **1,000 passes / 8,000 columns**
+per copy: one nominal copy and 100-copy mix B at seeds 110 and 113, as for F's
+tick exit. Run from the repository root on one H200:
+
+```sh
+uv run python -m drosophilos.bench.kernel_campaign render --backend torch-fast --device cuda --copies 1 --mix 0 --repeats 2 --max-ms 60000 --rate-robust --experimental-autapse --ordered-xor-oneshot --out render_f_calibration.json
+uv run python -m drosophilos.bench.kernel_campaign render --backend torch-fast --device cuda --copies 1 --mix 0 --seed 1 --repeats 1000 --max-ms 14000000 --rate-robust --experimental-autapse --ordered-xor-oneshot --out render_f_nominal.json
+uv run python -m drosophilos.bench.kernel_campaign render --backend torch-fast --device cuda --copies 100 --mix B --seed 110 --repeats 1000 --max-ms 14000000 --rate-robust --experimental-autapse --ordered-xor-oneshot --out render_f_s110.json
+uv run python -m drosophilos.bench.kernel_campaign render --backend torch-fast --device cuda --copies 100 --mix B --seed 113 --repeats 1000 --max-ms 14000000 --rate-robust --experimental-autapse --ordered-xor-oneshot --out render_f_s113.json
+```
+
+Use the calibration's output completion steps to estimate
+`first + 7999 * mean_interval`, and set the neural ceiling to at least 1.5×
+that value. The local 16-column nominal RefSim run completed in **22,068.4 ms
+neural**, first completion at 4,711.4 ms, mean subsequent interval **1,156.5 ms**;
+all 16 values matched, with zero faults/timeouts/bad outputs. Extrapolation is
+about **9,256 s neural** for 8,000 columns, hence the provisional 14,000 s
+ceiling. Also time a two-pass,
+**100-copy** calibration: the batch wall/neural ratio is very different from
+one copy. Previous H200 measurements give ~1.0–1.1× wall/neural at the small
+single-copy kernel scale and ~11× at 100 copies of the 31k-neuron tick kernel
+([performance comparison](perf_final_comparison.md), §6 above). The 11.8k-neuron
+render build should be cheaper per step, but no F-render H200 measurement is
+available here. Budget **3–5 hours for nominal and roughly 15–30 hours per
+100-copy seed**, reserve 48 hours per noisy job, and replace this planning
+estimate with the measured batch calibration before submitting the long jobs.
+This estimate is not a claimed benchmark result.
+
+Require exact oracle agreement and exactly 8,000 outputs from every copy:
+zero wrong, missing, extra, invalid outputs, faults, timeouts, refusals and
+retries; no blocked copies. The command writes these counters and all output
+values; it is not `stage_d`'s canonical persistent-state scorer. Cross-check the
+column oracle with the IR/C reference and retain the calibrated ceiling,
+wall/neural timing, commit SHA, seed, effective build options and versions.
+`kernel_campaign.rebuild_record` enforces the saved options/versions and costs.
+For a stall, repeat with the original 100-copy topology/seed and
+`--dump-node N --dump-roles REGEX --dump-out PATH`; the existing tick-specific
+stall analyser cannot score render unchanged.
+
+The primitive surveys also include 0–100-step arrival jitter. The current
+kernel campaign runner, like earlier resident-kernel campaigns, loads producer
+bits together: its mix B applies weight/threshold/bias draws and background
+strays, while the jitter field in `Perturbation` is not applied by that runner.
+Label that distinction in the campaign report; a full input-jitter campaign
+requires an explicit runner extension and certification. A render pass cannot
+stand in for the separate RAM, paced-kernel, wide-word or array-MUL work.

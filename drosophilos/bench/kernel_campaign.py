@@ -70,10 +70,35 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
     return ks, pl, tokens, ref
 
 
+def rebuild_record(record: dict):
+    """Rebuild a current campaign, enforcing every effective option/version.
+
+    The historical tick diagnostic remains responsible for legacy records.
+    Wider F kernels first became buildable with complete option records; a
+    missing version must not silently select a different circuit on replay.
+    """
+    flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
+             "verified_register_reset", "experimental_register_reset", "experimental_autapse",
+             "ordered_xor_oneshot")
+    built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
+                  **{key: record.get(key, False) for key in flags})
+    pl = built[1]
+    for key, value in pl.build_options.items():
+        recorded = record.get(key)
+        if key not in record or type(recorded) is not type(value) or recorded != value:
+            raise ValueError(f"unsupported campaign build option {key}: recorded {recorded!r}, current {value!r}")
+    for key, value in (("neurons", pl.net.n), ("edges", pl.net.nnz)):
+        if key in record and record[key] != value:
+            raise ValueError(f"campaign {key} differs from the rebuilt kernel")
+    return built
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("block")
     ap.add_argument("--copies", type=int, default=100)
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="repeat the block's token sequence; recompute the stateful oracle for the full sequence")
     ap.add_argument("--mix", default="B")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-ms", type=float, default=30000, help="ceiling on the neural time (the run stops when every copy has delivered)")
@@ -88,7 +113,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--ordered-xor-oneshot", action="store_true",
                     help=("consume sum-XOR carry once per stage reset; requires --rate-robust "
                           "and --experimental-autapse (default timing, widths 1..8; "
-                          "no RAM/pacing/multipliers)"))
+                          "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--zero-once", action="store_true",
@@ -112,6 +137,8 @@ def parser() -> argparse.ArgumentParser:
 def main(argv=None):
     ap = parser()
     a = ap.parse_args(argv)
+    if a.repeats < 1:
+        ap.error("--repeats must be positive")
     P = Params()
     ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust,
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
@@ -119,6 +146,9 @@ def main(argv=None):
                               verified_register_reset=a.verified_register_reset,
                               experimental_register_reset=a.experimental_register_reset,
                               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot)
+    if a.repeats != 1:
+        tokens = tokens * a.repeats
+        ref = kernel_outputs(ks, tokens)
     B = a.copies
     dump_given = (a.dump_node is not None, a.dump_roles is not None, a.dump_out is not None)
     if any(dump_given) and not all(dump_given):
@@ -154,13 +184,14 @@ def main(argv=None):
         except Exception as exc:
             dump_errors[str(a.dump_node)] = {"path": str(a.dump_out), "error": f"{type(exc).__name__}: {exc}"}
             traceback.print_exc()
-    ok = wrong = missing = 0
+    ok = wrong = missing = extra = 0
     per_node = []
     for b in range(B):
         node_ok = node_wrong = node_missing = 0
         for j, o in enumerate(ks.outputs):
             got = [v for _, v in outs[b][o]]
             want = [r[j] for r in ref]
+            extra += max(0, len(got) - len(want))
             for k, w in enumerate(want):
                 if k < len(got) and got[k] == w:
                     node_ok += 1
@@ -173,8 +204,10 @@ def main(argv=None):
     n = ok + wrong + missing
     rec = {"block": a.block, "datapath": pl.datapath, "backend": a.backend,
            "observe_every": a.observe_every,
-           "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B, "tokens": len(tokens), "neurons": pl.net.n,
-           "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "faults": st["faults"], "timeouts": st["timeouts"],
+           "simulator": st.get("simulator"), "mix": a.mix, "perturbation": str(pert), "copies": B,
+           "seed": a.seed, "repeats": a.repeats, "tokens": len(tokens), "neurons": pl.net.n, "edges": pl.net.nnz,
+           "outputs_expected": n, "ok": ok, "wrong": wrong, "missing": missing, "extra": extra,
+           "faults": st["faults"], "timeouts": st["timeouts"],
            "kill_train": [pl.build_options["kernel_kill_pulses"], pl.build_options["kill_strength"]],
            "true_guard_version": TRUE_GUARD_VERSION,
            "refusals": st.get("refusals", 0), "retries": st.get("retries", 0),

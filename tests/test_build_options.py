@@ -507,6 +507,45 @@ def test_stall_diag_accepts_versionless_rate_circuit_when_counts_prove_identity(
     assert rebuilt.build_options["rate_robust_version"] == RATE_ROBUST_VERSION
 
 
+def test_wider_f_campaign_versions_and_options_are_enforced(monkeypatch):
+    _, pl, _, _ = kernel_campaign.block("render", PARAMS, rate_robust=True,
+                                        experimental_autapse=True, ordered_xor_oneshot=True)
+    record = {"block": "render", "neurons": pl.net.n, "edges": pl.net.nnz, **pl.build_options}
+    rebuilt = kernel_campaign.rebuild_record(record)[1]
+    assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(pl)
+    monkeypatch.setattr(kernel_campaign, "block", lambda *a, **k: (None, rebuilt, [], []))
+    for key in ("experimental_autapse_version", "ordered_xor_oneshot_version", "rate_robust_version",
+                "true_guard_version", "act_hops"):
+        for value in (None, 999, "1", True):
+            with pytest.raises(ValueError, match="unsupported campaign build option"):
+                kernel_campaign.rebuild_record(record | {key: value})
+    with pytest.raises(ValueError, match="neurons differs"):
+        kernel_campaign.rebuild_record(record | {"neurons": 1})
+
+
+def test_campaign_repeats_recompute_stateful_oracle(tmp_path, monkeypatch):
+    from drosophilos.compiler.kernel import kernel_outputs
+    seen = {}
+    def run(pl, params, schedules, **kwargs):
+        ks, _, tokens, _ = kernel_campaign.block("tick", params)
+        assert schedules == [tokens * 2]
+        reference = kernel_outputs(ks, tokens * 2)
+        seen["reference"] = reference
+        outputs = [{name: [(i, row[j]) for i, row in enumerate(reference)]
+                    for j, name in enumerate(ks.outputs)}]
+        return outputs, None, dict(faults=0, timeouts=0, bad_outputs=0, neural_ms=1)
+    monkeypatch.setattr(kernel_campaign, "run_pipeline_batched", run)
+    monkeypatch.setattr(kernel_campaign, "make_perturbed_sim", lambda *a, **k: None)
+    target = tmp_path / "repeated.json"
+    kernel_campaign.main(["tick", "--copies", "1", "--repeats", "2", "--out", str(target)])
+    record = json.loads(target.read_text())
+    assert record["reference"] == seen["reference"]
+    assert record["tokens"] == 16 and record["repeats"] == 2
+    assert record["wrong"] == record["missing"] == 0
+    with pytest.raises(SystemExit):
+        kernel_campaign.main(["render", "--repeats", "0"])
+
+
 def _assert_conditioned_train_inputs(net, drive):
     # Undo compiled gain before identifying weak inputs. This includes edges added
     # AFTER conditioning, and makes no assumptions about source role names (.u/.p/
