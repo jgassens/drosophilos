@@ -322,6 +322,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     `**LEGACY_2026_09_20` to select their complete measured legacy combination in one place.
     `zero_once=True` replaces per-bit Z0 ignition with a shared OR/one-shot in each
     stage's reset domain, keeping nonzero results at the latch's nominal rate.
+    With configuration F enabled (experimental_autapse or ordered_xor_oneshot), it
+    is limited to tick2.c-shaped kernels because wider-shape combinations are unsurveyed.
     `robust_request_clear=True` uses the compact four-tap request-only clear:
     1.1-loop inhibition and zero-delay tap links. It requires the standard
     request-priority policy, four configured taps, 0.75 base kill strength,
@@ -345,9 +347,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     It adds zero-delay, 0.2-loop
     inhibitory feedback to each kernel latch member,
     without mirroring feedback onto readers. It is unqualified on the 44-step
-    rate floor and reload margin. All combinations of zero_once,
-    robust_request_clear and experimental_register_reset are allowed, subject
-    to their existing restrictions; the control machine is unchanged.
+    rate floor and reload margin. zero_once, robust_request_clear and
+    experimental_register_reset may otherwise be combined subject to their
+    existing restrictions; the control machine is unchanged.
     `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
     stage resets its spent latch. Operand XORs and carry-generation timing are
     unchanged. Only the default timing/reset policy and widths 1..8 are supported.
@@ -377,8 +379,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             verified_register_reset or experimental_register_reset):
         raise ValueError("ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
                          "untested shapes and reset policies are rejected")
-    if zero_once and (mems or phases or (streams and len(streams) != 1) or
-                      any(cs["op"] in {"MUL", "MULP", "MULP_ROW"} for cs in spec)):
+    if zero_once and (experimental_autapse or ordered_xor_oneshot) and (
+            mems or phases or (streams and len(streams) != 1) or
+            any(cs["op"] in {"MUL", "MULP", "MULP_ROW"} for cs in spec)):
         raise ValueError("zero_once is not surveyed with memories/RAM, phases/pacing, multiple streams, "
                          "or multipliers")
     if experimental_autapse and not rate_robust:

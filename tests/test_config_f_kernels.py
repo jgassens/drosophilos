@@ -147,6 +147,18 @@ def test_wider_shapes_require_complete_f(shape):
         small_shape(shape, ordered_xor_oneshot=False)
 
 
+def test_non_f_zero_once_render_remains_buildable():
+    """The fda6528-compatible non-F build is outside the F survey gate."""
+    from drosophilos.bench import kernel_campaign
+
+    _, pl, _, _ = kernel_campaign.block("render", P, zero_once=True)
+    assert pl.build_options["zero_once"] is True
+    assert not pl.build_options["experimental_autapse"]
+    assert not pl.build_options["ordered_xor_oneshot"]
+    with pytest.raises(ValueError, match="zero_once is not surveyed"):
+        kernel_campaign.block("render", P, zero_once=True, **F)
+
+
 @pytest.mark.parametrize("shape", [
     pytest.param("rom", id="ROM"),
     pytest.param("ram", id="RAM"),

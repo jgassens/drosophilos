@@ -439,6 +439,7 @@ Build records retain all effective flags and the existing circuit-version keys.
 campaign blocks and strictly checks every recorded build option and version,
 plus neuron/edge counts if present. Missing versions are rejected there;
 historical tick captures still use `stall_diag`'s existing compatibility rules.
+With configuration F plus `zero_once`, only tick2.c-shaped kernels are allowed because wider-shape combinations remain unsurveyed.
 
 ### Costs and the next campaign
 
