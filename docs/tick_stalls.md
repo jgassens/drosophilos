@@ -1182,3 +1182,11 @@ and compact atomic dumps with a bounded window around each copy's last commit (`
 the stalls (98/100 done), but died while writing a per-spike-role dump after filling the home
 quota. The rerun (Juno 428908--428910) was lost to the Juno filesystem outage at about 16:20
 on 2026-09-30; all logs froze. Replays are queued on Juno 429332--429334 and G2 3979025.
+
+## Campaigns E and F Stage D exit (2026-10-11)
+
+Campaign E: `tick2.c`, 1,000 ticks × 100 copies, mix B, `--rate-robust --experimental-autapse --zero-once --robust-request-clear --experimental-register-reset`, commit `831016a`. Juno H100 seed 110 (449853; 30,487 neurons) and seed 112 (449854) each **met exit**: 100/100, 0 faults/timeouts/wrong/missing, not truncated. E total: 2/2 campaigns met exit, 0 stalled/200 copies.
+
+Campaign F: `tick2.c`, 1,000 ticks × 100 copies, mix B, `--rate-robust --experimental-autapse --ordered-xor-oneshot`, commit `c2464d7` (merged `da15590`). Juno H200 seed 110 (451082; 31,363 neurons) and seed 113 (451083) each **met exit**: 100/100, 0 faults/timeouts/wrong/missing, not truncated. F total: 2/2 campaigns met exit, 0 stalled/200 copies. Exact one-sided 95% binomial bounds: F 0/200, 1.4867039%; E+F pooled 0/400, 0.7461356%, with the latter explicitly pooling different builds. One-sided Fisher exact F 0/200 versus pooled no-autapse baselines 15/300 is p=0.000407242. The nominal 1,000-tick F run is queued (Juno 451548), pending.
+
+The autapse-alone residual was real: seed 110 copy 82 (Juno 449070/449820/450661) formed an R6 double rail when an ordered-XOR sum relay escaped its veto on a second carry pulse. `ordered_xor_oneshot` fixes that primitive: 0 double rails in 120,000 trials; slow tests rerun on Juno 451099, 5 passed. Autapse alone totals 4/5 campaigns, 1 stalled/500; E 2/2, 0/200; F 2/2, 0/200. Recommend F as the leanest configuration that met exit on every seed tried: `rate_robust` plus the two opt-ins `experimental_autapse` and `ordered_xor_oneshot`. It is still opt-in and experimental, has two seeds per configuration, covers toy tick only, and the default-build decision is the user's.
