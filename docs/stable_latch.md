@@ -22,8 +22,10 @@ from the current circuit. Records without the version key mean version 1,
 because commits f71538c..63c41f8 built exactly that circuit; missing boolean
 flags still default to false.
 
-The opt-in rejects memories/RAM, phases/pacing, multiple input streams and
-multipliers (array or pipelined): no probe or campaign evaluated those shapes.
+Autapse **alone** still rejects memories/RAM, phases/pacing, multiple input
+streams and multipliers. The complete configuration F has the narrower,
+per-shape qualification described below; this does not qualify those shapes
+with autapse alone.
 Both generic and specialized `tick2.c` datapaths remain allowed; specialized
 Stage D seed 108 (Juno 449072) met exit with 100/100 copies and 26,683 neurons.
 Same-seed autapse and legacy campaigns are
@@ -341,3 +343,132 @@ TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_experimental_a
 
 Slow qualification probes retain search-passer refutations, 40,000-trial
 surveys, holding/distribution exposures, gate controls and recovery comparisons.
+
+## Configuration F: wider kernel qualification (2026-10-11)
+
+F means `rate_robust=True, experimental_autapse=True,
+ordered_xor_oneshot=True`, with the existing default timing/reset policy.
+These are **bounded RefSim composition qualifications for experimental builds**,
+not a new Stage D exit, a proof over all mix-B draws, or a resolution of the
+isolated rate-floor/reload frontier above. The control machine and every
+option-off netlist are unchanged. Circuit versions remain autapse v1 and
+ordered-XOR v1: no weights, delays, readers or reset trains were retuned.
+
+| Shape | Added circuitry and reset ownership | Decision for F |
+|---|---|---|
+| ROM / LOAD | Exact address-mismatch veto neurons, read relays into operand-token latches; generic LOAD retains the PASSB mux and unused ordered adder, specialized LOAD retains only PASSB. Operand latches clear with the LOAD stage; no stored ROM word latch. | Allowed, widths 1–8. Autapse/one-shot apply unchanged. |
+| RAM / STORE / LOAD | Word registers contain dual rails, bit-valid ORs, completion trees, conditioned readers and ordinary four-tap resets/READY chains. Each write port has a COPY latch cleared by its STORE stage. Shared ports add per-word marks and a completion-driven kill train for marks and all COPY latches. Address mismatch vetoes are combinational; reads feed LOAD's token latches. | Allowed, widths 1–8, under the existing valid-address, initialized-read and non-overlapping-write contract. No new reset policy. |
+| MUL array | Partial-product rails; successive ordered ripple adders; completion-tree retiming between rows. All row sums, carries, retiming latches and one-shot spent latches share the cell's stage reset. | **Only widths 1–2 allowed. Above 2 remains rejected:** the retimed one-shot path fails the nominal primitive survey. |
+| MULP / MULP_ROW | Each row carries accumulator, A/B and flags in its stage/master (`3*n+3` bits), forms shifted partial products and uses one ordered ripple adder. Each row has its own request, commit, reset and one-shot spent latches. No between-row `Gates.retime` tree. | Allowed, widths 1–8. Existing row timing and reset ownership suffice in the tested envelope. |
+| Multiple streams | One producer/stage/master, creq pair, watchdog and conditioned readers per stream, with the same reader-request/commit guards as the single stream. | Allowed with F; repeated two-stream operand and independent-output kernels complete. |
+| Phases / pacing | Phase OK kill pairs gate input commits. Ring lines are kill pairs; multiple completion sources get separate rings, wrapped pairs and a guarded join. No XOR datapath is added by the pacing itself. | Allowed with F. Local autapses cover these pairs; ordinary four-tap kill trains are unchanged. Preserve the existing host schedule contract; phase gates do not supply missing tokens or fix cyclic dependencies. |
+
+The autapse transform still runs **after** RAM ports, shared-port marks, phase
+guards and rate readers are installed. It adds exactly one zero-delay
+`-round(0.2*loop)` edge per latch member while suppressing feedback mirroring;
+genuine clears retain their reader mirrors. `Gates.ordered_xor_oneshot` reaches
+every `ripple_adder_ordered`, including MULP rows, and its spent latches are
+included in that row's `extend_reset`. The default control-machine ALU never
+opts in. Tests check reset ownership, every wider population's feedback, and
+ordered option-off fingerprints captured from caf043e for all eight shapes.
+
+`tests/test_config_f_kernels.py` uses float64 **RefSim with actual primitives**.
+Mix B is independently drawn log-weight sigma .04, threshold/bias sigma .2 mV,
+Bernoulli 5 Hz × 150 q background per neuron/step, and 0–100-step host-load
+jitter. These are the campaign's laws, not its exact topology-dependent draw
+sequence. Counts are finite exposures, not confidence bounds over game kernels.
+
+Measured checks:
+
+* All eight 2-bit nominal kernels (ROM, RAM, shared RAM, MUL, MULP, streams,
+  each-phase and wrap-phase) computed the expected repeated values, with zero
+  faults, timeouts, bad decodes, refusals or retries. Each/wrap tests additionally
+  assert the order of phase outputs over three frames.
+* RAM's fast survey performed 32 writes and 128 reads per condition (nominal
+  and mix B), visiting all four addresses, overwriting with complemented rails,
+  and reading every peer after each write. No wrong, double or missing rails,
+  surviving COPY/read-register latches, or missing write/read completions.
+  Word overwrite uses its real reset → READY → COPY path, not a host reload.
+  Read-register and port clears are inspected after 200 ms, then reused.
+  The survey also reports the interval from the word's last inhibitory spike
+  to COPY ignition; this is a measured sample margin, not a universal minimum.
+  A separate 8-bit, seed-6110 mix-B margin probe measured **58.4–67.0 ms**
+  from the last clear spike to COPY (two writes, eight reads, no errors).
+  Expanded RAM surveys passed **256 writes / 1,024 reads** in each of the
+  4-bit nominal, 4-bit mix-B and 8-bit mix-B conditions, with all five failure
+  counters zero. The 4-bit nominal sample covers every address/value pair.
+* Two-bit MUL exhausts all 16 operand pairs, then complements both operands on
+  the same physical copies: 32 transactions each nominal/noisy, no failures.
+  Every actual multiplier latch is inspected after the ordinary clear and
+  200 ms recovery; spent-edge counts detect repeated one-shot firing.
+* **Four-bit array MUL fails:** exhaustive nominal 256 pairs plus their
+  complemented reloads gives **16 missing high rails / 512 transactions**,
+  zero wrong/double rails, repeated one-shots or reset survivors. The 128-draw
+  mix-B survey gives **4 missing high rails / 256 transactions**. The smallest
+  retained witness is 7 × 1, with the ordinary kernel B/SUB XOR and A/B delays.
+  The same two-transaction witness passes with autapse/rate readers but without
+  sum one-shots: this exposes a first-edge timing issue in the retimed array,
+  not a failed latch clear. Repeated legacy XOR pulses can recover that case.
+  A full kernel's particular nominal 7 × 1 schedule does compute 7; it does not
+  invalidate the primitive's allowed-phase witness. The public builder refuses
+  wider arrays instead of relying on that one favorable schedule. A repair must
+  qualify first-edge timing through every retiming row before lifting this gate.
+* MULP exhausts 2-bit operand pairs (32 transactions including complemented
+  reloads); noisy 4-bit and 8-bit pipelines test 16 and 8 transactions,
+  respectively. All complete correctly. This tests the real expanded rows and
+  their full handshakes, including both input streams and input jitter.
+* Both generic and specialized two-copy mix-B versions of all eight small
+  kernels pass, including host-bit jitter, repeated writes through shared RAM
+  ports, and three frames of each/wrap pacing. Ring primitive surveys include
+  K=1, 2 and 3, and the larger **64-copy, K=8, three-source join**: **4,608
+  advances**, no wrong/double/dark line rails or missing/extra wraps. These use
+  the kernel's four-tap kill trains, not the control machine's three-tap drive.
+* The real 8-bit render column kernel completes two passes / 16 outputs
+  nominally in 22,068.4 ms neural, with all values correct and no faults,
+  timeouts or bad decodes. This is a short composition check, not the proposed
+  1,000-pass campaign.
+
+Widths above eight remain unqualified for the ordered one-shot. In particular,
+**doom2/doom4 are not unlocked** by these small-width results. Alternative
+physics, timing or reset policies retain the existing rejection. Autapse-alone
+wider kernels also remain rejected: these measurements concern F.
+
+Build records retain all effective flags and the existing circuit-version keys.
+`kernel_campaign.rebuild_record(record)` reconstructs current render/perspective
+campaign blocks and strictly checks every recorded build option and version,
+plus neuron/edge counts if present. Missing versions are rejected there;
+historical tick captures still use `stall_diag`'s existing compatibility rules.
+
+### Costs and the next campaign
+
+Costs below are exact construction counts, with default timing and `zero_once`
+off. Render is `kernel_campaign.block("render")`: the 8-bit column kernel,
+heading 3. Doom2 is the **full source**, compiled with `compile_program`, array
+MUL, neural pacing and counts `{"input": 160, "p": 16000}` (not the resized
+8×5 performance fixture).
+
+| Build | Rate readers only, neurons / synapses | F, neurons / synapses | Added by F |
+|---|---:|---:|---:|
+| render, generic | 11,448 / 20,942 | **11,768 / 24,228** | +320 / +3,286 |
+| render, specialized | 8,238 / 14,792 | **8,318 / 16,730** | +80 / +1,938 |
+| doom2, generic, **cost-only candidate** | 1,037,804 / 2,041,991 | **1,050,604 / 2,298,941** | +12,800 / +256,950 |
+| doom2, specialized, **cost-only candidate** | 955,644 / 1,884,471 | **962,044 / 2,107,085** | +6,400 / +222,614 |
+
+The doom2 F counts were obtained by constructing the rate-reader netlist with
+`Gates(..., ordered_xor_oneshot=True)` and applying the v1 autapse finalizer.
+That offline cost calculation bypasses the gate **only for counting**; it is
+not a runnable/qualified public F build. Both 16-bit width and its wider array
+MUL remain blockers. Default render counts are 11,018 / 19,942 generic and
+7,808 / 13,792 specialized.
+
+See [stage_d.md](stage_d.md#render-campaign-after-the-wider-shape-surveys) for the
+render campaign commands, exit checks and one-H200 planning estimate. Required
+fast regression:
+
+```sh
+TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_config_f_kernels.py tests/test_experimental_autapse.py tests/test_ordered_xor.py tests/test_build_options.py -m 'not slow'
+```
+
+Expanded surveys use `uv run pytest -s tests/test_config_f_kernels.py -m slow`.
+The rejected array surveys assert the rejection and retain the nominal failure
+count; they must not be relabeled as successful arithmetic qualification.

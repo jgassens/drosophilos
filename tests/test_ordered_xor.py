@@ -383,10 +383,9 @@ def test_requires_qualified_storage_and_readers(rate, autapse):
 
 @pytest.mark.parametrize("options", [
     {"n": 9}, {"params": replace(P, dt=.2)}, {"act_hops": 10}, {"idle_hops": 19},
-    {"streams": ["a", "b"]}, {"mems": {"ram": (2, {})}},
-    {"phases": [("input", "out", "each")]}, {"robust_request_clear": True},
+    {"robust_request_clear": True},
     {"experimental_register_reset": True}, {"kernel_kill_pulses": 3},
-    {"retry_clear": True}, {"spec": [{"name": "out", "op": "MUL", "a": "input", "b": ("const", "k")}]},
+    {"retry_clear": True},
 ])
 def test_unqualified_shapes_rejected(options):
     from drosophilos.lib.kernel import build_pipeline
