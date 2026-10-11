@@ -147,6 +147,18 @@ def test_wider_shapes_require_complete_f(shape):
         small_shape(shape, ordered_xor_oneshot=False)
 
 
+@pytest.mark.parametrize("shape", ["RAM", "MUL", "MULP", "streams", "each", "wrap"])
+def test_zero_once_rejects_unsurveyed_wider_shapes(shape):
+    with pytest.raises(ValueError, match="zero_once is not surveyed"):
+        small_shape(shape, zero_once=True)
+
+
+@pytest.mark.parametrize("datapath", ["generic", "specialized"])
+def test_zero_once_tick2_remains_allowed(datapath):
+    from drosophilos.lib.kernel import build_pipeline
+    build_pipeline("tick2.c", zero_once=True, datapath=datapath)
+
+
 @pytest.mark.parametrize("options", [dict(width=16), dict(act_hops=10), dict(kernel_kill_pulses=3),
                                     dict(experimental_register_reset=True), dict(robust_request_clear=True)])
 def test_unevaluated_timing_and_width_remain_rejected(options):
@@ -304,6 +316,8 @@ def test_multiplier_large_survey(width, trials, noisy):
     # silently enabled by the pipelined row qualification.
     if width == 4 and not noisy:
         assert result == dict(trials=512, wrong=0, double=0, missing=16, repeated=0, survivors=0)
+    if width == 4 and noisy:
+        assert result == dict(trials=256, wrong=0, double=0, missing=4, repeated=0, survivors=0)
     with pytest.raises(ValueError, match="rejects array MUL above 2 bits"):
         small_shape("MUL", width)
 

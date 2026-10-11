@@ -377,6 +377,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             verified_register_reset or experimental_register_reset):
         raise ValueError("ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
                          "untested shapes and reset policies are rejected")
+    if zero_once and (mems or phases or (streams and len(streams) != 1) or
+                      any(cs["op"] in {"MUL", "MULP", "MULP_ROW"} for cs in spec)):
+        raise ValueError("zero_once is not surveyed with memories/RAM, phases/pacing, multiple streams, "
+                         "or multipliers")
     if experimental_autapse and not rate_robust:
         raise ValueError("experimental_autapse requires rate_robust=True")
     if experimental_autapse and not ordered_xor_oneshot and (mems or phases or (streams and len(streams) != 1) or
