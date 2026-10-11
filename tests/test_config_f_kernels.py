@@ -147,7 +147,16 @@ def test_wider_shapes_require_complete_f(shape):
         small_shape(shape, ordered_xor_oneshot=False)
 
 
-@pytest.mark.parametrize("shape", ["RAM", "MUL", "MULP", "streams", "each", "wrap"])
+@pytest.mark.parametrize("shape", [
+    pytest.param("rom", id="ROM"),
+    pytest.param("ram", id="RAM"),
+    pytest.param("ram_shared", id="RAM-shared"),
+    pytest.param("MUL", id="MUL"),
+    pytest.param("MULP", id="MULP"),
+    pytest.param("streams", id="streams"),
+    pytest.param("each", id="each"),
+    pytest.param("wrap", id="wrap"),
+])
 def test_zero_once_rejects_unsurveyed_wider_shapes(shape):
     with pytest.raises(ValueError, match="zero_once is not surveyed"):
         small_shape(shape, zero_once=True)
@@ -155,8 +164,9 @@ def test_zero_once_rejects_unsurveyed_wider_shapes(shape):
 
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
 def test_zero_once_tick2_remains_allowed(datapath):
-    from drosophilos.lib.kernel import build_pipeline
-    build_pipeline("tick2.c", zero_once=True, datapath=datapath)
+    from drosophilos.bench.stage_d import build, load_kernel
+
+    build(load_kernel(), P, datapath, zero_once=True, **F)
 
 
 @pytest.mark.parametrize("options", [dict(width=16), dict(act_hops=10), dict(kernel_kill_pulses=3),
