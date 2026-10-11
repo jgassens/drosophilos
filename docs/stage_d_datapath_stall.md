@@ -1055,3 +1055,7 @@ above. The three 40,000-trial XOR surveys and both large arithmetic surveys
 also passed; the eight-bit noisy survey was rerun after expanding load jitter
 to mix B's full 0–100-step range. `git diff --check` passes. Only the task's
 owned files are modified.
+
+### Campaign F result
+
+Campaign F (`tick2.c`, 1,000 ticks × 100 copies, mix B) used `--rate-robust --experimental-autapse --ordered-xor-oneshot`, commit `c2464d7` (merged `da15590`). Juno H200 seed 110 (451082; 31,363 neurons) and seed 113 (451083) each met exit, 100/100, with 0 faults/timeouts/wrong/missing and no truncation. This follows the real autapse-alone residual: seed 110 copy 82 (Juno 449070/449820/450661) was an R6 double rail because an ordered-XOR sum relay escaped its veto on a second carry pulse. The one-shot fixes that primitive: 0 double rails in 120,000 trials; slow tests rerun on Juno 451099, 5 passed. The nominal 1,000-tick F run is queued as Juno 451548, pending.
