@@ -185,13 +185,14 @@ class Gates:
             carries.append(Rail2(c0, c1))
         return sums, carries, x, cds
 
-    def retime(self, name: str, X: list[Rail2], hops: int = 3) -> list[Rail2]:
+    def retime(self, name: str, X: list[Rail2], hops: int = 3, *, output_start: int = 0) -> list[Rail2]:
         """A copy of the word whose bits all rise together: bit-valid ORs -> completion tree ->
         (delayed) one veto relay per rail, vetoed by the bit's other rail. Needed where a
         word's bits arrive spread out (a ripple adder's sums) but must be a LATE operand
         whose bits are aligned (the next row of a multiplier): with the spread, a generate in
         a low stage lets the carry chain overtake a late high bit and the sum double-rails
-        (measured). Cost ~75 neurons and ~110 ms per 4-bit word."""
+        (measured). Cost ~75 neurons and ~110 ms per 4-bit word. `output_start`
+        returns only that suffix; completion still waits for the whole word."""
         valids = []
         for i, x in enumerate(X):
             g, lv = add_or_latched(self.net, self.drive, f"{name}.v{i}", [x.r0.u, x.r1.u])
@@ -205,6 +206,8 @@ class Gates:
         d = add_delay_chain(self.net, self.drive, f"{name}.d", root.u, hops)
         out = []
         for i, x in enumerate(X):
+            if i < output_start:
+                continue
             r0, r1 = self.latch(f"{name}.o{i}r0"), self.latch(f"{name}.o{i}r1")
             self.veto(f"{name}.o{i}r0.g", d, [x.r1.u], r0)
             self.veto(f"{name}.o{i}r1.g", d, [x.r0.u], r1)
@@ -240,16 +243,17 @@ class Gates:
             addend = [zero] * j + [pp[m - j][j] for m in range(j, n)]
             # the running sum is LATE and must be aligned (re-timed through its completion); the
             # addend is EARLY (partial products are valid at Ad + 4)
-            acc_r = self.retime(f"{name}.rt{j}", acc)
             if self.ordered_xor_oneshot and n > 2 and self.ordered_xor_oneshot_mul_version:
                 # Adding zero below the shift cannot generate a carry. Preserve those
                 # bits and start the real addition at j with Cin=0. In the old full
                 # row, their unnecessary propagate chain put the 7*1 top rail past
                 # the survey's 900-ms clear, despite a correct single first edge.
+                acc_r = self.retime(f"{name}.rt{j}", acc, output_start=j)
                 sums, _, _, _ = self.ripple_adder_ordered(
-                    f"{name}.row{j}", acc_r[j:], addend[j:], zero, carry_hops)
+                    f"{name}.row{j}", acc_r, addend[j:], zero, carry_hops)
                 acc = acc[:j] + sums
             else:
+                acc_r = self.retime(f"{name}.rt{j}", acc)
                 sums, carries, x, cds = self.ripple_adder_ordered(f"{name}.row{j}", acc_r, addend, zero, carry_hops)
                 acc = sums
         return acc

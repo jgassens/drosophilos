@@ -7,6 +7,7 @@ widths and physical mix-B draws; neither is a game-kernel campaign exit.
 from dataclasses import replace
 import hashlib
 import json
+import os
 
 import numpy as np
 import pytest
@@ -386,11 +387,21 @@ def test_multiplier_fast_survey(noisy):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("width,trials,noisy", [(3, 64, False), (3, 128, True),
-                                               (4, 256, False), (4, 128, True),
-                                               (8, 256, False), (8, 128, True)])
+                                               (4, 256, False), (4, 128, True)])
 def test_multiplier_large_survey(width, trials, noisy):
     result = multiplier_survey(width, trials, noisy)
     print("mul survey", width, noisy, result)
+    assert result == dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("DROSO_WIDE_MUL") != "1",
+                    reason="width-8 cluster qualification requires DROSO_WIDE_MUL=1")
+@pytest.mark.parametrize("trials,noisy", [(256, False), (128, True)])
+def test_multiplier_width8_cluster_survey(trials, noisy):
+    # Primitive qualification only; the public width-8 builder remains gated.
+    result = multiplier_survey(8, trials, noisy)
+    print("mul cluster survey", 8, noisy, result)
     assert result == dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0)
 
 
@@ -420,6 +431,32 @@ def test_qualified_array_builder_records_version_and_reset_ownership(width):
     targets = {d for s, d, q in zip(pl.net.src, pl.net.dst, pl.net.quanta)
                if s == pl.cells[0].stage.reset_inh and q < 0}
     assert spent and spent <= targets
+    for j in range(1, width):
+        for i in range(width):
+            assert f"out.mul.rt{j}.v{i}.or" in pl.net.roles
+            for rail in (0, 1):
+                assert (f"out.mul.rt{j}.o{i}r{rail}.u" in pl.net.roles) == (i >= j)
+
+
+def test_retime_suffix_preserves_whole_word_completion():
+    from drosophilos.lib.gates import Gates, Rail2
+    from drosophilos.lib.netlist import Drive, Netlist
+
+    snapshots = []
+    for output_start in (0, 2):
+        net = Netlist(P)
+        g = Gates(net, Drive.from_params(P))
+        word = [Rail2(g.latch(f"a{i}r0"), g.latch(f"a{i}r1")) for i in range(4)]
+        out = g.retime("rt", word, output_start=output_start)
+        assert len(out) == 4 - output_start
+        # Everything constructed before the output latches is identical,
+        # including each bit-valid input, the completion tree and its delay.
+        boundary = net.roles.index(f"rt.o{output_start}r0.u")
+        snapshots.append((net.roles[:boundary], net.bias[:boundary],
+                          [(s, d, q, delay) for s, d, q, delay in
+                           zip(net.src, net.dst, net.quanta, net.delay)
+                           if s < boundary and d < boundary]))
+    assert snapshots[0] == snapshots[1]
 
 
 @pytest.mark.parametrize("width", [3, 5, 6, 7, 8, 9, 16])

@@ -570,3 +570,63 @@ The public builder currently allows array MUL widths **1, 2, 4**. The
 requires a power-of-two result subtree for its zero flag, so width three is
 still refused. Unsurveyed widths also remain refused; MULP's separate
 qualification is unchanged.
+
+## Configuration F: prefix-bypass review corrections (2026-10-12)
+
+The earlier bypass counts are retained above as construction history. Wide-array
+v1 now omits the unused retime output latches and veto relays for bits below
+each row's shift. `retime(..., output_start=j)` still constructs bit-valid
+latches for every accumulator bit, the same whole-word completion tree and
+the same completion delay; only output bits j through n−1 are copied. Other
+retime callers retain all outputs. The wide-array version remains **1**.
+All pre-existing frozen digests remain unchanged; there was no frozen digest
+for the version-1 wide-array circuit.
+
+Corrected exact primitive fixture counts, including ordinary reset fan-out,
+local autapses and downstream readers, supersede the preceding cost table:
+
+| Width | Removed neurons / synapses versus version 0 in successive rows j=1..n−1 | Version 0 → reviewed version 1 |
+|---|---|---|
+| 4 | 80 / 172; 160 / 344; 234 / 504 | 1,565 / 3,292 → **1,091 / 2,272** (−474 / −1,020) |
+| 8 (construction only) | 80 / 172; 160 / 344; 240 / 516; 320 / 688; 400 / 860; 480 / 1,032; 546 / 1,176 | 6,497 / 14,028 → **4,271 / 9,240** (−2,226 / −4,788) |
+
+The unused output removal saves a further 10*j neurons and 24*j synapses per
+row: 60 / 144 at width four and 280 / 672 at width eight. Combined savings
+versus version 0 are 80*j / 172*j for non-final rows and 78*j / 168*j for
+the final row. Completion circuitry and partial products retain their original
+construction.
+
+Width eight is **not qualified**: its mix-B survey was never completed, and
+the public builder continues to refuse it. Its nominal 256-pair survey
+(512 transactions including complemented reloads) and mix-B 128-pair survey
+(256 transactions including reloads) now live in the separate opt-in slow
+`test_multiplier_width8_cluster_survey`. It skips unless `DROSO_WIDE_MUL=1`:
+
+```sh
+DROSO_WIDE_MUL=1 uv run pytest tests/test_config_f_kernels.py -q -s -k test_multiplier_width8_cluster_survey
+```
+
+Those zero-failure assertions are future cluster qualification criteria, not
+claims of completed validation. The ordinary large-survey parametrization now
+contains only widths three and four; the separate width-four nominal kernel
+test still covers output mux, completion, commit and reset ownership.
+
+Foreground review validation:
+
+* `uv run pytest tests/test_build_options.py tests/test_config_f_kernels.py tests/test_ordered_xor.py -q -m 'not slow'`
+  exited **0**, with **199 passed** and all frozen digests unchanged. The new
+  completion-tree structural test was added after this run collected its tests
+  and passed separately: **1 passed**, with the two width-eight cluster cases
+  **skipped** without the opt-in variable. Together these cover all **200**
+  fast tests in the final file state.
+* `uv run pytest tests/test_config_f_kernels.py -q -k 'test_multiplier_large_survey or test_qualified_array_kernel_nominal'`
+  exited **0**: **5 passed, 95 deselected in 186.47s (0:03:06)**. Width-three
+  nominal / mix-B covered **128 / 256** transactions; width-four nominal /
+  mix-B covered **512 / 256** transactions. All wrong/double/missing,
+  repeated-one-shot and reset-survivor counters were **zero**. The full
+  width-four nominal kernel also passed. The unused-output removal is retained.
+
+These runs used the existing project environment without dependency syncing,
+with imports directed at this worktree and writable temporary/cache locations.
+The slow run overrode the configured extra `-q` solely to show pytest's exact
+result summary. Width-eight cluster qualification was not run.
