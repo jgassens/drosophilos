@@ -464,7 +464,7 @@ def test_retime_suffix_preserves_whole_word_completion():
 
 @pytest.mark.parametrize("width", [3, 5, 6, 7, 9, 16])
 def test_other_array_widths_remain_rejected(width):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="rejects unqualified or unsupported array MUL width"):
         small_shape("MUL", width)
 
 
