@@ -2,7 +2,8 @@
 
 `drosophilos/bench/stage_d.py`, `tests/test_stage_d.py`. Status (2026-09-25): harness built
 and tested on the laptop (6 neural ticks on RefSim match every tick); **the 1,000-tick run has
-not been run yet** — it is a cluster job, commands below.
+not been run yet** — it is a cluster job, commands below. Update 2026-10-12: the 1,000-tick
+exit has been run; see §8.
 
 ## 1. The exit
 
@@ -324,6 +325,8 @@ Campaign E, `tick2.c`, 1,000 ticks × 100 copies, mix B, commit `831016a`, used 
 
 Campaign F, `tick2.c`, 1,000 ticks × 100 copies, mix B, commit `c2464d7` (merged `da15590`), used `--rate-robust --experimental-autapse --ordered-xor-oneshot`. On Juno H200, seed 110 (451082; 31,363 neurons) and seed 113 (451083) each **met exit**: 100/100, 0 faults/timeouts/wrong/missing, not truncated. F totals 2/2 exits met and 0 stalled/200 copies. The exact one-sided 95% binomial upper bound is `1 - 0.05^(1/200) = 0.0148670392` (1.4867039%) for F; E+F pooled is 0/400 and `1 - 0.05^(1/400) = 0.0074613555` (0.7461356%), while noting that they are different builds. One-sided Fisher exact F 0/200 versus pooled no-autapse baselines 15/300 is p=0.000407242. Nominal: `tick2.c`, 1 copy, mix none, seed 1, 1,000 ticks, `--rate-robust --experimental-autapse --ordered-xor-oneshot`, Juno H100 451587, commit `ded224b`: exit met; 1,000/1,000 ticks matched, 0 wrong, faults, timeouts, missing, refusals or retries; 31,363 neurons, 4 h 23 min wall on one H100. Stage D exit is met with configuration F: nominal plus 100-copy mix B on seeds 110 and 113. The autapse-alone residual was real: generic seed 110, copy 82 (Juno 449070/449820/450661) was an R6 double rail when an ordered-XOR sum relay escaped its veto on a second carry pulse; `ordered_xor_oneshot` fixes that primitive (0 double rails in 120,000 trials; slow tests rerun on Juno 451099: 5 passed). F is the leanest configuration to meet exit on every seed tried: `rate_robust` plus opt-ins `experimental_autapse` and `ordered_xor_oneshot`. It remains experimental and opt-in, has two seeds per configuration, covers toy tick only, and the default-build decision is the user's.
 
+Added 2026-10-12, configuration F `tick2.c` campaigns (same flags, records built at `caf043e`): generic seed 114, Juno H200 (451848), **met exit**, 100/100, 100,000 matched ticks, 0 faults/timeouts/wrong/missing/duplicates/refusals/retries, not truncated; 31,363 neurons / 64,238 synapses, 5,824.4 s neural and 50,160.7 s wall. Generic seed 115, Juno H100 (451849), **met exit**, same zero counts, 5,819.2 s neural and 56,744.5 s wall. Specialized-datapath seed 113, Juno H200 (451850), **met exit**, same zero counts; 27,083 neurons / 54,966 synapses, 5,803.4 s neural and 44,332.1 s wall. Generic F totals 4/4 campaigns, 0 stalled / 400 copies; one-sided 95% upper bound `1 - 0.05^(1/400) = 0.0074613555` (0.7461356%), one-sided Fisher exact 0/400 vs the 15/300 no-autapse pool p=2.4628e-6. Generic plus specialized totals 0/500: bound 0.5973552%, Fisher p=3.2607e-7; these totals pool two builds.
+
 ## 9. What this does NOT cover
 
 - **TMR and the commit log**: the plan's Stage D puts `minidoom` `p_*` on control nodes with
@@ -382,6 +385,8 @@ available here. Budget **3–5 hours for nominal and roughly 15–30 hours per
 100-copy seed**, reserve 48 hours per noisy job, and replace this planning
 estimate with the measured batch calibration before submitting the long jobs.
 This estimate is not a claimed benchmark result.
+
+**Result (2026-10-12):** Configuration F render campaign used `examples/render.c`'s column kernel via `drosophilos.bench.kernel_campaign render`, flags `--rate-robust --experimental-autapse --ordered-xor-oneshot`, torch-fast on H200, commit `d66d3f8`; build size 11,768 neurons / 24,228 synapses, 1,000 passes × 8 outputs per copy. Calibration Juno (451886; commit `98c39ba`; mix B seed 110, 100 copies, 2 passes) matched 1,600/1,600 with 0 faults/timeouts/bad outputs, 22.18 s neural and 99 s wall. Nominal Juno (451992; 1 copy) had 8,000/8,000 ok and 0 wrong/missing/extra/faults/timeouts/refusals/retries, 9,254.8 s neural and 16,342 s wall. Mix B seed 110, 100 copies, Juno (451993): 800,000/800,000 ok, same zero counts, one-sided 95% upper bound 3.7447e-6 per output, 9,323.4 s neural and 38,654 s wall. Seed 113, Juno (451994): 800,000/800,000 ok, same zero counts, 9,341.0 s neural and 38,586 s wall. Pooled seeds: 0 non-ok / 1,600,000 outputs, bound `1 - 0.05^(1/1600000) = 1.8724e-6`. The planning estimate (3–5 h nominal, 15–30 h per seed) is superseded by measured 4.5 h nominal and about 10.7 h per 100-copy seed on one H200. The runner applies no input arrival jitter; this is a column/ROM composition campaign, not a full game, RAM or paced-kernel campaign; widths above 8 and array MUL above 2 bits stay unqualified.
 
 Require exact oracle agreement and exactly 8,000 outputs from every copy:
 zero wrong, missing, extra, invalid outputs, faults, timeouts, refusals and
