@@ -406,3 +406,21 @@ strays, while the jitter field in `Perturbation` is not applied by that runner.
 Label that distinction in the campaign report; a full input-jitter campaign
 requires an explicit runner extension and certification. A render pass cannot
 stand in for the separate RAM, paced-kernel, wide-word or array-MUL work.
+
+### Array-MUL kernel campaign (planned)
+
+*2026-10-12.* Configuration F now allows array MUL at widths 1, 2, 4 and 8, and no
+existing block exercises it (`perspective` uses the pipelined MULP). The `mul8`
+block is a hand-written 8-bit kernel of three cells, with 8-bit wrap-around
+arithmetic: `c1 = MUL(input, 5)`, `c2 = ADD(c1, 3)`, `c3 = MUL(c2, input)`, output
+`c3`, over the tokens 0, 1, 7, 13, 51, 128, 200, 255. Its reference comes from the
+kernel reference machinery and is checked in the tests against
+`((x*5+3)*x) & 255`. No result is claimed here; set `--max-ms` for the long runs
+(`<CEIL>`) from the calibration.
+
+```sh
+uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 100 --mix B --seed 110 --repeats 2 --max-ms 60000 --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_calibration.json
+uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 1 --mix 0 --seed 1 --repeats 1000 --max-ms <CEIL> --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_nominal.json
+uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 100 --mix B --seed 110 --repeats 1000 --max-ms <CEIL> --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_s110.json
+uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 100 --mix B --seed 113 --repeats 1000 --max-ms <CEIL> --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_s113.json
+```
