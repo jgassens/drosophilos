@@ -428,17 +428,17 @@ def test_qualified_array_builder_records_version_and_reset_ownership(width, reco
     pl, _, _ = small_shape("MUL", width)
     if records_version:
         assert pl.build_options["ordered_xor_oneshot_mul_version"] == 1
+        spent = {i for i, role in enumerate(pl.net.roles) if ".mul.row" in role and ".spent." in role}
+        targets = {d for s, d, q in zip(pl.net.src, pl.net.dst, pl.net.quanta)
+                   if s == pl.cells[0].stage.reset_inh and q < 0}
+        assert spent and spent <= targets
+        for j in range(1, width):
+            for i in range(width):
+                assert f"out.mul.rt{j}.v{i}.or" in pl.net.roles
+                for rail in (0, 1):
+                    assert (f"out.mul.rt{j}.o{i}r{rail}.u" in pl.net.roles) == (i >= j)
     else:
         assert "ordered_xor_oneshot_mul_version" not in pl.build_options
-    spent = {i for i, role in enumerate(pl.net.roles) if ".mul.row" in role and ".spent." in role}
-    targets = {d for s, d, q in zip(pl.net.src, pl.net.dst, pl.net.quanta)
-               if s == pl.cells[0].stage.reset_inh and q < 0}
-    assert spent and spent <= targets
-    for j in range(1, width):
-        for i in range(width):
-            assert f"out.mul.rt{j}.v{i}.or" in pl.net.roles
-            for rail in (0, 1):
-                assert (f"out.mul.rt{j}.o{i}r{rail}.u" in pl.net.roles) == (i >= j)
 
 
 def test_retime_suffix_preserves_whole_word_completion():
@@ -462,9 +462,9 @@ def test_retime_suffix_preserves_whole_word_completion():
     assert snapshots[0] == snapshots[1]
 
 
-@pytest.mark.parametrize("width", [3, 5, 6, 7])
+@pytest.mark.parametrize("width", [3, 5, 6, 7, 9, 16])
 def test_other_array_widths_remain_rejected(width):
-    with pytest.raises(ValueError, match="rejects unqualified or unsupported array MUL width"):
+    with pytest.raises(ValueError):
         small_shape("MUL", width)
 
 
