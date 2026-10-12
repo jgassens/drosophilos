@@ -5,7 +5,8 @@ exact 95 % upper limits, like the block campaigns of A2.
 
     python -m drosophilos.bench.kernel_campaign render --copies 100 --device cuda
     blocks: render (4 cells, ROM tables), fanout (a value read by two cells: the multi-pair guard),
-            tick (the 13-cell state kernel, fresh input per tick), perspective (16-bit, MULP)
+            tick (the 13-cell state kernel, fresh input per tick), perspective (16-bit, MULP),
+            mul8 (8-bit array MUL, configuration F)
 """
 
 import argparse
@@ -47,6 +48,14 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
         from ..compiler.kernel import KernelSpec
         ks = KernelSpec(spec, {"k1": 1, "k7": 7, "k3": 3}, {}, "input", 8); ks.outputs = ["c4"]
         tokens = [0, 5, 9, 14, 14, 200, 77, 3]
+        prog = None
+    elif name == "mul8":
+        spec = [{"name": "c1", "op": "MUL", "a": "input", "b": ("const", "k5")},
+                {"name": "c2", "op": "ADD", "a": "c1", "b": ("const", "k3")},
+                {"name": "c3", "op": "MUL", "a": "c2", "b": "input"}]
+        from ..compiler.kernel import KernelSpec
+        ks = KernelSpec(spec, {"k5": 5, "k3": 3}, {}, "input", 8); ks.outputs = ["c3"]
+        tokens = [0, 1, 7, 13, 51, 128, 200, 255]
         prog = None
     elif name == "tick":
         prog = compile_c(open("examples/tick2.c").read())
