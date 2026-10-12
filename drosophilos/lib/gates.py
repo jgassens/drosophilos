@@ -20,6 +20,8 @@ from .netlist import Drive, Netlist
 
 # Bump when the qualified circuit or timing policy changes.
 ORDERED_XOR_ONESHOT_VERSION = 1
+# Wide F arrays omit the zero-addend prefix of each row. Independent of sum v1.
+ORDERED_XOR_ONESHOT_MUL_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -57,9 +59,14 @@ def add_maj_latched(net: Netlist, drive: Drive, name: str, inputs: list[int]) ->
 class Gates:
     """Collects every internal latch and gate neuron so a reset domain can claim them."""
 
-    def __init__(self, net: Netlist, drive: Drive, *, ordered_xor_oneshot: bool = False):
+    def __init__(self, net: Netlist, drive: Drive, *, ordered_xor_oneshot: bool = False,
+                 ordered_xor_oneshot_mul_version: int = ORDERED_XOR_ONESHOT_MUL_VERSION):
         self.net, self.drive = net, drive
         self.ordered_xor_oneshot = ordered_xor_oneshot
+        if (type(ordered_xor_oneshot_mul_version) is not int or
+                ordered_xor_oneshot_mul_version not in (0, ORDERED_XOR_ONESHOT_MUL_VERSION)):
+            raise ValueError("unsupported ordered_xor_oneshot_mul_version")
+        self.ordered_xor_oneshot_mul_version = ordered_xor_oneshot_mul_version
         self.latches: list[Latch] = []
         self.gates: list[int] = []
 
@@ -211,7 +218,9 @@ class Gates:
         rail (EARLY); row k of the array adds the shifted partial-product row (EARLY, valid at
         Ad + 4) to the running sum (LATE, the previous row's output) with an ordered ripple
         adder, so each row's inputs are ordered by construction. `zero` is a dual-rail 0 for
-        the carry-in. Cost ~ n rows x (n-bit ripple adder); latency ~ n x (n x 29 ms)."""
+        the carry-in. Cost ~ n rows x (n-bit ripple adder); latency ~ n x (n x 29 ms).
+        Wide one-shot arrays v1 bypass each row's zero-addend prefix, reducing
+        the adder to n-j bits; other arrays retain the full legacy rows."""
         n = len(Ad)
         pp = []  # pp[i][j] latch for A_i AND B_j
         for i in range(n):
@@ -232,8 +241,17 @@ class Gates:
             # the running sum is LATE and must be aligned (re-timed through its completion); the
             # addend is EARLY (partial products are valid at Ad + 4)
             acc_r = self.retime(f"{name}.rt{j}", acc)
-            sums, carries, x, cds = self.ripple_adder_ordered(f"{name}.row{j}", acc_r, addend, zero, carry_hops)
-            acc = sums
+            if self.ordered_xor_oneshot and n > 2 and self.ordered_xor_oneshot_mul_version:
+                # Adding zero below the shift cannot generate a carry. Preserve those
+                # bits and start the real addition at j with Cin=0. In the old full
+                # row, their unnecessary propagate chain put the 7*1 top rail past
+                # the survey's 900-ms clear, despite a correct single first edge.
+                sums, _, _, _ = self.ripple_adder_ordered(
+                    f"{name}.row{j}", acc_r[j:], addend[j:], zero, carry_hops)
+                acc = acc[:j] + sums
+            else:
+                sums, carries, x, cds = self.ripple_adder_ordered(f"{name}.row{j}", acc_r, addend, zero, carry_hops)
+                acc = sums
         return acc
 
     def overflow_ordered(self, name: str, Ad: list[Rail2], bx: list[Rail2], Cin: Rail2, x, carries, cds) -> Rail2:

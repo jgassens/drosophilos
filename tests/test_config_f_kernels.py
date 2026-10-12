@@ -33,6 +33,56 @@ OFF_DIGESTS = dict(zip(SHAPES, (
     "41570fd545cbae54471636c5a6974057c6449c81ccce555bfba372adac868805",
     "79e155f1dec7b3d896632b40bddd0e907c54bebbd32abfca1137734ac4374800",
 )))
+# Captured from the unmodified builder before the wide-array v1 repair.
+F_CAMPAIGN_DIGESTS = {
+    "tick-generic": "86f32cd954b39a59f57109675dd7cf7b6dbc6da32c81a14c95ff042d0045b0fd",
+    "tick-specialized": "2ebac22b72725602c02952495c787e429a42dc54ca0d6e4a9f95589438920a5f",
+    "render": "d0e713368a042c8a5486666535d5f1edb5c45b4ddff59d8e515e589954614e75",
+}
+F_SMALL_DIGESTS = dict(zip(SHAPES, (
+    "b7e3982fc5f74ecb2f34b01eb9dbd0de3261706607d71ce5ed1a8d91a8a78303",
+    "459c40ae1912c0e41a7f9df2b5cb45f50dbf3d98b513f84d0f978c7c070a14c6",
+    "ef59584b1c4bd3e5832940f449e43e3cefa095dc82669c3d59a051ed155e01f7",
+    "f57017d7f7f4570649f52a5a187ed2e660a3401981dfdca793726800e25d7bcf",
+    "3a0621f83f0270459f99fde11030644ab94854939f3ae60ae8dd30c2da1b823f",
+    "440096d116a3070e56647db65b0ecdcb9b3c9417c9ed310b7919a371c7cdb9d6",
+    "c895f24c528bea4e0d496e10a69abcf335438f96f76544d5318e426d4e5b04f7",
+    "c295a1ec3d5944427b3edff7a95bd5ae00cdd4b24f04e5708726d511db05560f",
+)))
+
+
+def pipeline_digest(pl):
+    net = pl.net
+    data = [getattr(net, k) for k in ("roles", "src", "dst", "quanta", "delay", "bias",
+                                     "rate_readouts", "inhibition_mirrors")]
+    data.append([(l.u, l.v) for l in pl.image_latches])
+    return hashlib.sha256(json.dumps(data, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+
+
+@pytest.mark.parametrize("name", F_CAMPAIGN_DIGESTS)
+def test_f_campaigns_without_wide_array_stay_byte_identical(name):
+    from drosophilos.bench import kernel_campaign, stage_d
+
+    pl = (kernel_campaign.block("render", P, **F)[1] if name == "render" else
+          stage_d.build(stage_d.load_kernel(), P, name.removeprefix("tick-"), **F))
+    assert pipeline_digest(pl) == F_CAMPAIGN_DIGESTS[name]
+    assert "ordered_xor_oneshot_mul_version" not in pl.build_options
+
+
+@pytest.mark.parametrize("options", [{}, {"rate_robust": True},
+                                     {"rate_robust": True, "zero_once": True}])
+def test_non_f_wide_array_stays_byte_identical(options, monkeypatch):
+    from functools import partial
+    from drosophilos.lib import kernel
+    from drosophilos.lib.gates import Gates
+
+    flags = dict.fromkeys(F, False) | options
+    current, _, _ = small_shape("MUL", 4, **flags)
+    monkeypatch.setattr(kernel, "Gates", partial(Gates, ordered_xor_oneshot_mul_version=0))
+    legacy, _, _ = small_shape("MUL", 4, **flags)
+    assert pipeline_digest(current) == pipeline_digest(legacy)
+    assert current.build_options == legacy.build_options
+    assert "ordered_xor_oneshot_mul_version" not in current.build_options
 
 
 def small_shape(shape, width=2, **options):
@@ -113,12 +163,9 @@ def test_small_kernel_nominal(shape):
 @pytest.mark.parametrize("shape", SHAPES)
 def test_off_byte_identical_and_f_reset_ownership(shape):
     off, _, _ = small_shape(shape, **dict.fromkeys(F, False))
-    net = off.net
-    data = [getattr(net, k) for k in ("roles", "src", "dst", "quanta", "delay", "bias",
-                                     "rate_readouts", "inhibition_mirrors")]
-    data.append([(l.u, l.v) for l in off.image_latches])
-    assert hashlib.sha256(json.dumps(data, separators=(",", ":"), sort_keys=True).encode()).hexdigest() == OFF_DIGESTS[shape]
+    assert pipeline_digest(off) == OFF_DIGESTS[shape]
     pl, _, _ = small_shape(shape)
+    assert pipeline_digest(pl) == F_SMALL_DIGESTS[shape]
     net = pl.net
     # All wider latch populations, including RAM words/COPY/marks and pacing
     # pairs, receive v1 local feedback. Readers never acquire self feedback.
@@ -270,19 +317,16 @@ def score_rails(sim, rails, values, result, *, since=None):
         result["wrong"] += int(seen[np.arange(sim.B), 1 - want].sum())
 
 
-def multiplier_survey(width, trials, noisy=False, *, operands=None, oneshot=True):
-    """Actual ordered array, retiming completion trees and ordinary stage reset.
-
-    All 4-bit operand pairs when trials=256; rail-complemented second loads
-    test spent-latch re-arm on the same physical draws after a 200 ms clear.
-    """
+def multiplier_fixture(width, *, oneshot=True, mul_version=1):
+    """Actual kernel ordering, retiming trees and ordinary stage reset."""
     from drosophilos.lib.gates import Gates, Rail2
     from drosophilos.lib.netlist import Drive, Netlist
     from drosophilos.protocol.latch import add_experimental_autapses, add_reset
 
     net = Netlist(P)
     drive = replace(Drive.from_params(P), rate_robust=True, kill_pulses=4)
-    g = Gates(net, drive, ordered_xor_oneshot=oneshot)
+    g = Gates(net, drive, ordered_xor_oneshot=oneshot,
+              ordered_xor_oneshot_mul_version=mul_version)
     a = [Rail2(g.latch(f"a{i}r0"), g.latch(f"a{i}r1")) for i in range(width)]
     b = [Rail2(g.latch(f"b{i}r0"), g.latch(f"b{i}r1")) for i in range(width)]
     zero = Rail2(g.latch("zero0"), g.latch("zero1"))
@@ -293,6 +337,17 @@ def multiplier_survey(width, trials, noisy=False, *, operands=None, oneshot=True
     out = g.multiplier_ordered("mul", ad, bx, zero)
     reset = add_reset(net, drive, "stage", g.latches, g.gates)
     add_experimental_autapses(net, drive)
+    return net, drive, g, a, b, zero, out, reset
+
+
+def multiplier_survey(width, trials, noisy=False, *, operands=None, oneshot=True, mul_version=1):
+    """All small nominal operand pairs, then complemented reloads after 200 ms clear.
+
+    Keep the original evaluation deadline: wide-array v1 must finish before
+    that clear, rather than merely hiding the latency regression with a longer run.
+    """
+    net, drive, g, a, b, zero, out, reset = multiplier_fixture(
+        width, oneshot=oneshot, mul_version=mul_version)
     result = dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0)
     once = [i for i, role in enumerate(net.roles) if ".once" in role and role.endswith(".edge")]
     members = sorted({m for latch in g.latches for m in latch.members})
@@ -330,29 +385,107 @@ def test_multiplier_fast_survey(noisy):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("width,trials,noisy", [(4, 256, False), (4, 128, True), (8, 16, False), (8, 16, True)])
+@pytest.mark.parametrize("width,trials,noisy", [(3, 64, False), (3, 128, True),
+                                               (4, 256, False), (4, 128, True),
+                                               (8, 256, False), (8, 128, True)])
 def test_multiplier_large_survey(width, trials, noisy):
     result = multiplier_survey(width, trials, noisy)
     print("mul survey", width, noisy, result)
-    # These wider retimed arrays are retained as a rejected frontier, not
-    # silently enabled by the pipelined row qualification.
-    if width == 4 and not noisy:
-        assert result == dict(trials=512, wrong=0, double=0, missing=16, repeated=0, survivors=0)
-    if width == 4 and noisy:
-        assert result == dict(trials=256, wrong=0, double=0, missing=4, repeated=0, survivors=0)
-    with pytest.raises(ValueError, match="rejects array MUL above 2 bits"):
+    assert result == dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("width", [4])
+def test_qualified_array_kernel_nominal(width):
+    # Exercise real operands, output mux, completion, commit and stage/master
+    # reset ownership after the primitive has met its wider qualification.
+    run_shape("MUL", width=width)
+
+
+def test_retimed_array_deadline_regression_and_legacy_control():
+    result = multiplier_survey(4, 1, operands=[(7, 1)], mul_version=0)
+    assert result["missing"] > 0, result
+    assert result["wrong"] == result["double"] == result["survivors"] == 0
+    repaired = multiplier_survey(4, 1, operands=[(7, 1)])
+    assert all(v == 0 for k, v in repaired.items() if k != "trials"), repaired
+    control = multiplier_survey(4, 1, operands=[(7, 1)], oneshot=False)
+    assert all(v == 0 for k, v in control.items() if k != "trials"), control
+
+
+@pytest.mark.parametrize("width", [4])
+def test_qualified_array_builder_records_version_and_reset_ownership(width):
+    pl, _, _ = small_shape("MUL", width)
+    assert pl.build_options["ordered_xor_oneshot_mul_version"] == 1
+    spent = {i for i, role in enumerate(pl.net.roles) if ".mul.row" in role and ".spent." in role}
+    targets = {d for s, d, q in zip(pl.net.src, pl.net.dst, pl.net.quanta)
+               if s == pl.cells[0].stage.reset_inh and q < 0}
+    assert spent and spent <= targets
+
+
+@pytest.mark.parametrize("width", [3, 5, 6, 7, 8, 9, 16])
+def test_other_array_widths_remain_rejected(width):
+    with pytest.raises(ValueError, match="rejects unqualified or unsupported array MUL width"):
         small_shape("MUL", width)
 
 
-def test_retimed_array_rejection_has_nominal_refsim_evidence():
-    result = multiplier_survey(4, 1, operands=[(7, 1)])
-    assert result["missing"] > 0, result
-    assert result["wrong"] == result["double"] == result["survivors"] == 0
-    control = multiplier_survey(4, 1, operands=[(7, 1)], oneshot=False)
-    assert all(v == 0 for k, v in control.items() if k != "trials"), control
-    for width in (3, 4, 8, 16):
-        with pytest.raises(ValueError, match="rejects array MUL above 2 bits"):
-            small_shape("MUL", width)
+@pytest.mark.parametrize("version", [None, 0, 2, "1", True])
+def test_campaign_replay_checks_wide_array_version(version, monkeypatch):
+    from drosophilos.bench import kernel_campaign
+
+    pl, _, _ = small_shape("MUL", 4)
+    monkeypatch.setattr(kernel_campaign, "block", lambda *a, **k: (None, pl, [], []))
+    record = {"block": "wide-array", **pl.build_options}
+    assert kernel_campaign.rebuild_record(record)[1] is pl
+    key = "ordered_xor_oneshot_mul_version"
+    if version is None:
+        record.pop(key)
+    else:
+        record[key] = version
+    with pytest.raises(ValueError, match="unsupported campaign build option ordered_xor_oneshot_mul_version"):
+        kernel_campaign.rebuild_record(record)
+
+
+def multiplier_witness_trace(*, mul_version=0, oneshot=True):
+    """Retain real RefSim spikes beyond the old 900-ms observation/clear boundary."""
+    net, drive, _, a, b, zero, out, _ = multiplier_fixture(
+        4, oneshot=oneshot, mul_version=mul_version)
+    sim = RefSim(net.topology(), P)
+    sim.add_events(0, [0], [zero.r0.u], [drive.ignite])
+    for word, value in ((a, 7), (b, 1)):
+        sim.add_events(0, [200] * 4, [r.latches[value >> i & 1].u for i, r in enumerate(word)],
+                       [drive.ignite] * 4)
+    sim.run(10000)
+    return net, sim.trace, out
+
+
+def test_retimed_array_neuron_trace_disproves_lost_first_edge():
+    net, trace, out = multiplier_witness_trace()
+    expected = {
+        "mul.row3.fa3.x.y0.u": 7929,
+        "mul.row3.fa2.c0.u": 8711,
+        "mul.row3.fa3.cinr0.d4": 8976,
+        "mul.row3.fa3.s.once0.edge": 9018,
+        "mul.row3.fa3.s.once0.edge_inh": 9029,
+        "mul.row3.fa3.s.once0.spent.u": 9060,
+        "mul.row3.fa3.s.y0.b.edge": 9060,
+        "mul.row3.fa3.s.y0.b.edge_inh": 9071,
+        "mul.row3.fa3.s.y0.u": 9102,
+    }
+    for role, first in expected.items():
+        times = trace.neuron_steps(net.roles.index(role))
+        assert times[0] == first, (role, times[:5])
+        if role.endswith(".edge"):
+            assert len(times) == 1
+    assert len(trace.before(9000).neuron_steps(out[3].r0.u)) == 0
+    assert len(trace.neuron_steps(out[3].r0.u)) > 0
+    assert len(trace.neuron_steps(out[3].r1.u)) == 0
+    legacy_net, legacy_trace, legacy_out = multiplier_witness_trace(oneshot=False)
+    assert legacy_trace.neuron_steps(legacy_out[3].r0.u)[0] == 8976
+    assert legacy_trace.neuron_steps(legacy_net.roles.index("mul.row3.fa3.s.y0.b.edge")).tolist() == [8934]
+    _, fixed_trace, fixed_out = multiplier_witness_trace(mul_version=1)
+    for bit, rail in enumerate(fixed_out):
+        assert len(fixed_trace.before(9000).neuron_steps(rail.latches[7 >> bit & 1].u)) > 0
+        assert len(fixed_trace.neuron_steps(rail.latches[1 - (7 >> bit & 1)].u)) == 0
 
 
 def ram_survey(width, copies, noisy=False, cycles=8):

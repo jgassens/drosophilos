@@ -358,7 +358,7 @@ ordered-XOR v1: no weights, delays, readers or reset trains were retuned.
 |---|---|---|
 | ROM / LOAD | Exact address-mismatch veto neurons, read relays into operand-token latches; generic LOAD retains the PASSB mux and unused ordered adder, specialized LOAD retains only PASSB. Operand latches clear with the LOAD stage; no stored ROM word latch. | Allowed, widths 1–8. Autapse/one-shot apply unchanged. |
 | RAM / STORE / LOAD | Word registers contain dual rails, bit-valid ORs, completion trees, conditioned readers and ordinary four-tap resets/READY chains. Each write port has a COPY latch cleared by its STORE stage. Shared ports add per-word marks and a completion-driven kill train for marks and all COPY latches. Address mismatch vetoes are combinational; reads feed LOAD's token latches. | Allowed, widths 1–8, under the existing valid-address, initialized-read and non-overlapping-write contract. No new reset policy. |
-| MUL array | Partial-product rails; successive ordered ripple adders; completion-tree retiming between rows. All row sums, carries, retiming latches and one-shot spent latches share the cell's stage reset. | **Only widths 1–2 allowed. Above 2 remains rejected:** the retimed one-shot path fails the nominal primitive survey. |
+| MUL array | Partial-product rails; successive ordered ripple adders; completion-tree retiming between rows. All row sums, carries, retiming latches and one-shot spent latches share the cell's stage reset. | **2026-10-11: only widths 1–2 allowed; above 2 rejected** after the nominal primitive survey. **2026-10-12 follow-up: widths 1, 2, 4 allowed**, with wide-array bypass v1 for 4; see the appended timing diagnosis and qualification below. |
 | MULP / MULP_ROW | Each row carries accumulator, A/B and flags in its stage/master (`3*n+3` bits), forms shifted partial products and uses one ordered ripple adder. Each row has its own request, commit, reset and one-shot spent latches. No between-row `Gates.retime` tree. | Allowed, widths 1–8. Existing row timing and reset ownership suffice in the tested envelope. |
 | Multiple streams | One producer/stage/master, creq pair, watchdog and conditioned readers per stream, with the same reader-request/commit guards as the single stream. | Allowed with F; repeated two-stream operand and independent-output kernels complete. |
 | Phases / pacing | Phase OK kill pairs gate input commits. Ring lines are kill pairs; multiple completion sources get separate rings, wrapped pairs and a guarded join. No XOR datapath is added by the pacing itself. | Allowed with F. Local autapses cover these pairs; ordinary four-tap kill trains are unchanged. Preserve the existing host schedule contract; phase gates do not supply missing tokens or fix cyclic dependencies. |
@@ -414,6 +414,9 @@ Measured checks:
   invalidate the primitive's allowed-phase witness. The public builder refuses
   wider arrays instead of relying on that one favorable schedule. A repair must
   qualify first-edge timing through every retiming row before lifting this gate.
+  **2026-10-12 follow-up:** the extended neuron trace below corrects this
+  interpretation: the top rail arrives after the survey's observation deadline;
+  the first edge is neither lost nor recovered by a repeated legacy pulse.
 * MULP exhausts 2-bit operand pairs (32 transactions including complemented
   reloads); noisy 4-bit and 8-bit pipelines test 16 and 8 transactions,
   respectively. All complete correctly. This tests the real expanded rows and
@@ -474,3 +477,96 @@ TMPDIR=/private/tmp/claude-501/tmpdir uv run pytest -q tests/test_config_f_kerne
 Expanded surveys use `uv run pytest -s tests/test_config_f_kernels.py -m slow`.
 The rejected array surveys assert the rejection and retain the nominal failure
 count; they must not be relabeled as successful arithmetic qualification.
+The 2026-10-12 follow-up below qualifies a changed wide-array circuit;
+its version-0 witness controls retain the historical deadline failure.
+
+## Configuration F: array MUL deadline diagnosis and prefix bypass (2026-10-12)
+
+The preceding survey counts and their original interpretation are retained as
+history. The new `test_retimed_array_neuron_trace_disproves_lost_first_edge`
+extends the **same 7 × 1 primitive**, without a clear at 900 ms, to 1,000 ms.
+It uses unmodified float64 RefSim integration, actual operand latches, six-hop
+B/SUB XOR staging, seventeen-hop A staging, completion retiming, autapse v1,
+sum one-shot v1 and ordinary reset circuitry. ZERO is loaded at step 0 and
+the operands at step 200 (20 ms). Times below are absolute, with dt = 0.1 ms.
+
+| Original full array neuron | First spike, step | Time, ms |
+|---|---:|---:|
+| `mul.row3.fa3.x.y0.u` (top operand XOR = 0) | 7,929 | 792.9 |
+| `mul.row3.fa2.c0.u` (carry into top stage = 0) | 8,711 | 871.1 |
+| `mul.row3.fa3.cinr0.d4` (five-hop delayed carry) | 8,976 | 897.6 |
+| `mul.row3.fa3.s.once0.edge` (transaction one-shot) | 9,018 | 901.8 |
+| `mul.row3.fa3.s.once0.edge_inh` (source inhibitor) | 9,029 | 902.9 |
+| `mul.row3.fa3.s.once0.spent.u` | 9,060 | 906.0 |
+| `mul.row3.fa3.s.y0.b.edge` (correct sum ignition) | 9,060 | 906.0 |
+| `mul.row3.fa3.s.y0.b.edge_inh` (sum relay inhibitor) | 9,071 | 907.1 |
+| `mul.row3.fa3.s.y0.u` (product bit 3, zero rail) | 9,102 | 910.2 |
+
+The EARLY XOR is already valid **104.7 ms before** the delayed carry. The
+transaction one-shot fires exactly once and the downstream sum relay also
+fires exactly once, 4.2 ms later. Their feed-forward inhibition arrives at
+904.7 and 908.9 ms respectively (18-step synaptic delay), after each first
+edge has fired. There is no missed one-shot window or late
+veto: the old survey's `duration = 1000 + width*width*500` ends at step 9,000
+for width four, **before the one-shot even fires**. It scores the top rail as
+missing and starts an ordinary clear. In this witness the missing rail is
+**r0 of the top bit**, not logical-one r1; the other three bits are correct.
+With sum one-shots disabled, the top rail's *first* spike is step 8,976, inside
+the same window. The three rows' additional one-shot relays add 12.6 ms to
+the full array's critical path. Thus the witness does not substantiate the
+earlier repeated-pulse recovery explanation. A longer observation reveals a
+correct result, but does not qualify completion before the original clear.
+
+Wide-array circuit **`ordered_xor_oneshot_mul_version = 1`** keeps that
+deadline and bypasses the zero-addend prefix instead. In shifted row j, bits
+0 through j−1 add zero with Cin=0, so they cannot generate a carry. Those
+accumulator rails pass through unchanged; the ordered adder starts at bit j
+with the existing ZERO carry-in. Completion-tree retiming still covers the
+whole accumulator and aligns all remaining LATE bits. Sum one-shots, veto
+weights, latch constants, reader policy, kill trains and ordinary clears
+are unchanged. In a shortened row `fa0` names product bit j.
+
+The bypass applies only to one-shot arrays wider than two bits. Every
+non-F circuit, both small F array widths, all other F units, tick2.c generic
+and specialized, and render retain their original ordered netlist bytes.
+Frozen SHA-256 tests include roles, ordered edges/weights/delays, biases,
+reader/reset-mirror registries and image latches. Non-F wide arrays also
+compare against the retained version-0 construction. The new version key
+is recorded **only when a wide F array is present**; existing campaign replay
+checks every effective build-option key, rejecting missing or mismatched
+versions. Version 0 is retained solely for primitive historical controls;
+the public builder selects the qualified current version.
+
+There is **no added latency**. For 7 × 1, all four correct product rails
+are live by **699.5 ms**, a **210.7 ms reduction** from the original F array.
+The qualification fixture, including ordinary reset fan-out, local autapses
+and downstream retiming readers, has the following exact savings:
+
+| Width | Removed neurons / synapses in successive rows j=1..n−1 | Total before → after |
+|---|---|---|
+| 4 | 70 / 148; 140 / 296; 204 / 432 | 1,565 / 3,292 → **1,151 / 2,416** (−414 / −876) |
+| 8 | 70 / 148; 140 / 296; 210 / 444; 280 / 592; 350 / 740; 420 / 888; 476 / 1,008 | 6,497 / 14,028 → **4,551 / 9,912** (−1,946 / −4,116) |
+
+Each non-final row saves 70*j neurons and 148*j synapses; the final row
+saves 68*j and 144*j because this primitive fixture has no downstream
+output rate readers. These are fixture counts, not a whole-kernel count.
+Partial products and retiming trees retain their original construction.
+
+Qualification retains the original deadline (550 ms at width three, 900 ms
+at width four), complemented reloads on the same physical copies, all-latch
+survivor checks after the ordinary clear and 200 ms recovery, and spent-edge
+counts throughout each transaction. Mix B retains independent log-weight
+sigma .04, threshold/bias sigma .2 mV, 5 Hz × 150 q background and 0–100-step
+host-load jitter. Every counter below is zero: wrong/double/missing rails,
+repeated one-shots and reset survivors.
+
+| Qualified width | Nominal operand coverage / transactions including complements | Mix-B transactions including complements |
+|---|---|---:|
+| 3 | All 64 pairs / **128** | **256** |
+| 4 | All 256 pairs / **512** | **256** |
+
+The public builder currently allows array MUL widths **1, 2, 4**. The
+3-bit result qualifies the multiplier primitive only: the generic public ALU
+requires a power-of-two result subtree for its zero flag, so width three is
+still refused. Unsurveyed widths also remain refused; MULP's separate
+qualification is unchanged.
