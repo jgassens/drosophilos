@@ -60,7 +60,7 @@ from ..sim.ref64 import RefSim
 from .adder import extend_reset
 from .control import add_kill_pair, add_kill_train, add_request_clear
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
-from .gates import ORDERED_XOR_ONESHOT_VERSION, Gates, Rail2
+from .gates import ORDERED_XOR_ONESHOT_MUL_VERSION, ORDERED_XOR_ONESHOT_VERSION, Gates, Rail2
 from .netlist import Drive, Netlist
 from ..protocol.rate import RATE_ROBUST_VERSION, condition_rate_gate
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
@@ -356,16 +356,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Wider shapes use the same v1 circuits and ordinary reset domains, including
     multiplier-row spent latches and RAM COPY/word latches. This bounded RefSim
     qualification is not a game-kernel campaign exit (docs/stable_latch.md).
-    Array MUL above two bits remains rejected after missing-rail failures in
-    its retimed rows; MULP/MULP_ROW use separately reset rows instead.
+    Array MUL width 4 uses the independently versioned zero-prefix bypass;
+    wider arrays remain rejected until their nominal and noisy surveys pass.
+    MULP/MULP_ROW use separately reset rows instead.
     Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
-    if ordered_xor_oneshot and n > 2 and any(cs["op"] == "MUL" for cs in spec):
-        raise ValueError("configuration F rejects array MUL above 2 bits: the retimed array "
-                         "misses the high output rail (4-bit 7 * 1, RefSim nominal); "
+    if ordered_xor_oneshot and n not in (1, 2, 4) and any(cs["op"] == "MUL" for cs in spec):
+        raise ValueError(f"configuration F rejects unqualified or unsupported array MUL width {n}: "
+                         "qualified supported widths are 1, 2, 4; "
                          "MULP uses separately reset pipelined rows")
     if ordered_xor_oneshot and (
             params != Params() or not 1 <= n <= 8 or
@@ -1021,6 +1022,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     if ordered_xor_oneshot:
         pl.build_options["ordered_xor_oneshot_version"] = ORDERED_XOR_ONESHOT_VERSION
+        if n > 2 and any(cs["op"] == "MUL" for cs in spec):
+            pl.build_options["ordered_xor_oneshot_mul_version"] = ORDERED_XOR_ONESHOT_MUL_VERSION
     pl.phase_ok, pl.rings, pl.phase_ends = ok_pairs, rings, phase_ends  # neural pacing: stream -> OK pair / ring lines / end pulse
     return pl
 

@@ -403,3 +403,10 @@ def test_rebuild_requires_identified_oneshot_version(version):
     for rebuild in (build_tick_pipeline, recheck_record):
         with pytest.raises(ValueError, match="ordered-XOR one-shot circuit version"):
             rebuild(record)
+
+
+@pytest.mark.parametrize("version", [None, -1, 2, "1", True])
+def test_wide_array_version_rejects_unknown_circuits(version):
+    with pytest.raises(ValueError, match="unsupported ordered_xor_oneshot_mul_version"):
+        Gates(Netlist(P), Drive.from_params(P), ordered_xor_oneshot=True,
+              ordered_xor_oneshot_mul_version=version)
