@@ -358,7 +358,7 @@ ordered-XOR v1: no weights, delays, readers or reset trains were retuned.
 |---|---|---|
 | ROM / LOAD | Exact address-mismatch veto neurons, read relays into operand-token latches; generic LOAD retains the PASSB mux and unused ordered adder, specialized LOAD retains only PASSB. Operand latches clear with the LOAD stage; no stored ROM word latch. | Allowed, widths 1–8. Autapse/one-shot apply unchanged. |
 | RAM / STORE / LOAD | Word registers contain dual rails, bit-valid ORs, completion trees, conditioned readers and ordinary four-tap resets/READY chains. Each write port has a COPY latch cleared by its STORE stage. Shared ports add per-word marks and a completion-driven kill train for marks and all COPY latches. Address mismatch vetoes are combinational; reads feed LOAD's token latches. | Allowed, widths 1–8, under the existing valid-address, initialized-read and non-overlapping-write contract. No new reset policy. |
-| MUL array | Partial-product rails; successive ordered ripple adders; completion-tree retiming between rows. All row sums, carries, retiming latches and one-shot spent latches share the cell's stage reset. | **2026-10-11: only widths 1–2 allowed; above 2 rejected** after the nominal primitive survey. **2026-10-12 follow-up: widths 1, 2, 4 allowed**, with wide-array bypass v1 for 4; see the appended timing diagnosis and qualification below. |
+| MUL array | Partial-product rails; successive ordered ripple adders; completion-tree retiming between rows. All row sums, carries, retiming latches and one-shot spent latches share the cell's stage reset. | **2026-10-11: only widths 1–2 allowed; above 2 rejected** after the nominal primitive survey. **2026-10-12 follow-up: widths 1, 2, 4, 8 allowed**, with wide-array bypass v1 for 4 and 8; see the appended timing diagnosis and qualification below. |
 | MULP / MULP_ROW | Each row carries accumulator, A/B and flags in its stage/master (`3*n+3` bits), forms shifted partial products and uses one ordered ripple adder. Each row has its own request, commit, reset and one-shot spent latches. No between-row `Gates.retime` tree. | Allowed, widths 1–8. Existing row timing and reset ownership suffice in the tested envelope. |
 | Multiple streams | One producer/stage/master, creq pair, watchdog and conditioned readers per stream, with the same reader-request/commit guards as the single stream. | Allowed with F; repeated two-stream operand and independent-output kernels complete. |
 | Phases / pacing | Phase OK kill pairs gate input commits. Ring lines are kill pairs; multiple completion sources get separate rings, wrapped pairs and a guarded join. No XOR datapath is added by the pacing itself. | Allowed with F. Local autapses cover these pairs; ordinary four-tap kill trains are unchanged. Preserve the existing host schedule contract; phase gates do not supply missing tokens or fix cyclic dependencies. |
@@ -565,7 +565,7 @@ repeated one-shots and reset survivors.
 | 3 | All 64 pairs / **128** | **256** |
 | 4 | All 256 pairs / **512** | **256** |
 
-The public builder currently allows array MUL widths **1, 2, 4**. The
+The public builder currently allows array MUL widths **1, 2, 4, 8**. The
 3-bit result qualifies the multiplier primitive only: the generic public ALU
 requires a power-of-two result subtree for its zero flag, so width three is
 still refused. Unsurveyed widths also remain refused; MULP's separate
@@ -602,6 +602,8 @@ the public builder continues to refuse it. Its nominal 256-pair survey
 (256 transactions including reloads) now live in the separate opt-in slow
 `test_multiplier_width8_cluster_survey`. It skips unless `DROSO_WIDE_MUL=1`:
 
+**Superseded 2026-10-12:** both width-eight surveys passed on Juno (452953 nominal, 452954 mix B, commit 07e28ed, all counters zero) and the builder now allows width eight; see the 2026-10-12 note below.
+
 ```sh
 DROSO_WIDE_MUL=1 uv run pytest tests/test_config_f_kernels.py -q -s -k test_multiplier_width8_cluster_survey
 ```
@@ -630,3 +632,15 @@ These runs used the existing project environment without dependency syncing,
 with imports directed at this worktree and writable temporary/cache locations.
 The slow run overrode the configured extra `-q` solely to show pytest's exact
 result summary. Width-eight cluster qualification was not run.
+
+## Configuration F: width-eight primitive qualification (2026-10-12)
+
+At commit `07e28ed`, the width-eight primitive qualification completed on the
+Juno cluster. Juno job **452953** ran the nominal 256 operand pairs plus
+complemented reloads and reported `{'trials': 512, 'wrong': 0, 'double': 0,
+'missing': 0, 'repeated': 0, 'survivors': 0}`. Juno job **452954** ran mix B,
+128 pairs plus reloads, and reported `{'trials': 256, 'wrong': 0, 'double': 0,
+'missing': 0, 'repeated': 0, 'survivors': 0}`.
+
+Width 8 is now allowed by the public array-MUL builder. These results qualify
+the primitive only; no kernel-level noisy campaign for array MUL has been run.

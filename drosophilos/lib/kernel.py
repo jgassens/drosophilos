@@ -356,17 +356,17 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Wider shapes use the same v1 circuits and ordinary reset domains, including
     multiplier-row spent latches and RAM COPY/word latches. This bounded RefSim
     qualification is not a game-kernel campaign exit (docs/stable_latch.md).
-    Array MUL width 4 uses the independently versioned zero-prefix bypass;
-    wider arrays remain rejected until their nominal and noisy surveys pass.
+    Array MUL widths 4 and 8 use the independently versioned zero-prefix
+    bypass; other wider arrays remain rejected.
     MULP/MULP_ROW use separately reset rows instead.
     Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
-    if ordered_xor_oneshot and n not in (1, 2, 4) and any(cs["op"] == "MUL" for cs in spec):
+    if ordered_xor_oneshot and n not in (1, 2, 4, 8) and any(cs["op"] == "MUL" for cs in spec):
         raise ValueError(f"configuration F rejects unqualified or unsupported array MUL width {n}: "
-                         "qualified supported widths are 1, 2, 4; "
+                         "qualified supported widths are 1, 2, 4, 8; "
                          "MULP uses separately reset pipelined rows")
     if ordered_xor_oneshot and (
             params != Params() or not 1 <= n <= 8 or
