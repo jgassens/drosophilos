@@ -602,6 +602,8 @@ the public builder continues to refuse it. Its nominal 256-pair survey
 (256 transactions including reloads) now live in the separate opt-in slow
 `test_multiplier_width8_cluster_survey`. It skips unless `DROSO_WIDE_MUL=1`:
 
+**Superseded 2026-10-12:** both width-eight surveys passed on Juno (452953 nominal, 452954 mix B, commit 07e28ed, all counters zero) and the builder now allows width eight; see the 2026-10-12 note below.
+
 ```sh
 DROSO_WIDE_MUL=1 uv run pytest tests/test_config_f_kernels.py -q -s -k test_multiplier_width8_cluster_survey
 ```

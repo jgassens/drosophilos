@@ -399,7 +399,7 @@ def test_multiplier_large_survey(width, trials, noisy):
                     reason="width-8 cluster qualification requires DROSO_WIDE_MUL=1")
 @pytest.mark.parametrize("trials,noisy", [(256, False), (128, True)])
 def test_multiplier_width8_cluster_survey(trials, noisy):
-    # Primitive qualification only; the public width-8 builder remains gated.
+    # Primitive qualification only; passed on Juno 452953/452954 (2026-10-12), which lifted the width-8 builder gate.
     result = multiplier_survey(8, trials, noisy)
     print("mul cluster survey", 8, noisy, result)
     assert result == dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0)
