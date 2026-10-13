@@ -24,8 +24,7 @@
     "edge_rule": "both endpoints are neurons and syn_count >= min_syn"
   },
   "placement_rule": {
-    "quoted": "0 <= |q| <= k_max * count * QUANTA_PER_SYNAPSE; the presynaptic host transmitter sign must match the designed edge sign.",
-    "implementation": "drosophilos.connectome.embed_h0.Policy.req_count(q)"
+    "quoted": "0 <= |q| <= k_max * count * QUANTA_PER_SYNAPSE; the presynaptic host transmitter sign must match the designed edge sign and the designed neuron's outgoing-edge vote (Dale's law)."
   },
   "supply": {
     "self_edges": [
@@ -40,306 +39,330 @@
         "nt_conf": 0.5514746335030042,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 454,
         "bodyId": 10490,
         "type": "GNG671",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.47714728002992657,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 502,
         "bodyId": 10540,
         "type": "APL",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.6773593460276103,
         "sign": -1,
         "synapse_count": 14,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 2403,
         "bodyId": 12569,
         "type": "DPM",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "dopamine",
         "predicted_nt": "dopamine",
         "nt_conf": 0.8701402180071319,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "modulatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 6367,
         "bodyId": 16949,
         "type": "MN9",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5731075580033004,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 6853,
         "bodyId": 17495,
         "type": "MN7",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.4894890676943371,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 6916,
         "bodyId": 17565,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.5830671613196604,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 6948,
         "bodyId": 17600,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.7560933687415134,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 7703,
         "bodyId": 18443,
         "type": "AMMC023",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.8075969867776333,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 9245,
         "bodyId": 20173,
         "type": "MN8",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5639694839175188,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 9536,
         "bodyId": 20504,
         "type": "SAD116",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.5634439982690987,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 10721,
         "bodyId": 21822,
         "type": "LHPV2a1_d",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.7759769654059359,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 13785,
         "bodyId": 25244,
         "type": "Dm9",
         "superclass": "ol_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.8523374614323087,
         "sign": -1,
         "synapse_count": 2,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 14577,
         "bodyId": 26137,
         "type": "MNx02",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5305817333887007,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 18708,
         "bodyId": 30780,
         "type": "MN13",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.41789362980769235,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 19852,
         "bodyId": 32092,
         "type": "MN7",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5579068242209014,
         "sign": 1,
         "synapse_count": 8,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 21358,
         "bodyId": 33801,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.9456077553306208,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 29775,
         "bodyId": 43331,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.5494795675176375,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 33791,
         "bodyId": 47928,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.4173604284080312,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 37104,
         "bodyId": 51781,
         "type": "CB1541",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.9517366777060674,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 43599,
         "bodyId": 59394,
         "type": "L3",
         "superclass": "ol_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.9175751856791172,
         "sign": 1,
         "synapse_count": 10,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 49020,
         "bodyId": 65944,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.257636191046274,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 64542,
         "bodyId": 85275,
         "type": "MN3L",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "unclear",
         "nt_conf": 0.49796897237323345,
         "sign": 1,
         "synapse_count": 10,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 66317,
         "bodyId": 87629,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.892832147923346,
         "sign": 1,
         "synapse_count": 6,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 71399,
@@ -352,33 +375,36 @@
         "nt_conf": 0.9119786265263041,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 71627,
         "bodyId": 94688,
         "type": "MN3M",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.48081578523360763,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 85487,
         "bodyId": 113792,
         "type": "CB1627",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.850371760549814,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 87568,
@@ -391,85 +417,92 @@
         "nt_conf": 0.8219434457399734,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 88925,
         "bodyId": 118781,
         "type": "CB3396",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.8671966549509309,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 90068,
         "bodyId": 120525,
         "type": "SLP412_b",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.8074240036279214,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 91412,
         "bodyId": 122521,
-        "type": NaN,
+        "type": null,
         "superclass": "ol_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.4170257658591185,
         "sign": 1,
         "synapse_count": 6,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 91718,
         "bodyId": 123002,
         "type": "C2",
         "superclass": "ol_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.5707472785549176,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 94449,
         "bodyId": 127314,
         "type": "CB4245",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.9452228863275395,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 100086,
         "bodyId": 136916,
         "type": "CB1627",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.8853876529400296,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 102274,
@@ -482,20 +515,22 @@
         "nt_conf": 0.617589310979296,
         "sign": -1,
         "synapse_count": 8,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 104308,
         "bodyId": 145304,
         "type": "CB4023",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.8797874379234717,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 106792,
@@ -508,7 +543,8 @@
         "nt_conf": 0.4555889423076923,
         "sign": -1,
         "synapse_count": 2,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 108383,
@@ -521,7 +557,8 @@
         "nt_conf": 0.6909707920221843,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 109124,
@@ -534,20 +571,22 @@
         "nt_conf": 0.746771290692615,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 109417,
         "bodyId": 158178,
         "type": "SLP412_b",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.7876145553,
         "sign": -1,
         "synapse_count": 2,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 110022,
@@ -560,7 +599,8 @@
         "nt_conf": 0.5817783864587351,
         "sign": -1,
         "synapse_count": 2,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 113016,
@@ -573,7 +613,8 @@
         "nt_conf": 0.5913013022845364,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 113549,
@@ -586,7 +627,8 @@
         "nt_conf": 0.6448775574103908,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 116083,
@@ -599,33 +641,36 @@
         "nt_conf": 0.7343829750381881,
         "sign": -1,
         "synapse_count": 3,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 119038,
         "bodyId": 200682,
         "type": "MNx04",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.33131569393704824,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 119910,
         "bodyId": 206751,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.8778708214218975,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 120175,
@@ -638,7 +683,8 @@
         "nt_conf": 0.7931027400509768,
         "sign": 1,
         "synapse_count": 5,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 122364,
@@ -651,7 +697,8 @@
         "nt_conf": 0.5278438966984762,
         "sign": -1,
         "synapse_count": 2,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 125208,
@@ -664,46 +711,50 @@
         "nt_conf": 0.9309338775330486,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 125294,
         "bodyId": 440899,
         "type": "MN12D",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5719040021085016,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 127576,
         "bodyId": 515060,
         "type": "MN10",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.4224038739431042,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 130310,
         "bodyId": 519667,
         "type": "MN6",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.6324248115278125,
         "sign": 1,
         "synapse_count": 6,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 131769,
@@ -716,124 +767,134 @@
         "nt_conf": 0.7136886813702801,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 132502,
         "bodyId": 524799,
         "type": "MN3M",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.4812263978289617,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 136214,
         "bodyId": 533967,
         "type": "MN12D",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "unclear",
         "nt_conf": 0.3895024091904498,
         "sign": 1,
         "synapse_count": 9,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 141804,
         "bodyId": 551398,
         "type": "MN11D",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5728364960920873,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 142588,
         "bodyId": 556589,
         "type": "MN3L",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "unclear",
         "nt_conf": 0.4894595082637218,
         "sign": 1,
         "synapse_count": 17,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 143754,
         "bodyId": 576496,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "serotonin",
         "nt_conf": 0.5986106210303459,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 144014,
         "bodyId": 580748,
         "type": "MN1",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "unclear",
         "nt_conf": 0.3186000850130569,
         "sign": 1,
         "synapse_count": 11,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 145490,
         "bodyId": 801562,
         "type": "DNge088",
         "superclass": "descending_neuron",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.5930431169669164,
         "sign": -1,
         "synapse_count": 30,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 152997,
         "bodyId": 810838,
         "type": "IN12B040",
         "superclass": "vnc_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.8255247489845439,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 157721,
         "bodyId": 817144,
         "type": "IN09A046",
         "superclass": "vnc_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "gaba",
         "predicted_nt": "gaba",
         "nt_conf": 0.7876346103262128,
         "sign": -1,
         "synapse_count": 8,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 159016,
@@ -846,7 +907,8 @@
         "nt_conf": 0.43827230500685393,
         "sign": 1,
         "synapse_count": 8,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 160008,
@@ -859,7 +921,8 @@
         "nt_conf": 0.9353403488972749,
         "sign": 1,
         "synapse_count": 5,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 160047,
@@ -872,7 +935,8 @@
         "nt_conf": 0.48503140808592377,
         "sign": 1,
         "synapse_count": 7,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 160083,
@@ -885,7 +949,8 @@
         "nt_conf": 0.9747326673375373,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 160307,
@@ -898,20 +963,22 @@
         "nt_conf": 0.5588599987467506,
         "sign": 1,
         "synapse_count": 7,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 162364,
         "bodyId": 907987,
         "type": "INXXX244",
         "superclass": "vnc_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "serotonin",
         "nt_conf": 0.8304512416717141,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 163664,
@@ -924,7 +991,8 @@
         "nt_conf": 0.6835337672576851,
         "sign": 1,
         "synapse_count": 7,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 164005,
@@ -937,7 +1005,8 @@
         "nt_conf": 0.8970241050186551,
         "sign": 1,
         "synapse_count": 9,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 164047,
@@ -950,7 +1019,8 @@
         "nt_conf": 0.587172945729506,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 164127,
@@ -963,7 +1033,8 @@
         "nt_conf": 0.4301510288890467,
         "sign": 1,
         "synapse_count": 10,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 164439,
@@ -976,33 +1047,36 @@
         "nt_conf": 0.9320430291358843,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 164998,
         "bodyId": 957716,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.9601647907629491,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165005,
         "bodyId": 102317324,
         "type": "MN1",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "unclear",
         "nt_conf": 0.3136255762755537,
         "sign": 1,
         "synapse_count": 20,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165078,
@@ -1015,7 +1089,8 @@
         "nt_conf": 0.8024363875486307,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165245,
@@ -1028,7 +1103,8 @@
         "nt_conf": 0.7053683209568358,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165351,
@@ -1041,7 +1117,8 @@
         "nt_conf": 0.8215888246387698,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165381,
@@ -1054,7 +1131,8 @@
         "nt_conf": 0.7761027163424191,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165436,
@@ -1067,7 +1145,8 @@
         "nt_conf": 0.5903630650961103,
         "sign": 1,
         "synapse_count": 17,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165445,
@@ -1080,7 +1159,8 @@
         "nt_conf": 0.8051461628377943,
         "sign": 1,
         "synapse_count": 9,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165456,
@@ -1093,7 +1173,8 @@
         "nt_conf": 0.8855518991598428,
         "sign": 1,
         "synapse_count": 6,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165486,
@@ -1106,7 +1187,8 @@
         "nt_conf": 0.8556671799908282,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165499,
@@ -1119,7 +1201,8 @@
         "nt_conf": 0.9286522613530263,
         "sign": 1,
         "synapse_count": 11,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165523,
@@ -1132,7 +1215,8 @@
         "nt_conf": 0.8076341492124034,
         "sign": 1,
         "synapse_count": 7,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165524,
@@ -1145,7 +1229,8 @@
         "nt_conf": 0.8231401511722245,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165529,
@@ -1158,7 +1243,8 @@
         "nt_conf": 0.672860903446859,
         "sign": 1,
         "synapse_count": 12,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165540,
@@ -1171,20 +1257,22 @@
         "nt_conf": 0.5783377174765794,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165556,
         "bodyId": 492462351,
         "type": "MN11V",
         "superclass": "cb_motor",
-        "class": NaN,
+        "class": null,
         "nt": "acetylcholine",
         "predicted_nt": "acetylcholine",
         "nt_conf": 0.5679534851730225,
         "sign": 1,
         "synapse_count": 29,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165625,
@@ -1197,7 +1285,8 @@
         "nt_conf": 0.8630762989904531,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165628,
@@ -1210,7 +1299,8 @@
         "nt_conf": 0.7669824078021293,
         "sign": 1,
         "synapse_count": 1,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165670,
@@ -1223,20 +1313,22 @@
         "nt_conf": 0.6620020602370541,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165850,
         "bodyId": 765790195,
         "type": "GNG591",
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "unclear",
         "predicted_nt": "octopamine",
         "nt_conf": 0.7692581776329234,
         "sign": 1,
         "synapse_count": 5,
-        "sign_label": "excitatory"
+        "nt_class": "unknown",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165860,
@@ -1249,7 +1341,8 @@
         "nt_conf": 0.7141151669794288,
         "sign": 1,
         "synapse_count": 6,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165882,
@@ -1262,7 +1355,8 @@
         "nt_conf": 0.6022302185347252,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165904,
@@ -1275,20 +1369,22 @@
         "nt_conf": 0.7569816250565562,
         "sign": 1,
         "synapse_count": 4,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 165959,
         "bodyId": 855919212,
-        "type": NaN,
+        "type": null,
         "superclass": "cb_intrinsic",
-        "class": NaN,
+        "class": null,
         "nt": "glutamate",
         "predicted_nt": "glutamate",
         "nt_conf": 0.8052030815477051,
         "sign": -1,
         "synapse_count": 1,
-        "sign_label": "inhibitory"
+        "nt_class": "inhibitory",
+        "placement_sign": "inhibitory"
       },
       {
         "neuron_index": 166036,
@@ -1301,7 +1397,8 @@
         "nt_conf": 0.7094155704386536,
         "sign": 1,
         "synapse_count": 14,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 166060,
@@ -1314,7 +1411,8 @@
         "nt_conf": 0.7737918235029894,
         "sign": 1,
         "synapse_count": 2,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 166264,
@@ -1327,7 +1425,8 @@
         "nt_conf": 0.7073247433372647,
         "sign": 1,
         "synapse_count": 5,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       },
       {
         "neuron_index": 166675,
@@ -1340,12 +1439,19 @@
         "nt_conf": 0.5068880952445434,
         "sign": 1,
         "synapse_count": 3,
-        "sign_label": "excitatory"
+        "nt_class": "excitatory",
+        "placement_sign": "excitatory"
       }
     ],
     "summary": {
       "total": 101,
-      "by_sign": {
+      "by_nt_class": {
+        "excitatory": 53,
+        "inhibitory": 27,
+        "unknown": 20,
+        "modulatory": 1
+      },
+      "by_placement_sign": {
         "excitatory": 74,
         "inhibitory": 27
       },
@@ -1384,7 +1490,6 @@
   "demand": {
     "k_max": 4.0,
     "quanta_per_synapse": 16,
-    "drive_loop_quanta": 3621,
     "latch_autapse": {
       "quanta": -724,
       "required_synapse_count": 12
@@ -1398,299 +1503,53 @@
     "inhibitory_self_edges": 27,
     "excitatory_self_edges": 74,
     "latch_autapse": {
+      "quanta": -724,
       "required_synapse_count": 12,
-      "carriable_self_edges": 2,
-      "carriable_body_ids": [
+      "standalone_inhibitory_self_edges_with_enough_synapses": 2,
+      "standalone_body_ids": [
         10540,
         801562
       ],
-      "k_max_needed_by_existing_inhibitory_self_edge": [
-        {
-          "bodyId": 10473,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 10540,
-          "synapse_count": 14,
-          "k_max": 3.232143
-        },
-        {
-          "bodyId": 17565,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 17600,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 18443,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 20504,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 21822,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 25244,
-          "synapse_count": 2,
-          "k_max": 22.625
-        },
-        {
-          "bodyId": 43331,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 116827,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 118781,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 120525,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 123002,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 141161,
-          "synapse_count": 8,
-          "k_max": 5.65625
-        },
-        {
-          "bodyId": 151050,
-          "synapse_count": 2,
-          "k_max": 22.625
-        },
-        {
-          "bodyId": 155188,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 158178,
-          "synapse_count": 2,
-          "k_max": 22.625
-        },
-        {
-          "bodyId": 159866,
-          "synapse_count": 2,
-          "k_max": 22.625
-        },
-        {
-          "bodyId": 170407,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 172666,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 184446,
-          "synapse_count": 3,
-          "k_max": 15.083333
-        },
-        {
-          "bodyId": 231168,
-          "synapse_count": 2,
-          "k_max": 22.625
-        },
-        {
-          "bodyId": 523060,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 801562,
-          "synapse_count": 30,
-          "k_max": 1.508333
-        },
-        {
-          "bodyId": 810838,
-          "synapse_count": 1,
-          "k_max": 45.25
-        },
-        {
-          "bodyId": 817144,
-          "synapse_count": 8,
-          "k_max": 5.65625
-        },
-        {
-          "bodyId": 855919212,
-          "synapse_count": 1,
-          "k_max": 45.25
-        }
-      ]
+      "full_rule_carriable_self_edges": 0,
+      "designed_source_dale_signs": {
+        "inhibitory": 0,
+        "excitatory": 140
+      }
     },
     "oneshot_transaction": {
+      "quanta": -15932,
       "required_synapse_count": 249,
-      "carriable_self_edges": 0,
-      "carriable_body_ids": [],
-      "k_max_needed_by_existing_inhibitory_self_edge": [
-        {
-          "bodyId": 10473,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 10540,
-          "synapse_count": 14,
-          "k_max": 71.125
-        },
-        {
-          "bodyId": 17565,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 17600,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 18443,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 20504,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 21822,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 25244,
-          "synapse_count": 2,
-          "k_max": 497.875
-        },
-        {
-          "bodyId": 43331,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 116827,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 118781,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 120525,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 123002,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 141161,
-          "synapse_count": 8,
-          "k_max": 124.46875
-        },
-        {
-          "bodyId": 151050,
-          "synapse_count": 2,
-          "k_max": 497.875
-        },
-        {
-          "bodyId": 155188,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 158178,
-          "synapse_count": 2,
-          "k_max": 497.875
-        },
-        {
-          "bodyId": 159866,
-          "synapse_count": 2,
-          "k_max": 497.875
-        },
-        {
-          "bodyId": 170407,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 172666,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 184446,
-          "synapse_count": 3,
-          "k_max": 331.916667
-        },
-        {
-          "bodyId": 231168,
-          "synapse_count": 2,
-          "k_max": 497.875
-        },
-        {
-          "bodyId": 523060,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 801562,
-          "synapse_count": 30,
-          "k_max": 33.191667
-        },
-        {
-          "bodyId": 810838,
-          "synapse_count": 1,
-          "k_max": 995.75
-        },
-        {
-          "bodyId": 817144,
-          "synapse_count": 8,
-          "k_max": 124.46875
-        },
-        {
-          "bodyId": 855919212,
-          "synapse_count": 1,
-          "k_max": 995.75
-        }
-      ]
+      "standalone_inhibitory_self_edges_with_enough_synapses": 0,
+      "standalone_body_ids": [],
+      "full_rule_carriable_self_edges": 0,
+      "designed_source_dale_signs": {
+        "inhibitory": 0,
+        "excitatory": 8
+      }
     }
   },
   "adder_demand": {
-    "netlist_neurons": 664,
-    "matching_excitatory_latches": 62,
-    "latch_autapse_self_edges": 124,
-    "sum_xor2_ordered": 4,
-    "rails_per_sum_xor": 2,
-    "transaction_self_edges": 8
+    "netlist_neurons": 740,
+    "non_f_flipflop_netlist_neurons": 664,
+    "self_edges_by_quanta": {
+      "-15932": 8,
+      "-724": 140
+    },
+    "latch_autapse": {
+      "quanta": -724,
+      "self_edges": 140,
+      "designed_source_dale_signs": {
+        "inhibitory": 0,
+        "excitatory": 140
+      }
+    },
+    "oneshot_transaction": {
+      "quanta": -15932,
+      "self_edges": 8,
+      "designed_source_dale_signs": {
+        "inhibitory": 0,
+        "excitatory": 8
+      }
+    }
   }
 }

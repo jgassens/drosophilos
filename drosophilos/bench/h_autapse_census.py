@@ -1,10 +1,4 @@
-"""Stage H: census MCNS self-connections for configuration F.
-
-Run with ``python -m drosophilos.bench.h_autapse_census --data-dir DATA/mcns``.
-The report asks whether a real neuron's anatomical self-connection can carry the
-zero-delay inhibitory feedback which configuration F adds to latch members and
-to ordered sum-XOR transaction relays.
-"""
+"""Stage H: census MCNS self-connections for configuration F."""
 
 from __future__ import annotations
 
@@ -18,41 +12,47 @@ import numpy as np
 import pandas as pd
 
 from ..connectome.embed_h0 import Policy
-from ..connectome.mcns import load_mcns
+from ..connectome.mcns import INHIBITORY, load_mcns
 from ..lib.adder import build_adder_channel
-from ..lib.netlist import Drive
-from ..protocol.latch import EXPERIMENTAL_AUTAPSE_GAIN
 from ..sim.model import Params, QUANTA_PER_SYNAPSE
 
+BINS = (("1", 1, 1), ("2-4", 2, 4), ("5-9", 5, 9), ("10-19", 10, 19),
+        ("20-49", 20, 49), (">=50", 50, math.inf))
+MODULATORY = {"dopamine", "serotonin", "octopamine", "tyramine", "histamine"}
 
-BINS = (("1", 1, 1), ("2-4", 2, 4), ("5-9", 5, 9),
-        ("10-19", 10, 19), ("20-49", 20, 49), (">=50", 50, math.inf))
 
-
-def sign_name(value) -> str:
-    """The MCNS sign label used in this report (including missing/zero as unknown)."""
-    if pd.isna(value) or value == 0:
+def nt_class(value) -> str:
+    """Classify consensus transmitter without MCNS's default-positive sign."""
+    if pd.isna(value) or str(value).lower() in {"", "unclear", "missing", "nan"}:
         return "unknown"
+    value = str(value).lower()
+    if value in INHIBITORY:
+        return "inhibitory"
+    if value == "acetylcholine":
+        return "excitatory"
+    if value in MODULATORY:
+        return "modulatory"
+    return "unknown"
+
+
+def placement_sign_name(value) -> str:
     return "inhibitory" if value < 0 else "excitatory"
 
 
-def self_edge_table(pre: np.ndarray, post: np.ndarray, count: np.ndarray,
-                    neurons: pd.DataFrame) -> pd.DataFrame:
+def self_edge_table(pre: np.ndarray, post: np.ndarray, count: np.ndarray, neurons: pd.DataFrame) -> pd.DataFrame:
     """Return annotations for every anatomical self-edge; inputs are MCNS-style arrays."""
     keep = np.asarray(pre) == np.asarray(post)
     indices = np.asarray(pre)[keep].astype(np.int64)
-    cols = [c for c in ("bodyId", "type", "superclass", "class", "nt", "predicted_nt", "nt_conf", "sign")
-            if c in neurons.columns]
+    cols = [c for c in ("bodyId", "type", "superclass", "class", "nt", "predicted_nt", "nt_conf", "sign") if c in neurons]
     out = neurons.iloc[indices][cols].copy().reset_index(drop=True)
     out.insert(0, "neuron_index", indices)
     out["synapse_count"] = np.asarray(count)[keep].astype(np.int64)
-    out["sign_label"] = [sign_name(x) for x in out.get("sign", pd.Series(0, index=out.index))]
+    out["nt_class"] = [nt_class(x) for x in out.get("nt", pd.Series(index=out.index, dtype=object))]
+    out["placement_sign"] = [placement_sign_name(x) for x in out["sign"]]
     return out
 
 
 def count_categories(rows: pd.DataFrame, column: str) -> dict[str, int]:
-    if column not in rows:
-        return {}
     return {str(k): int(v) for k, v in rows[column].fillna("unknown").value_counts().items()}
 
 
@@ -62,129 +62,137 @@ def count_bins(counts: np.ndarray) -> dict[str, int]:
 
 
 def supply_summary(rows: pd.DataFrame) -> dict:
-    return {"total": int(len(rows)), "by_sign": count_categories(rows, "sign_label"),
+    return {"total": int(len(rows)), "by_nt_class": count_categories(rows, "nt_class"),
+            "by_placement_sign": count_categories(rows, "placement_sign"),
             "by_transmitter": count_categories(rows, "nt"),
             "by_superclass": count_categories(rows, "superclass"),
             "by_synapse_count_bin": count_bins(rows["synapse_count"].to_numpy())}
 
 
-def autapse_demands(params: Params = Params(), k_max: float = 4.0) -> dict:
-    """Configuration-F self-edge quanta and imported Profile-2 count thresholds."""
-    drive = Drive.from_params(params)
-    q_latch = -round(EXPERIMENTAL_AUTAPSE_GAIN * drive.loop)
-    q_oneshot = -round(4.4 * drive.loop)
-    policy = Policy(k_max=k_max)
-    return {"k_max": k_max, "quanta_per_synapse": QUANTA_PER_SYNAPSE,
-            "drive_loop_quanta": drive.loop,
-            "latch_autapse": {"quanta": int(q_latch), "required_synapse_count": policy.req_count(q_latch)},
-            "oneshot_transaction": {"quanta": int(q_oneshot), "required_synapse_count": policy.req_count(q_oneshot)}}
-
-
-def fit_summary(rows: pd.DataFrame, demand: dict) -> dict:
-    """Counts of inhibitory self-edges meeting each imported Profile-2 threshold."""
-    inh = rows[rows["sign_label"] == "inhibitory"].copy()
-    out = {"inhibitory_self_edges": int(len(inh)), "excitatory_self_edges": int((rows["sign_label"] == "excitatory").sum())}
-    for name in ("latch_autapse", "oneshot_transaction"):
-        req = demand[name]["required_synapse_count"]
-        good = inh[inh["synapse_count"] >= req]
-        # This is the multiplier needed by every existing inhibitory self-edge.
-        k_needed = np.abs(demand[name]["quanta"]) / (inh["synapse_count"].to_numpy() * QUANTA_PER_SYNAPSE) if len(inh) else np.array([])
-        out[name] = {"required_synapse_count": int(req), "carriable_self_edges": int(len(good)),
-                     "carriable_body_ids": [int(x) for x in good["bodyId"]],
-                     "k_max_needed_by_existing_inhibitory_self_edge": [
-                         {"bodyId": int(b), "synapse_count": int(c), "k_max": round(float(k), 6)}
-                         for b, c, k in zip(inh["bodyId"], inh["synapse_count"], k_needed)]}
-    return out
-
-
-def latch_matches(net, drive: Drive) -> list[tuple[int, int]]:
-    """The exact non-mutating latch recognition used by add_experimental_autapses."""
-    edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
-    return [(u, v) for (u, v), q in edges.items()
-            if q == drive.loop and edges.get((v, u)) == drive.loop
-            and net.roles[u].endswith(".u")
-            and net.roles[v] == net.roles[u].removesuffix(".u") + ".v"]
+def _outgoing_dale_signs(net) -> np.ndarray:
+    """Placement's designed-neuron transmitter vote; designed self-edges do not vote."""
+    src, q, dst = np.asarray(net.src), np.asarray(net.quanta), np.asarray(net.dst)
+    nonself = src != dst
+    pos = np.bincount(src[nonself], weights=(q[nonself] > 0), minlength=net.n)
+    neg = np.bincount(src[nonself], weights=(q[nonself] < 0), minlength=net.n)
+    return np.where(pos >= neg, 1, -1).astype(np.int8)
 
 
 def adder_demand() -> dict:
-    """Count configuration-F demands on the specified 4-bit flip-flop adder build."""
-    channel = build_adder_channel(Params(), 4, ordered=True, watchdog_hops=100, storage="flipflop")
-    latches = latch_matches(channel.net, channel.drive)
-    # Gates.ripple_adder_ordered makes one sum xor per bit; oneshot=True makes one
-    # transaction relay (and thus one self-edge) for each of its two late rails.
-    sum_xors, rails_per_sum = 4, 2
-    return {"netlist_neurons": channel.net.n, "matching_excitatory_latches": len(latches),
-            "latch_autapse_self_edges": 2 * len(latches), "sum_xor2_ordered": sum_xors,
-            "rails_per_sum_xor": rails_per_sum, "transaction_self_edges": sum_xors * rails_per_sum}
+    """Derive all configuration-F self-edge demand from the specified real build."""
+    params = Params()
+    channel = build_adder_channel(params, 4, ordered=True, watchdog_hops=100, storage="flipflop",
+                                  rate_robust=True, experimental_autapse=True, ordered_xor_oneshot=True)
+    baseline = build_adder_channel(params, 4, ordered=True, watchdog_hops=100, storage="flipflop")
+    net = channel.net
+    src, dst, q = np.asarray(net.src), np.asarray(net.dst), np.asarray(net.quanta)
+    self_edges, dale = src == dst, _outgoing_dale_signs(net)
+    role = np.asarray(net.roles, dtype=object)[src]
+    kinds = {"latch_autapse": self_edges & np.array([x.endswith((".u", ".v")) for x in role]),
+             "oneshot_transaction": self_edges & np.array([".once" in x and x.endswith(".edge") for x in role])}
+    result = {"netlist_neurons": int(net.n), "non_f_flipflop_netlist_neurons": int(baseline.net.n),
+              "self_edges_by_quanta": {str(int(x)): int((q[self_edges] == x).sum()) for x in np.unique(q[self_edges])}}
+    for name, mask in kinds.items():
+        quanta = np.unique(q[mask])
+        if len(quanta) != 1:
+            raise ValueError(f"{name} has {len(quanta)} self-edge quanta; expected one")
+        signs = dale[src[mask]]
+        result[name] = {"quanta": int(quanta[0]), "self_edges": int(mask.sum()),
+                        "designed_source_dale_signs": {"inhibitory": int((signs < 0).sum()),
+                                                        "excitatory": int((signs > 0).sum())}}
+    return result
+
+
+def autapse_demands(params: Params = Params(), k_max: float = 4.0, *, built: dict | None = None) -> dict:
+    """Profile-2 thresholds derived from configuration F's built-netlist quanta."""
+    del params
+    built, policy = (adder_demand() if built is None else built), Policy(k_max=k_max)
+    return {"k_max": k_max, "quanta_per_synapse": QUANTA_PER_SYNAPSE,
+            **{name: {"quanta": built[name]["quanta"], "required_synapse_count": policy.req_count(built[name]["quanta"])}
+               for name in ("latch_autapse", "oneshot_transaction")}}
+
+
+def fit_summary(rows: pd.DataFrame, demand: dict, built: dict | None = None) -> dict:
+    """Compare standalone sign/count capacity with the complete Dale-law placement rule."""
+    built = adder_demand() if built is None else built
+    out = {"inhibitory_self_edges": int((rows["placement_sign"] == "inhibitory").sum()),
+           "excitatory_self_edges": int((rows["placement_sign"] == "excitatory").sum())}
+    for name in ("latch_autapse", "oneshot_transaction"):
+        req = demand[name]["required_synapse_count"]
+        standalone = rows[(rows["placement_sign"] == "inhibitory") & (rows["synapse_count"] >= req)]
+        signs = built[name]["designed_source_dale_signs"]
+        # The source vote must also agree with the negative self-edge.  It does not.
+        full = standalone if signs["inhibitory"] else standalone.iloc[0:0]
+        out[name] = {"quanta": int(demand[name]["quanta"]), "required_synapse_count": int(req),
+                     "standalone_inhibitory_self_edges_with_enough_synapses": int(len(standalone)),
+                     "standalone_body_ids": [int(x) for x in standalone["bodyId"]],
+                     "full_rule_carriable_self_edges": int(len(full)), "designed_source_dale_signs": signs}
+    return out
 
 
 def raw_self_edge_check(data_dir: Path, known_bodies: np.ndarray) -> dict:
-    """Count raw feather self rows and which survive MCNS's both-endpoints-neurons rule."""
     import pyarrow.dataset as ds
-    path = data_dir / "connectome-weights-male-cns-v1.0-minconf-0.5.feather"
-    dataset = ds.dataset(path, format="feather")
+    dataset = ds.dataset(data_dir / "connectome-weights-male-cns-v1.0-minconf-0.5.feather", format="feather")
     names = dataset.schema.names
     pre = "body_pre" if "body_pre" in names else next(c for c in names if "pre" in c.lower())
     post = "body_post" if "body_post" in names else next(c for c in names if "post" in c.lower())
     total = kept = 0
     bodies = np.sort(np.asarray(known_bodies))
     for batch in dataset.scanner(columns=[pre, post], batch_size=2_000_000).to_batches():
-        a, b = batch.column(0).to_numpy(), batch.column(1).to_numpy()
-        same = a == b
-        total += int(same.sum())
-        x = a[same]
-        pos = np.searchsorted(bodies, x)
-        ok = (pos < len(bodies)) & (bodies[np.minimum(pos, len(bodies) - 1)] == x)
-        kept += int(ok.sum())
+        a, b = batch.column(0).to_numpy(), batch.column(1).to_numpy(); same = a == b
+        total += int(same.sum()); x = a[same]; pos = np.searchsorted(bodies, x)
+        kept += int(((pos < len(bodies)) & (bodies[np.minimum(pos, len(bodies) - 1)] == x)).sum())
     return {"raw_self_edges": total, "raw_self_edges_with_both_bodies_in_neuron_table": kept,
             "excluded_outside_neuron_table": total - kept}
 
 
+def _json_clean(value):
+    if isinstance(value, dict): return {str(k): _json_clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)): return [_json_clean(v) for v in value]
+    if isinstance(value, np.generic): value = value.item()
+    return None if isinstance(value, float) and not math.isfinite(value) else value
+
+
 def make_report(data_dir: Path) -> dict:
     m = load_mcns(data_dir=data_dir)
-    rows = self_edge_table(m.pre, m.post, m.count, m.neurons)
-    demand = autapse_demands()
-    return {"stage": "H autapse census", "inputs": {
-            "edge_cache": str(data_dir / "mcns_v1.0_edges_minsyn1.npz"),
-            "neurons": str(data_dir / "mcns_v1.0_neurons.parquet"),
-            "raw_weights": str(data_dir / "connectome-weights-male-cns-v1.0-minconf-0.5.feather"),
-            "params": dataclasses.asdict(Params()), "k_max": 4.0},
-            "mcns": {"version": m.version, "data_dir": str(data_dir),
+    rows, built = self_edge_table(m.pre, m.post, m.count, m.neurons), adder_demand()
+    demand = autapse_demands(built=built)
+    return {"stage": "H autapse census", "inputs": {"edge_cache": str(data_dir / "mcns_v1.0_edges_minsyn1.npz"),
+            "neurons": str(data_dir / "mcns_v1.0_neurons.parquet"), "raw_weights": str(data_dir / "connectome-weights-male-cns-v1.0-minconf-0.5.feather"),
+            "params": dataclasses.asdict(Params()), "k_max": 4.0}, "mcns": {"version": m.version, "data_dir": str(data_dir),
             "neuron_rule": "superclass is not null", "edge_rule": "both endpoints are neurons and syn_count >= min_syn"},
-            "placement_rule": {"quoted": "0 <= |q| <= k_max * count * QUANTA_PER_SYNAPSE; the presynaptic host transmitter sign must match the designed edge sign.",
-                               "implementation": "drosophilos.connectome.embed_h0.Policy.req_count(q)"},
+            "placement_rule": {"quoted": "0 <= |q| <= k_max * count * QUANTA_PER_SYNAPSE; the presynaptic host transmitter sign must match the designed edge sign and the designed neuron's outgoing-edge vote (Dale's law)."},
             "supply": {"self_edges": rows.to_dict(orient="records"), "summary": supply_summary(rows),
                        "raw_source_check": raw_self_edge_check(data_dir, m.neurons["bodyId"].to_numpy())},
-            "demand": demand, "fit": fit_summary(rows, demand), "adder_demand": adder_demand()}
+            "demand": demand, "fit": fit_summary(rows, demand, built), "adder_demand": built}
 
 
 def markdown(report: dict) -> str:
     s, f, d, a = report["supply"]["summary"], report["fit"], report["demand"], report["adder_demand"]
-    lines = ["# Stage H autapse census", "", "An autapse is a neuron-to-itself anatomical connection.", "",
-             "| row | self-edges |", "| --- | ---: |",
-             f"| supply total | {s['total']} |", f"| inhibitory supply | {s['by_sign'].get('inhibitory', 0)} |",
-             f"| excitatory supply | {s['by_sign'].get('excitatory', 0)} |",
-             f"| carriable latch autapse at k_max 4 | {f['latch_autapse']['carriable_self_edges']} |",
-             f"| carriable one-shot autapse at k_max 4 | {f['oneshot_transaction']['carriable_self_edges']} |",
-             f"| demand on the 4-bit adder (latch / transaction) | {a['latch_autapse_self_edges']} / {a['transaction_self_edges']} |", "",
-             f"Profile 2 allows a designed edge only when the presynaptic host has its sign and `0 <= |q| <= k_max * count * QUANTA_PER_SYNAPSE`; `Policy.req_count` supplies the count conversion.",
-             f"The latch feedback is {d['latch_autapse']['quanta']} quanta and needs {d['latch_autapse']['required_synapse_count']} synapses at k_max 4; the transaction feedback is {d['oneshot_transaction']['quanta']} quanta and needs {d['oneshot_transaction']['required_synapse_count']}.",
-             f"The raw table has {report['supply']['raw_source_check']['raw_self_edges']} self rows, of which {report['supply']['raw_source_check']['excluded_outside_neuron_table']} have a body outside the MCNS neuron table, leaving {s['total']}.",
-             "Cholinergic (excitatory) self-edges are shown as supply but cannot carry these inhibitory designed edges."]
+    lines = ["# Stage H autapse census", "", "An autapse is a neuron-to-itself anatomical connection; Dale's law means all outputs of one designed neuron use one transmitter sign.", "",
+             "| row | count |", "| --- | ---: |", f"| anatomical self-edges | {s['total']} |",
+             f"| transmitter class: inhibitory / excitatory / modulatory / unknown | {s['by_nt_class'].get('inhibitory', 0)} / {s['by_nt_class'].get('excitatory', 0)} / {s['by_nt_class'].get('modulatory', 0)} / {s['by_nt_class'].get('unknown', 0)} |",
+             f"| placement sign: inhibitory / excitatory | {s['by_placement_sign'].get('inhibitory', 0)} / {s['by_placement_sign'].get('excitatory', 0)} |",
+             f"| configuration-F / non-F flip-flop adder neurons | {a['netlist_neurons']} / {a['non_f_flipflop_netlist_neurons']} |",
+             f"| F latch / one-shot self-edge demand (quanta) | {a['latch_autapse']['self_edges']} ({a['latch_autapse']['quanta']}) / {a['oneshot_transaction']['self_edges']} ({a['oneshot_transaction']['quanta']}) |",
+             f"| latch: standalone inhibitory loops with >= {d['latch_autapse']['required_synapse_count']} synapses / full-rule carriable | {f['latch_autapse']['standalone_inhibitory_self_edges_with_enough_synapses']} / {f['latch_autapse']['full_rule_carriable_self_edges']} |",
+             f"| one-shot: standalone inhibitory loops with >= {d['oneshot_transaction']['required_synapse_count']} synapses / full-rule carriable | {f['oneshot_transaction']['standalone_inhibitory_self_edges_with_enough_synapses']} / {f['oneshot_transaction']['full_rule_carriable_self_edges']} |", "",
+             "The real F build directly supplies the demand, split by its netlist self-edge quanta rather than a hand-matched circuit pattern.",
+             f"The two standalone latch candidates are bodyIds {', '.join(map(str, f['latch_autapse']['standalone_body_ids']))}; neither could also host the excitatory loop to which its autapse belongs.",
+             "Both full-rule counts are zero because every relevant designed source votes excitatory while its self-edge is inhibitory.",
+             "Thus inhibitory self-feedback on an excitatory neuron needs a separate inhibitory neuron, making a two-step loop through an interneuron anatomically possible.",
+             "The optional cross-check against the driven mutual-inhibitory-pair pool was not done."]
     return "\n".join(lines) + "\n"
 
 
 def main() -> None:
     from ..connectome.mcns_download import DEFAULT_DIR
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--data-dir", type=Path, default=DEFAULT_DIR)
-    args = p.parse_args()
-    report = make_report(args.data_dir)
-    root = Path(__file__).resolve().parents[2]
-    out = root / "docs" / "stage_h"; out.mkdir(parents=True, exist_ok=True)
-    (out / "autapse_census.json").write_text(json.dumps(report, indent=2) + "\n")
+    p = argparse.ArgumentParser(description=__doc__); p.add_argument("--data-dir", type=Path, default=DEFAULT_DIR)
+    report = make_report(p.parse_args().data_dir)
+    out = Path(__file__).resolve().parents[2] / "docs" / "stage_h"; out.mkdir(parents=True, exist_ok=True)
+    (out / "autapse_census.json").write_text(json.dumps(_json_clean(report), indent=2, allow_nan=False) + "\n")
     (out / "autapse_census.md").write_text(markdown(report))
-    print(json.dumps(report["supply"]["summary"], indent=2))
+    print(json.dumps(report["supply"]["summary"], indent=2, allow_nan=False))
 
 
 if __name__ == "__main__":
