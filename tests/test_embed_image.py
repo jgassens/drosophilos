@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from test_embed_netlist import (latch_relay_netlist, synthetic_ff_mcns, synthetic_mcns, synthetic_triple_mcns, two_flipflop_netlist,
+from test_embed_netlist import (latch_relay_netlist, synthetic_autapses, synthetic_ff_mcns, synthetic_mcns, synthetic_triple_mcns, two_flipflop_netlist,
                                 two_proxied_flipflop_netlist)
 
 from drosophilos.connectome.embed_h0 import Policy
@@ -38,6 +38,44 @@ def _placed_latch_relay():
     pl = place_netlist(net, m, policy, time_limit_s=20, restarts=2, verbose=False)
     assert pl.carried == net.nnz == 6, pl.summary(net)
     return net, drive, ids, policy, m, idx, pl
+
+
+@pytest.mark.parametrize("too_weak", [False, True])
+def test_autapses_in_conditions_and_whole_graph(too_weak):
+    from drosophilos.connectome.embed_image import full_graph_topology, h1_conditions
+
+    net, drive, ids, policy, m, idx, real = synthetic_autapses(too_weak)
+    pl = Placement(dict(enumerate(real.tolist())), [], 0, [], 0, 0)
+    conditions = h1_conditions(policy)
+    a = build_image(net, m, pl, conditions["A"][2], profile3=conditions["A"][1])
+    b = build_image(net, m, pl, conditions["B"][2], profile3=conditions["B"][1])
+    assert a.counts["carried"] == 6 + (not too_weak)
+    classes = {"autapse (wrong sign)": 1, "autapse (no host self-edge)": 1}
+    if too_weak:
+        classes["autapse (too weak)"] = 1
+    assert a.counts["profile3_by_class"] == b.counts["omitted_by_class"] == classes
+    assert all(e.src == e.dst and e.delay == 0 and e.quanta == -round(.2 * drive.loop) for e in a.profile3)
+    assert all(e["delay"] == 0 for e in a.manifest["structural_edits"])
+    assert not b.profile3
+    for img in (a, b):
+        # Existing host self-edges that cannot carry feedback are zeroed before Profile 3 is added.
+        assert len([e for e in img.parasitic if e.src == e.dst]) == 1 + too_weak
+        fg = full_graph_topology(m, Params(), img)
+        for name in ("edge_inh", "edge", "v"):
+            s = ids[name]
+            present = img is a or (name == "edge_inh" and not too_weak)
+            take = (img.topology.src == s) & (img.topology.dst == s)
+            assert take.sum() == int(present)
+            if present:
+                assert img.topology.delay[take].tolist() == [0]
+                # The designed delay reaches RefSim unchanged, too.
+                assert RefSim(img.topology, Params()).topo.delay[take].tolist() == [0]
+            host = fg.index_map[s]
+            full = (fg.topology.src == host) & (fg.topology.dst == host) & (fg.topology.quanta != 0)
+            assert full.sum() == int(present)
+            if present:
+                assert fg.topology.quanta[full].tolist() == [-round(.2 * drive.loop)]
+                assert fg.topology.delay[full].tolist() == [0]
 
 
 def test_image_carries_every_edge_at_designed_quanta_with_scale():

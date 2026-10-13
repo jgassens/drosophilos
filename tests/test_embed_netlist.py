@@ -91,6 +91,72 @@ def synthetic_mcns(policy: Policy, drive: Drive, seed: int = 0, n_distractors: i
     return m, idx
 
 
+def synthetic_autapses(too_weak: bool = False):
+    """The planted relay's inhibitory host, an excitatory host and a host without feedback."""
+    net, drive, ids = latch_relay_netlist()
+    policy = Policy(k_max=4)
+    m, idx = synthetic_mcns(policy, drive)
+    q = -round(.2 * drive.loop)
+    for name in ("edge_inh", "edge", "v"):
+        net.synapse(ids[name], ids[name], q, 0)
+    cnt = policy.req_count(q)
+    m = MCNS(m.neurons, np.append(m.pre, [idx["I"], idx["E"]]).astype(np.int32),
+             np.append(m.post, [idx["I"], idx["E"]]).astype(np.int32),
+             np.append(m.count, [cnt - 1 if too_weak else cnt, cnt]).astype(np.int32), min_syn=1)
+    real = np.array([idx["S"], idx["U"], idx["V"], idx["E"], idx["I"]])
+    return net, drive, ids, policy, m, idx, real
+
+
+@pytest.mark.parametrize("too_weak", [False, True])
+def test_autapses_use_only_their_host_self_edge(too_weak):
+    net, drive, ids, policy, m, idx, real = synthetic_autapses(too_weak)
+    design = _Design(net, policy, hub_deg=20, hard_hubs=range(net.n))
+    assert not design.hard[design.self_edge].any()
+    assert design.sign[ids["edge"]] == design.sign[ids["v"]] == 1
+    pl = audit(net, design, _Anatomy(m, policy), real, 0, {}, "planted", policy)
+    assert pl.carried == 6 + (not too_weak)
+    reasons = {(s, d): reason for s, d, _, reason in pl.missing}
+    assert reasons[ids["edge"], ids["edge"]] == "autapse (wrong sign)"
+    assert reasons[ids["v"], ids["v"]] == "autapse (no host self-edge)"
+    if too_weak:
+        assert reasons[ids["edge_inh"], ids["edge_inh"]] == "autapse (too weak)"
+    else:
+        assert (ids["edge_inh"], ids["edge_inh"]) not in reasons
+    for reason in reasons.values():
+        assert pl.missing_by_class[reason] == [1, 1]
+    assert pl.summary(net)["missing_by_class"] == pl.missing_by_class
+
+
+def test_autapses_preserve_motifs_and_never_constrain_host_choice():
+    net, drive, ids, policy, m, idx, real = synthetic_autapses(too_weak=True)
+    baseline, _, _ = latch_relay_netlist()
+    old = _Design(baseline, policy, hub_deg=20)
+    new = _Design(net, policy, hub_deg=20)
+    assert [(mo.kind, mo.nodes, mo.edges) for mo in old.motifs] == [(mo.kind, mo.nodes, mo.edges) for mo in new.motifs]
+    a = place_netlist(baseline, m, policy, restarts=1, seed=0, time_limit_s=20)
+    b = place_netlist(net, m, policy, restarts=1, seed=0, time_limit_s=20)
+    assert a.mapping == b.mapping and not b.unplaced
+    assert b.carried == a.carried == 6
+    assert len(b.missing) == 3
+
+
+def test_self_only_neuron_scores_hosts_without_a_hard_sign_constraint():
+    _, drive, _, policy, m, idx, _ = synthetic_autapses()
+    net = Netlist(Params())
+    node = net.neuron("feedback")
+    net.synapse(node, node, -round(.2 * drive.loop), 0)
+    design = _Design(net, policy, hub_deg=20)
+    assert design.sign[node] == 0 and not design.hard.any()
+    pl = place_netlist(net, m, policy, restarts=1, cand_cap=m.n, time_limit_s=20)
+    assert pl.mapping == {node: idx["I"]} and pl.carried == 1
+    # Strong edges between OTHER hosts cannot carry this node's self-edge.
+    keep = m.pre != m.post
+    absent = MCNS(m.neurons, m.pre[keep], m.post[keep], m.count[keep], min_syn=1)
+    pl = place_netlist(net, absent, policy, restarts=1, cand_cap=m.n, time_limit_s=20)
+    assert len(pl.mapping) == 1 and not pl.unplaced and pl.carried == 0
+    assert pl.missing_by_class == {"autapse (no host self-edge)": [1, 1]}
+
+
 def chain_toy_netlist(n_pairs: int, kind: str = "ffpair", proxy: bool = False):
     """`n_pairs` flip-flops (or excitatory latches, kind="latch") in a line, each joined to the
     next by one edge relay read off the previous pair's `u` and igniting the next pair's `u`:

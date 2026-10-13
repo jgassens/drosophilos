@@ -53,7 +53,7 @@ from ..sim.model import QUANTA_PER_SYNAPSE, Params, Topology
 from ..sim.ref64 import RefSim
 from ..sim.trace import SpikeTrace
 from .embed_h0 import Policy
-from .embed_netlist import Placement, role_key
+from .embed_netlist import Placement, autapse_reason, role_key
 from .manifest import Manifest, ParameterEdit, params_dict
 from .mcns import MCNS
 
@@ -173,7 +173,11 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
         rs, rd = int(real[s]), int(real[d])
         cnt = count(rs, rd)
         req = policy.req_count(q)
-        if rs < 0 or rd < 0:
+        if s == d:
+            nt = m.neurons["nt"].iat[rs] if rs >= 0 else None
+            host_sign = 1 if nt in policy.excitatory_nt else -1 if nt in policy.inhibitory_nt else 0
+            detail = autapse_reason(q, cnt, host_sign, policy, rs >= 0)
+        elif rs < 0 or rd < 0:
             detail = "endpoint unplaced"
         elif cnt == 0:
             detail = f"no anatomical edge (needs {req} synapses)"
@@ -196,7 +200,7 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
             continue
         reason = reasons.get((int(s), int(d)))  # the placement's audit, with the data's detail
         edge = ImageEdge(int(s), int(d), int(q), net.roles[s], net.roles[d], f"{reason}: {detail}" if reason else detail,
-                         f"{role_key(net.roles[s])} -> {role_key(net.roles[d])}", cnt, int(dl))
+                         detail if s == d else f"{role_key(net.roles[s])} -> {role_key(net.roles[d])}", cnt, int(dl))
         if select(edge):
             p3.append(edge)
             src_t.append(s); dst_t.append(d); q_t.append(int(q)); dl_t.append(int(dl))
@@ -210,7 +214,7 @@ def build_image(net: Netlist, m: MCNS, placement: Placement, policy: Policy = Po
         sub = C[real_hosts][:, real_hosts].tocoo()
         for i, j, cnt in zip(sub.row.tolist(), sub.col.tolist(), sub.data.tolist()):
             rs, rd = int(real_hosts[i]), int(real_hosts[j])
-            if rs == rd or (rs, rd) in carried_pairs:
+            if (rs, rd) in carried_pairs or (rs == rd and (int(hosts[i]), int(hosts[j])) not in agg):
                 continue
             s, d = int(hosts[i]), int(hosts[j])
             reason = "under a designed edge (too weak or wrong sign)" if any(a == s and b == d for a, b in zip(net.src, net.dst)) else "not designed"
@@ -266,7 +270,8 @@ def image_manifest(net: Netlist, m: MCNS, img: Image, policy: Policy, params: Pa
         edits += [ParameterEdit("weight", int(img.bodies[e.src]), int(img.bodies[e.dst]), e.quanta, 0, "documented zero weight",
                                 f"parasitic edge among circuit neurons ({e.reason})") for e in img.parasitic]
     structural = [{"kind": "add_edge", "pre": int(img.bodies[e.src]), "post": int(img.bodies[e.dst]), "pre_role": e.src_role,
-                   "post_role": e.dst_role, "quanta": e.quanta, "class": e.cls, "reason": e.reason} for e in img.profile3]
+                   "post_role": e.dst_role, "quanta": e.quanta, **({"delay": e.delay} if e.src == e.dst else {}),
+                   "class": e.cls, "reason": e.reason} for e in img.profile3]
     structural += [{"kind": "add_neuron", "role": net.roles[d], "reason": "unplaced by the search"} for d in img.synthetic]
     g0 = m.graph_summary()
     n_par_zero = len(img.parasitic) if img.zero_parasitic else 0

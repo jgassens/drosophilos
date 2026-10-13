@@ -89,6 +89,7 @@ class Placement:
         return {"neurons": net.n, "placed": len(self.mapping), "unplaced": len(self.unplaced),
                 "edges": self.edges, "synapses": net.nnz,
                 "carried": self.carried, "missing": len(self.missing), "carried_fraction": round(self.carried / max(1, self.edges), 4),
+                "missing_by_class": self.missing_by_class,
                 "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy,
                 "isolation_weight": self.isolation_weight, "objective": round(self.objective, 3),
                 "external_in_edges": ex.get("in_edges", 0), "external_out_edges": ex.get("out_edges", 0),
@@ -159,6 +160,19 @@ def exposure_summary(in_ext: np.ndarray, out_ext: np.ndarray, in_edges: np.ndarr
 def role_key(role: str) -> str:
     key = role.split(".")[-1] if "." in role else role
     return "".join(ch for ch in key if not ch.isdigit())
+
+
+def autapse_reason(q: int, count: int, host_sign: int, policy: Policy, placed: bool = True) -> str | None:
+    """A self-edge uses only its own host's anatomy and the ordinary weight bound."""
+    if not placed:
+        return "autapse (endpoint unplaced)"
+    if count == 0:
+        return "autapse (no host self-edge)"
+    if host_sign * q <= 0:
+        return "autapse (wrong sign)"
+    if count < policy.req_count(q):
+        return "autapse (too weak)"
+    return None
 
 
 def _count_matrix(m: MCNS):
@@ -339,6 +353,7 @@ class _Design:
         self.q = np.asarray(net.quanta, dtype=np.int64)
         self.req = np.array([policy.req_count(x) for x in self.q], dtype=np.int32)
         self.esign = np.where(self.q > 0, 1, -1).astype(np.int8)
+        self.self_edge = self.src == self.dst
         self.bias = np.zeros(n, np.float64)  # the netlist's per-neuron tonic bias (mV); parallel to roles
         self.bias[: len(net.bias)] = np.asarray(net.bias, dtype=np.float64)[:n]
         self.ff_driver = ff_driver
@@ -347,9 +362,10 @@ class _Design:
         # neuron in a mutual inhibitory pair with another biased neuron) is inhibitory whatever
         # else it drives: its loop is what it is, and an excitatory readout edge from it (an edge
         # relay reading `.u`) is the minority a GABA host cannot carry.
-        pos = np.bincount(self.src, weights=(self.q > 0), minlength=n)
-        neg = np.bincount(self.src, weights=(self.q < 0), minlength=n)
+        pos = np.bincount(self.src, weights=(self.q > 0) & ~self.self_edge, minlength=n)
+        neg = np.bincount(self.src, weights=(self.q < 0) & ~self.self_edge, minlength=n)
         self.sign = np.where(pos + neg == 0, 0, np.where(pos >= neg, 1, -1)).astype(np.int8)
+        # Feedback must not change a latch/relay's transmitter vote or motif degree.
         self.ff_members = self._ff_members()
         self.sign[list(self.ff_members)] = -1
         # a flip-flop proxy (biased, excitatory, its only input a member's inhibition) is
@@ -357,8 +373,8 @@ class _Design:
         self.ff_proxy_of = self._ff_proxies()
         self.sign[list(self.ff_proxy_of)] = 1
         self.mixed = [int(d) for d in np.flatnonzero((pos > 0) & (neg > 0))]
-        outdeg = np.bincount(self.src, minlength=n)
-        indeg = np.bincount(self.dst, minlength=n)
+        outdeg = np.bincount(self.src[~self.self_edge], minlength=n)
+        indeg = np.bincount(self.dst[~self.self_edge], minlength=n)
         self.out_hub = outdeg > hub_deg
         self.in_hub = indeg > hub_deg
         self.hub = self.out_hub | self.in_hub
@@ -369,15 +385,19 @@ class _Design:
             anchored[net.roles.index(h) if isinstance(h, str) else int(h)] = True
         self.hard |= sign_ok & anchored[self.src] & self.out_hub[self.src]
         self.hard |= sign_ok & anchored[self.dst] & self.in_hub[self.dst]
-        self.soft = sign_ok & ~self.hard
-        self.impossible = ~sign_ok
+        self.hard &= ~self.self_edge
+        self.soft = (sign_ok | self.self_edge) & ~self.hard
+        self.impossible = ~sign_ok & ~self.self_edge
         self.hard_out = [[] for _ in range(n)]
         self.hard_in = [[] for _ in range(n)]
         self.soft_out = [[] for _ in range(n)]
         self.soft_in = [[] for _ in range(n)]
+        self.self_out = [[] for _ in range(n)]
         for e in range(len(self.src)):
             s, d = int(self.src[e]), int(self.dst[e])
-            if self.hard[e]:
+            if self.self_edge[e]:
+                self.self_out[s].append(e)
+            elif self.hard[e]:
                 self.hard_out[s].append(e); self.hard_in[d].append(e)
             elif self.soft[e]:
                 self.soft_out[s].append(e); self.soft_in[d].append(e)
@@ -399,7 +419,7 @@ class _Design:
             inh_pairs.add((int(self.src[e]), int(self.dst[e])))
         members = set()
         for s, d in inh_pairs:
-            if (d, s) in inh_pairs:
+            if s != d and (d, s) in inh_pairs:
                 members.add(s); members.add(d)
         return members
 
@@ -408,8 +428,8 @@ class _Design:
         only input (raw edges) is an inhibitory synapse from a flip-flop member and whose outputs
         (if any) are all excitatory -- add_flipflop's p (inhibited by v) or q (inhibited by u)."""
         n = self.n
-        indeg = np.bincount(self.dst, minlength=n)
-        neg_out = np.bincount(self.src, weights=(self.q < 0), minlength=n)
+        indeg = np.bincount(self.dst[~self.self_edge], minlength=n)
+        neg_out = np.bincount(self.src, weights=(self.q < 0) & ~self.self_edge, minlength=n)
         out: dict = {}
         for e in np.flatnonzero((self.q < 0) & (self.bias[self.dst] != 0)).tolist():
             s, d = int(self.src[e]), int(self.dst[e])
@@ -773,6 +793,9 @@ class _Search:
         s = 0.0
         pruned: dict = {}
         for d, r in assign.items():
+            for e in D.self_out[d]:
+                if A.count(r, r) >= D.req[e] and (A.exc[r] if D.esign[e] > 0 else A.inh[r]):
+                    s += self.soft_w
             for e in D.hard_out[d]:
                 x = int(D.dst[e])
                 if x in assign:
@@ -932,6 +955,8 @@ class _Search:
             return []
         cover = np.zeros(A.n, np.float64)
         dense = np.zeros(A.n, np.int32)
+        for e in D.self_out[h]:
+            cover += (A.C.diagonal() >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)
         for e in D.soft_out[h] + D.hard_out[h]:
             x, r = int(D.dst[e]), int(D.req[e])
             Ar, _ = A.A(r)
@@ -1184,6 +1209,8 @@ class _Search:
         partners on ties; None if no neuron carries any."""
         D, A = self.D, self.A
         votes: list = []
+        for e in D.self_out[d]:
+            votes.append(np.flatnonzero((A.C.diagonal() >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)))
         for e in D.hard_out[d] + D.soft_out[d]:
             x = int(D.dst[e])
             if self.real[x] >= 0:
@@ -1243,6 +1270,7 @@ class _Search:
         D, A = self.D, self.A
         n = 0
         for d, r in assign.items():
+            n += sum(A.count(r, r) >= D.req[e] and (A.exc[r] if D.esign[e] > 0 else A.inh[r]) for e in D.self_out[d])
             for e in D.hard_out[d] + D.soft_out[d]:
                 x = int(D.dst[e])
                 rx = assign.get(x, self.real[x] if self.real[x] >= 0 else -1)
@@ -1377,20 +1405,27 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
     carried, missing = 0, []
     missing_by_class: dict = {}
     for (s, d), q in pairs.items():
-        cls = (role_key(roles[s]), role_key(roles[d]))
-        missing_by_class.setdefault(cls, [0, 0])[1] += 1
+        cls = f"{role_key(roles[s])} -> {role_key(roles[d])}"
         esign = 1 if q > 0 else -1
-        if real[s] < 0 or real[d] < 0:
+        if s == d:
+            r = int(real[s])
+            host_sign = (1 if A.exc[r] else -1 if A.inh[r] else 0) if r >= 0 else 0
+            reason = autapse_reason(q, A.count(r, r) if r >= 0 else 0, host_sign, policy, r >= 0)
+            cls = reason or "autapse (carried)"
+        elif real[s] < 0 or real[d] < 0:
             reason = "endpoint unplaced"
         elif esign != D.sign[s]:
             reason = "wrong sign (mixed-sign designed neuron)"
         elif not (A.exc[real[s]] if D.sign[s] == 1 else A.inh[real[s]]):
             reason = "sign"  # the chosen host neuron's own transmitter does not match the designed sign
         elif A.count(int(real[s]), int(real[d])) >= policy.req_count(q):
-            carried += 1
-            continue
+            reason = None
         else:
             reason = "no anatomical edge strong enough"
+        missing_by_class.setdefault(cls, [0, 0])[1] += 1
+        if reason is None:
+            carried += 1
+            continue
         missing.append((s, d, q, reason))
         missing_by_class[cls][0] += 1
     placed = np.array(sorted(mapping.values()), dtype=np.int64)
@@ -1451,7 +1486,7 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
         n_missing = sum(1 for s_, _, _, _ in missing if s_ in prox)
         pl.proxy_readout = {"proxies": len(prox), "placed": sum(1 for x in prox if real[x] >= 0),
                             "edges": n_edges, "carried": n_edges - n_missing}
-    pl.missing_by_class = {f"{a} -> {b}": v for (a, b), v in sorted(missing_by_class.items(), key=lambda kv: -kv[1][0])}
+    pl.missing_by_class = dict(sorted(missing_by_class.items(), key=lambda kv: -kv[1][0]))
     return pl
 
 
@@ -1589,7 +1624,9 @@ def place_netlist_greedy(net: Netlist, m: MCNS, policy: Policy = Policy(), verbo
     inh_mask = np.isin(nt, policy.inhibitory_nt)
     C, CT = _count_matrix(m)
     sign = np.zeros(n, np.int8)
-    for s_, x in zip(src, q):
+    for s_, d_, x in zip(src, dst, q):
+        if s_ == d_:
+            continue
         sg = 1 if x > 0 else -1
         if sign[s_] == 0:
             sign[s_] = sg
@@ -1598,6 +1635,8 @@ def place_netlist_greedy(net: Netlist, m: MCNS, policy: Policy = Policy(), verbo
     out_edges = [[] for _ in range(n)]
     in_edges = [[] for _ in range(n)]
     for e, (s_, d_) in enumerate(zip(src, dst)):
+        if s_ == d_:
+            continue
         out_edges[s_].append((d_, req[e]))
         in_edges[d_].append((s_, req[e]))
     pair_of = {}
