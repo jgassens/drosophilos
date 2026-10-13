@@ -918,3 +918,56 @@ syncing, with imports explicitly pointing to this worktree:
 export UV_NO_SYNC=1
 export PYTHONPATH="$PWD"
 ```
+
+### Cluster results (2026-10-13)
+
+All 44 opt-in width-16 cluster cases (`tests/test_config_f_kernels.py::test_width16_cluster_survey`, `DROSO_WIDE16=1`) were run on Juno CPU nodes (partition normal, one job per case) at commit `a27f31f`, and every case passed with all failure counters zero.
+
+| Shape | Condition | Juno job | Sample | Result | Wall |
+|---|---|---|---|---|---|
+| ADD | nominal | 453991 | 4096 transactions | all failure counters 0 | 75.3 min |
+| ADD | mix-B | 453992 | 4096 transactions | all failure counters 0 | 96.0 min |
+| SUB | nominal | 453993 | 4096 transactions | all failure counters 0 | 71.8 min |
+| SUB | mix-B | 453994 | 4096 transactions | all failure counters 0 | 103.6 min |
+| AND | nominal | 453995 | 32 transactions | all failure counters 0 | 0.7 min |
+| AND | mix-B | 453996 | 32 transactions | all failure counters 0 | 1.0 min |
+| OR | nominal | 453997 | 32 transactions | all failure counters 0 | 0.9 min |
+| OR | mix-B | 453998 | 32 transactions | all failure counters 0 | 0.8 min |
+| XOR | nominal | 453999 | 32 transactions | all failure counters 0 | 1.0 min |
+| XOR | mix-B | 454000 | 32 transactions | all failure counters 0 | 0.8 min |
+| MOV | nominal | 454002 | 32 transactions | all failure counters 0 | 0.6 min |
+| MOV | mix-B | 454003 | 32 transactions | all failure counters 0 | 0.8 min |
+| AND-specialized | nominal | 454004 | 32 transactions | all failure counters 0 | 0.4 min |
+| AND-specialized | mix-B | 454005 | 32 transactions | all failure counters 0 | 0.5 min |
+| OR-specialized | nominal | 454006 | 32 transactions | all failure counters 0 | 0.4 min |
+| OR-specialized | mix-B | 454007 | 32 transactions | all failure counters 0 | 0.5 min |
+| XOR-specialized | nominal | 454008 | 32 transactions | all failure counters 0 | 0.4 min |
+| XOR-specialized | mix-B | 454009 | 32 transactions | all failure counters 0 | 0.5 min |
+| MOV-specialized | nominal | 454010 | 32 transactions | all failure counters 0 | 0.3 min |
+| MOV-specialized | mix-B | 454011 | 32 transactions | all failure counters 0 | 0.5 min |
+| rom | nominal | 454012 | 32 transactions | all failure counters 0 | 0.7 min |
+| rom | mix-B | 454013 | 32 transactions | all failure counters 0 | 0.8 min |
+| rom-specialized | nominal | 454014 | 32 transactions | all failure counters 0 | 0.4 min |
+| rom-specialized | mix-B | 454016 | 32 transactions | all failure counters 0 | 0.5 min |
+| ram | nominal | 454018 | 256 writes / 1024 reads, COPY-after-clear 622-622 steps | all failure counters 0 | 4.0 min |
+| ram | mix-B | 454019 | 256 writes / 1024 reads, COPY-after-clear 561-706 steps | all failure counters 0 | 6.2 min |
+| ram-shared | nominal | 454020 | 256 writes / 1024 reads, COPY-after-clear 622-622 steps | all failure counters 0 | 4.5 min |
+| ram-shared | mix-B | 454021 | 256 writes / 1024 reads, COPY-after-clear 564-728 steps | all failure counters 0 | 7.4 min |
+| MULP | nominal | 454022 | 32 transactions | all failure counters 0 | 201.4 min |
+| MULP | mix-B | 454023 | 32 transactions | all failure counters 0 | 176.4 min |
+| streams | nominal | 454024 | 32 transactions | all failure counters 0 | 2.6 min |
+| streams | mix-B | 454025 | 32 transactions | all failure counters 0 | 2.2 min |
+| each | nominal | 454027 | 32 transactions | all failure counters 0 | 3.2 min |
+| each | mix-B | 454028 | 32 transactions | all failure counters 0 | 2.9 min |
+| wrap | nominal | 454029 | 32 transactions | all failure counters 0 | 3.2 min |
+| wrap | mix-B | 454030 | 32 transactions | all failure counters 0 | 2.9 min |
+| streams-specialized | nominal | 454031 | 32 transactions | all failure counters 0 | 1.9 min |
+| streams-specialized | mix-B | 454032 | 32 transactions | all failure counters 0 | 1.6 min |
+| each-specialized | nominal | 454033 | 32 transactions | all failure counters 0 | 2.5 min |
+| each-specialized | mix-B | 454034 | 32 transactions | all failure counters 0 | 2.1 min |
+| wrap-specialized | nominal | 454035 | 32 transactions | all failure counters 0 | 2.2 min |
+| wrap-specialized | mix-B | 454036 | 32 transactions | all failure counters 0 | 2.1 min |
+| MUL | nominal | 454037 | 512 transactions | all failure counters 0 | 298.5 min |
+| MUL | mix-B | 454038 | 256 transactions | all failure counters 0 | 211.9 min |
+
+These are primitive-composition RefSim surveys (float64), not a compiler/kernel campaign; the builder still refuses configuration F above width 8; per this section's own plan, opening width 16 needs a separate review and a kernel-level campaign.
