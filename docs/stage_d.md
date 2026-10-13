@@ -431,7 +431,7 @@ Configuration F's array-MUL kernel block `mul8` was merged as `9aec10c`. The
 8-bit wrap-around kernel computes `c1 = MUL(input, 5)`, `c2 = ADD(c1, 3)`,
 `c3 = MUL(c2, input)` for tokens 0, 1, 7, 13, 51, 128, 200 and 255; it has
 16,674 neurons / 35,703 synapses and ran torch-fast on H200. The width-8
-primitive results at commit `07e28ed` are recorded above; Juno 453007 passed
+primitive results at commit `07e28ed` are recorded in `docs/stable_latch.md`; Juno 453007 passed
 the width-4 and width-8 kernel nominal tests at `3f4f8ba`.
 
 Calibration Juno 453152 (mix B seed 110, 100 copies, 2 passes,
