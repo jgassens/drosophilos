@@ -35,7 +35,7 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           zero_once: bool = False, robust_request_clear: bool = False,
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
-          ordered_xor_oneshot: bool = False):
+          ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -74,7 +74,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         robust_register_reset=robust_register_reset,
                         verified_register_reset=verified_register_reset,
                         experimental_register_reset=experimental_register_reset,
-                        experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot)
+                        experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
+                        f_width16_experimental=f_width16_experimental)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -88,7 +89,9 @@ def rebuild_record(record: dict):
     """
     flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
              "verified_register_reset", "experimental_register_reset", "experimental_autapse",
-             "ordered_xor_oneshot")
+             "ordered_xor_oneshot", "f_width16_experimental")
+    if "f_width16_experimental" in record and type(record["f_width16_experimental"]) is not bool:
+        raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
                   **{key: record.get(key, False) for key in flags})
     pl = built[1]
@@ -125,6 +128,8 @@ def parser() -> argparse.ArgumentParser:
                           "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
+    ap.add_argument("--f-width16-experimental", action="store_true",
+                    help="EXPERIMENTAL: allow width 16 for the kernel campaign; requires all three configuration F flags")
     ap.add_argument("--zero-once", action="store_true",
                     help="ignite Z0 once per word through a shared stage-reset OR/relay")
     ap.add_argument("--robust-register-reset", action="store_true",
@@ -154,7 +159,8 @@ def main(argv=None):
                               robust_register_reset=a.robust_register_reset,
                               verified_register_reset=a.verified_register_reset,
                               experimental_register_reset=a.experimental_register_reset,
-                              experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot)
+                              experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
+                              f_width16_experimental=a.f_width16_experimental)
     if a.repeats != 1:
         tokens = tokens * a.repeats
         ref = kernel_outputs(ks, tokens)
