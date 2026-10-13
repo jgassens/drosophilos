@@ -15,13 +15,16 @@ exactly as Stage H0 drove it (`connectome/h0_run.py`):
 Two switches make the boundary explicit: --outputs-zeroed silences every edge from a host to
 the rest of the brain (H0's outputs-zeroed condition), --inputs-zeroed every edge from the
 brain into a host (the isolated case embedded; the control that must reproduce the isolated
-run spike for spike). Per addition it records correct / wrong / fault / no ACCEPT / timeout,
+run spike for spike).  --cut-outputs-frac and --cut-inputs-frac instead cut the strongest
+deterministic fraction of their respective boundary edges, for a cluster cut ladder.  Per
+addition it records correct / wrong / fault / no ACCEPT / timeout,
 the ACCEPT latency, the circuit's spikes against the same word run in isolation, the boundary
 envelope (spikes arriving into circuit neurons from outside, per ms, by transmitter sign) and
 the wall seconds. One addition is ~12,000 RefSim steps of 166,700 neurons: tens of seconds on
 a cluster node. Do not run it on a laptop.
 
     python -m drosophilos.bench.h1_fullgraph --n-cases 50 --seed 0 --surround silent --out data/h1_fullgraph/silent.json
+    python -m drosophilos.bench.h1_fullgraph --mapping docs/h1_f_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/f-inputs-50.json
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ import numpy as np
 
 from ..connectome.embed_h0 import Policy
 from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelope_ms, build_image, circuit_sim,
-                                      full_graph_topology, load_mapping, run_words, surround_events, surround_populations,
+                                      full_graph_topology, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
                                       tally, trace_since, underlying)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
@@ -44,6 +47,41 @@ from ..sim.model import Params
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
 BURST_N = 1000  # h0_run: rng.choice(exc_all, 1000)
 BURST_AT = 50  # steps after the load (h0_run: tx.t_data + 50)
+
+ADDER_META_KEYS = ("builder", "width", "ordered", "watchdog_hops", "storage", "rate_robust",
+                   "experimental_autapse", "ordered_xor_oneshot")
+
+
+def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
+                       storage_override: str | None = None) -> dict:
+    """Resolve a mapping's Stage-H builder contract to ``build_adder_channel`` keyword args.
+
+    Pre-contract mappings retain the original H1 build (4-bit ordered latch, watchdog 100),
+    except that the older flip-flop mapping's top-level ``storage`` is intentionally honoured.
+    An explicit CLI value can only confirm, never silently replace, a saved contract.
+    """
+    meta = dict(mapping_meta)
+    contract = "builder" in meta
+    if contract:
+        missing = [key for key in ADDER_META_KEYS if key not in meta]
+        if missing:
+            raise ValueError(f"mapping Stage-H metadata is incomplete; missing {', '.join(missing)}")
+        if meta["builder"] != "build_adder_channel":
+            raise ValueError(f"mapping builder {meta['builder']!r} is not build_adder_channel")
+        if width_override is not None and width_override != meta["width"]:
+            raise ValueError(f"--width {width_override} disagrees with mapping width {meta['width']}")
+        if storage_override is not None and storage_override != meta["storage"]:
+            raise ValueError(f"--storage {storage_override!r} disagrees with mapping storage {meta['storage']!r}")
+        return {key: meta[key] for key in ADDER_META_KEYS if key != "builder"}
+
+    # Legacy files did not record a whole builder contract.  This exactly reproduces the old
+    # invocation, while allowing h1_ffadder_mapping.json to select its flip-flop output store.
+    saved_storage = meta.get("storage", "latch")
+    if storage_override is not None and storage_override != saved_storage:
+        raise ValueError(f"--storage {storage_override!r} disagrees with mapping storage {saved_storage!r}")
+    return {"width": 4 if width_override is None else width_override, "ordered": True,
+            "watchdog_hops": 100, "storage": saved_storage, "rate_robust": False,
+            "experimental_autapse": False, "ordered_xor_oneshot": False}
 
 
 def top_recruited(m, trace, circuit: np.ndarray, k: int = 8) -> list:
@@ -61,22 +99,27 @@ def run(args) -> dict:
     params = Params()
     max_steps = int(round(args.max_ms / params.dt))
     t_start = time.time()
-    ch = build_adder_channel(params, args.width, ordered=True, watchdog_hops=100)
+    mapping_meta = load_mapping_meta(args.mapping)
+    build_options = adder_build_kwargs(mapping_meta, width_override=args.width, storage_override=args.storage)
+    ch = build_adder_channel(params, **build_options)
+    width = build_options["width"]
     m = load_mcns()
     pl = load_mapping(args.mapping, ch.net, m)
     img = build_image(ch.net, m, pl, Policy(), profile3=all_missing)  # condition A: every designed edge, parasitic zeroed
-    fg = full_graph_topology(m, params, img, zero_outputs=args.outputs_zeroed, zero_inputs=args.inputs_zeroed)
+    fg = full_graph_topology(m, params, img, zero_outputs=args.outputs_zeroed, zero_inputs=args.inputs_zeroed,
+                             cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac)
     hosts = fg.index_map[img.real >= 0]
     pops = surround_populations(m, exclude=hosts)
     driven = {"silent": np.empty(0, np.int64), "poisson": pops["sensory"], "burst": pops["cholinergic"]}[args.surround]
     print(f"[h1fg] image: {img.counts['carried']} carried, {img.counts['profile3_edges']} Profile 3, "
           f"{img.counts['parasitic_zeroed']} parasitic zeroed, {img.counts['synthetic_neurons']} synthetic neurons; "
           f"full graph: {fg.counts['n']} neurons, {fg.counts['topology_edges']} edges, {fg.counts['nonzero_edges']} non-zero, "
-          f"outputs zeroed {fg.counts['outputs_zeroed']}, inputs zeroed {fg.counts['inputs_zeroed']}; "
+          f"outputs cut {fg.counts['outputs_cut_edges']} ({fg.counts['outputs_cut_synapses']} synapses), "
+          f"inputs cut {fg.counts['inputs_cut_edges']} ({fg.counts['inputs_cut_synapses']} synapses); "
           f"surround {args.surround}: {len(driven)} driven neurons (hosts excluded: {pops['excluded_hosts']}); "
           f"setup {time.time() - t_start:.1f}s", flush=True)
 
-    cases, words, expected = adder_cases(args.width, args.n_cases, args.seed)
+    cases, words, expected = adder_cases(width, args.n_cases, args.seed)
     rng = np.random.default_rng(args.seed)
     sim_iso = sim_full = None
     recs, reached, additions, spikes = [], [], [], 0
@@ -143,7 +186,8 @@ def run(args) -> dict:
     summary["surround_spikes"] = [r["envelope"]["surround_spikes"] for r in additions]
     summary["max_exc_per_ms"] = max((r["envelope"]["max_exc_per_ms"] for r in additions), default=0)
     summary["max_inh_per_ms"] = max((r["envelope"]["max_inh_per_ms"] for r in additions), default=0)
-    out = {"args": vars(args) | {"mapping": str(args.mapping), "out": str(args.out)}, "params": params.__dict__,
+    out = {"args": vars(args) | {"mapping": str(args.mapping), "out": str(args.out)},
+           "mapping_meta": mapping_meta, "build_options": {"builder": "build_adder_channel", **build_options}, "params": params.__dict__,
            "image_counts": img.counts, "full_graph_counts": fg.counts,
            "surround": {"kind": args.surround, "rate_hz": args.rate, "driven_neurons": int(len(driven)),
                         "burst_n": BURST_N, "burst_at_steps": BURST_AT, "excluded_hosts": pops["excluded_hosts"],
@@ -169,9 +213,15 @@ def parse(argv=None):
     ap.add_argument("--rate", type=float, default=2.0, help="Hz per sensory neuron for --surround poisson (H0: 2)")
     ap.add_argument("--inputs-zeroed", action="store_true", help="zero every edge from the brain into a host")
     ap.add_argument("--outputs-zeroed", action="store_true", help="zero every edge from a host into the brain")
+    ap.add_argument("--cut-inputs-frac", type=float, default=0.0,
+                    help="cut strongest fraction [0, 1] of anatomical edges into hosts")
+    ap.add_argument("--cut-outputs-frac", type=float, default=0.0,
+                    help="cut strongest fraction [0, 1] of anatomical edges from hosts")
     ap.add_argument("--chained", action="store_true", help="all additions through one simulator (default: fresh per addition)")
     ap.add_argument("--max-ms", type=float, default=1200.0, help="neural time allowed per addition")
-    ap.add_argument("--width", type=int, default=4)
+    ap.add_argument("--width", type=int, default=None, help="override legacy mapping width (default: 4; metadata mappings set it)")
+    ap.add_argument("--storage", choices=("latch", "flipflop"), default=None,
+                    help="confirm a mapping's output-store choice (legacy flip-flop mappings record this)")
     ap.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     ap.add_argument("--out", type=Path, default=None)
     return ap.parse_args(argv)
