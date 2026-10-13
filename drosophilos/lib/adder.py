@@ -4,8 +4,10 @@ completion tree. Adder-internal latches and gates belong to the consumer's reset
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault_path
-from ..protocol.latch import add_edge_relay, connect_trigger
+from ..protocol.latch import add_edge_relay, add_experimental_autapses, connect_trigger
 from ..sim.model import Params
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
@@ -29,20 +31,36 @@ def operand_word(a: int, b: int, cin: int, width: int) -> int:
 
 
 def build_adder_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
-                        watchdog_hops: int = 80, ordered: bool = False, storage: str = "latch") -> Channel:
+                        watchdog_hops: int = 80, ordered: bool = False, storage: str = "latch", *,
+                        rate_robust: bool = False, experimental_autapse: bool = False,
+                        ordered_xor_oneshot: bool = False) -> Channel:
     """`ordered=True`: the veto-relay adder (operand gate on A driven by the carry-in rails,
     B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder.
     `storage` is the output register's rail storage ("latch" or "flipflop", see add_register;
     the sum relays then fire each rail's set chain through `Q.rail_inputs`). The operand
-    register stays a latch register: the harness loads it with one pulse per rail."""
+    register stays a latch register: the harness loads it with one pulse per rail.
+    Configuration F enables rate-robust readers, experimental latch feedback and
+    one-shot sum XORs together. One-shot XORs require ordered mode and the kernel's
+    default physics/drive and widths 1..8; the adder retains its own reset timing."""
+    if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
+        raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
+    if ordered_xor_oneshot and not ordered:
+        raise ValueError("ordered_xor_oneshot requires ordered=True")
+    if ordered_xor_oneshot and (params != Params() or not 1 <= width <= 8 or
+                                drive not in (None, Drive.from_params(params))):
+        raise ValueError("ordered_xor_oneshot supports only default physics/drive and widths 1..8")
+    if experimental_autapse and not rate_robust:
+        raise ValueError("experimental_autapse requires rate_robust=True")
     drive = drive or Drive.from_params(params)
+    if rate_robust:
+        drive = replace(drive, rate_robust=True)
     net = Netlist(params)
     P = add_register(net, drive, "P", 2 * width + 1, with_completion=False)
     Q = add_register(net, drive, "Q", width + 1, with_completion=True, storage=storage)
     A = [Rail2(P.rails[i][0], P.rails[i][1]) for i in range(width)]
     B = [Rail2(P.rails[width + i][0], P.rails[width + i][1]) for i in range(width)]
     Cin = Rail2(P.rails[2 * width][0], P.rails[2 * width][1])
-    G = Gates(net, drive)
+    G = Gates(net, drive, ordered_xor_oneshot=ordered_xor_oneshot)
     if ordered:
         Ad, ACT, _ = G.operand_gate("add", A, [Cin.r0.u, Cin.r1.u], P.reset_inh)
         Bd = [G.delayed(f"add.b{i}", B[i], 6) for i in range(width)]
@@ -62,4 +80,6 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     if liveness:
         add_liveness(net, drive, P, Q, watchdog_hops)
     net.group("adder_latches", [x for l in G.latches for x in l.members])
+    if experimental_autapse:
+        add_experimental_autapses(net, drive)
     return Channel(net, drive, 2 * width + 1, P, Q)
