@@ -910,14 +910,11 @@ Required foreground regression (without either width-16 opt-in):
 uv run pytest tests/test_build_options.py tests/test_config_f_kernels.py tests/test_ordered_xor.py -q -m 'not slow' -p no:warnings
 ```
 
-On this laptop, ordinary `uv run` dependency synchronization failed because
-the sandbox cannot resolve the package-download host. Runs therefore reuse the
-already installed project environment without syncing, with imports explicitly
-pointing to this worktree and the writable task cache:
+Set `UV_CACHE_DIR` to a writable directory if the default uv cache is not
+writable. Runs can reuse an already installed project environment without
+syncing, with imports explicitly pointing to this worktree:
 
 ```sh
 export UV_NO_SYNC=1
-export UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv
-export UV_CACHE_DIR=/Users/jeremiahgassensmith/.agentctl/runs/run-20261013-082724-e7ab9c/tasks/f16-survey-harness/tmp/uv-cache
 export PYTHONPATH="$PWD"
 ```
