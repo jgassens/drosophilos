@@ -8,6 +8,8 @@ from dataclasses import replace
 import hashlib
 import json
 import os
+from time import perf_counter, process_time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -528,7 +530,7 @@ def test_retimed_array_neuron_trace_disproves_lost_first_edge():
         assert len(fixed_trace.neuron_steps(rail.latches[1 - (7 >> bit & 1)].u)) == 0
 
 
-def ram_survey(width, copies, noisy=False, cycles=8):
+def ram_survey(width, copies, noisy=False, cycles=8, *, shared=False):
     """Real word masters, exact address vetoes, COPY/READY and read registers.
 
     Each address is written, read, then overwritten with the opposite rails.
@@ -548,9 +550,24 @@ def ram_survey(width, copies, noisy=False, cycles=8):
     trigger, read = net.neuron("write"), net.neuron("read")
     wp = add_write_port(net, drive, "port", mem, trigger,
                         [[l.u for l in p] for p in addr], [[l.u for l in p] for p in data])
+    ports = [wp]
+    other_data = []
+    if shared:
+        from drosophilos.lib.kernel import _share_write_ports
+
+        other_trigger = net.neuron("other_write")
+        other_data = [[add_latch(net, drive, f"otherd{i}r{r}") for r in (0, 1)]
+                      for i in range(width)]
+        ports.append(add_write_port(net, drive, "otherport", mem, other_trigger,
+                                   [[l.u for l in p] for p in addr],
+                                   [[l.u for l in p] for p in other_data]))
+        _share_write_ports(net, drive, "shared", mem,
+                           [SimpleNamespace(name=f"store{i}", wport=port)
+                            for i, port in enumerate(ports)])
     out = add_register(net, drive, "out", width, with_completion=True)
     add_read_port(net, drive, "readport", mem, read, [[l.u for l in p] for p in read_addr], out.rails)
-    clear = add_reset(net, drive, "portclear", [l for p in addr + data for l in p] + wp.domain_latches)
+    clear = add_reset(net, drive, "portclear", [l for p in addr + data + other_data for l in p] +
+                      [l for port in ports for l in port.domain_latches])
     read_clear = add_reset(net, drive, "readclear", [l for p in read_addr for l in p])
     add_experimental_autapses(net, drive)
     sim = MixSurvey(net, copies, 6110, noisy)
@@ -561,16 +578,25 @@ def ram_survey(width, copies, noisy=False, cycles=8):
     state = np.zeros((copies, 4), dtype=int)
     for word in mem.words:
         sim.load(word.rails, np.zeros(copies, int), 0, drive)
-    sim.run(2000)
+    # At 16 bits initial completion is step 2277 nominally. Its shared-port
+    # mark clear must also drain before the first write (initialized-read /
+    # non-overlapping-write contract); retain the original <=8 startup/draws.
+    sim.run(2000 if width <= 8 else 4000)
     for tx in range(cycles):
+        wp = ports[(tx // 4) % len(ports)]
+        write_trigger = other_trigger if shared and wp is ports[1] else trigger
         word_idx = tx % 4
         values = (np.arange(copies) + word_idx) & mask
         if tx // 4 % 2:
             values ^= mask
         origin = sim.step_index
         sim.load(addr, np.full(copies, word_idx), origin, drive)
-        sim.load(data, values, origin, drive)
-        sim.pulse(trigger, origin + 400, drive)
+        sim.load(data, values if wp is ports[0] else values ^ mask, origin, drive)
+        if shared:
+            # The inactive port carries the opposite word: missing exclusion
+            # marks must be observable as wrong/double rails, not a same-data copy.
+            sim.load(other_data, values if wp is ports[1] else values ^ mask, origin, drive)
+        sim.pulse(write_trigger, origin + 400, drive)
         sim.counts.fill(0)
         sim.first.fill(-1)
         sim.run(6000)
@@ -584,14 +610,19 @@ def ram_survey(width, copies, noisy=False, cycles=8):
         # End of the STORE stage: COPY and its source tokens use ordinary clears.
         sim.pulse(clear[0], sim.step_index, drive)
         sim.run(2000)
-        members = [m for latch in wp.domain_latches for m in latch.members]
+        members = [m for port in ports for latch in port.domain_latches for m in latch.members]
+        if shared:
+            members += [i for i, role in enumerate(net.roles)
+                        if role.startswith("store") and role.endswith((".sel.u", ".sel.v"))]
         result["survivors"] += int((sim.last[:, members] >= sim.step_index - 500).sum())
         for j in range(4):
             origin = sim.step_index
             sim.load(read_addr, np.full(copies, j), origin, drive)
             sim.pulse(read, origin + 400, drive)
             sim.counts.fill(0)
-            sim.run(2500)
+            # The deeper completion tree needs a wider observation window;
+            # preserve every original <=8-bit deadline and RNG step count.
+            sim.run(2500 if width <= 8 else 4000)
             score_rails(sim, out.rails, state[:, j], result)
             result["rearm_missing"] += int((sim.counts[:, out.completion.u] == 0).sum())
             sim.pulse(out.reset_trigger, sim.step_index, drive)
@@ -676,3 +707,278 @@ def test_render_f_nominal():
     steps = [s for s, _ in outputs[0][ks.outputs[0]]]
     print("render F", pl.net.n, pl.net.nnz, stats["neural_ms"],
           "first completion ms", steps[0] * P.dt, "mean interval ms", (steps[-1] - steps[0]) * P.dt / 15)
+
+
+# Width-16 evidence is deliberately built from primitives, never by relaxing or
+# monkeypatching build_pipeline's width gate. These fixtures use the real ALU,
+# ROM relays, MULP row ordering, staged commits and four-tap reset domains.
+WIDE16_SHAPES = (
+    "ADD", "SUB", "AND", "OR", "XOR", "MOV",
+    "AND-specialized", "OR-specialized", "XOR-specialized", "MOV-specialized",
+    "rom", "rom-specialized", "ram", "ram-shared", "MULP",
+    "streams", "each", "wrap",
+    "streams-specialized", "each-specialized", "wrap-specialized", "MUL",
+)
+
+
+def wide16_fixture(shape):
+    from drosophilos.lib.adder import extend_reset
+    from drosophilos.lib.alu import wire_alu, wire_outputs
+    from drosophilos.lib.gates import Gates, Rail2
+    from drosophilos.lib.kernel import (
+        _NoProducer, _fault_latch, _unit_rails, add_alu_logic_tokens,
+        add_pacing_ring, add_specialized_alu_logic_tokens,
+    )
+    from drosophilos.lib.netlist import Drive, Netlist
+    from drosophilos.lib.ram import address_vetoes
+    from drosophilos.lib.staged import add_staged_commit
+    from drosophilos.protocol.celement import add_delay_chain, add_veto_neuron, add_veto_relay
+    from drosophilos.protocol.handshake import add_register
+    from drosophilos.protocol.latch import add_experimental_autapses, add_latch
+
+    width = 16
+    net = Netlist(P)
+    drive = replace(Drive.from_params(P), rate_robust=True, kill_pulses=4)
+    inputs = [add_register(net, drive, f"input{i}", width, with_completion=True)
+              for i in range(2)]
+    image, stages, masters, commits = [], [], [], []
+    domains = [latch for reg in inputs for latch in reg.all_latches()]
+    acts, rings, wrap = [], [], None
+    op = shape.removesuffix("-specialized")
+    stream_shape = op in ("streams", "each", "wrap")
+    rows = range(width) if shape == "MULP" else range(2 if stream_shape else 1)
+    rom_values = (0, 0x7fff, 0x2aaa, 0x4001)  # bit 15 exercises the constant-bit shortcut
+    for j in rows:
+        name = f"row{j}"
+        g = Gates(net, drive, ordered_xor_oneshot=True,
+                  ordered_xor_oneshot_mul_version=1)
+        def word(label):
+            return [Rail2(g.latch(f"{name}.{label}{i}r0"),
+                          g.latch(f"{name}.{label}{i}r1")) for i in range(width)]
+        def sample(label, rails):
+            tokens = word(label)
+            for i, pair in enumerate(rails):
+                for r in (0, 1):
+                    g.veto(f"{name}.{label}{i}r{r}.g", act, [pair[1 - r].u], tokens[i].latches[r])
+            return tokens
+        act = net.neuron(f"{name}.act")
+        acts.append(act)
+        if op in ("each", "wrap") and j:
+            start = add_delay_chain(net, drive, f"{name}.phase", commits[-1].done_relay, 11)
+            net.synapse(start, act, drive.ignite)
+        if shape == "MULP" and j:
+            start = add_delay_chain(net, drive, f"{name}.actd", commits[-1].done_relay, 11)
+            net.synapse(start, act, drive.ignite)
+            previous = masters[-1].rails
+            a = sample("a", previous[width + 3:2 * width + 3])
+            b = sample("b", previous[2 * width + 3:])
+        else:
+            a = sample("a", inputs[0].rails)
+            b = sample("b", inputs[1].rails)
+        sub = Rail2(add_latch(net, drive, f"{name}.sub0"),
+                    add_latch(net, drive, f"{name}.sub1"))
+        image.append(sub.latches[int(op == "SUB")])
+        stage = add_register(net, drive, f"{name}.stage",
+                             3 * width + 3 if shape == "MULP" else width + 3,
+                             with_completion=True)
+        _fault_latch(net, drive, name, stage)
+        sr = add_staged_commit(net, drive, name, stage, _NoProducer(), copy_requires_rail=True)
+        net.synapse(act, sr.commit_in, drive.ignite)
+        if shape == "MULP":
+            acc = (sample("acc", masters[-1].rails[:width]) if j else word("acc"))
+            if not j:
+                for i, rail in enumerate(acc):
+                    g.veto(f"{name}.acc{i}.z", act, [], rail.r0)
+            bd = [g.delayed(f"{name}.bd{i}", r, 6) for i, r in enumerate(b)]
+            ad = [g.delayed(f"{name}.ad{i}", r, 17) for i, r in enumerate(a)]
+            accd = [g.delayed(f"{name}.accd{i}", r, 23) for i, r in enumerate(acc)]
+            zero = Rail2(g.latch(f"{name}.zero0"), g.latch(f"{name}.zero1"))
+            g.veto(f"{name}.zero.g", act, [], zero.r0)
+            pp = word("pp")
+            for i, rail in enumerate(pp):
+                g.veto(f"{name}.pp{i}.g", ad[i].r1.u, [bd[j].r0.u], rail.r1)
+                g.veto(f"{name}.pp{i}.a", ad[i].r0.u, [], rail.r0)
+                g.veto(f"{name}.pp{i}.b", ad[i].r1.u, [bd[j].r1.u], rail.r0)
+            result, _, _, _ = g.ripple_adder_ordered(name, accd, [zero] * j + pp[:width - j], zero, 5)
+            c = Rail2(g.latch(f"{name}.c0"), g.latch(f"{name}.c1"))
+            v = Rail2(g.latch(f"{name}.v0"), g.latch(f"{name}.v1"))
+            g.veto(f"{name}.c.g", act, [], c.r0)
+            g.veto(f"{name}.v.g", act, [], v.r0)
+            wire_outputs(net, drive, ad + bd, stage, list(range(width + 3, 3 * width + 3)))
+        else:
+            fixed_op = ("ADD" if j == 0 else "MOV") if stream_shape else op
+            if op == "rom":
+                # Same constant-bit optimization, full-word high-address veto,
+                # exact decoder and token-to-PASSB path as kernel LOAD.
+                # LOAD has an all-zero A token. The sampled address remains
+                # in the stage domain and tests full-width clearing.
+                a = word("zeroa")
+                for i, rail in enumerate(a):
+                    g.veto(f"{name}.zeroa{i}.g", act, [], rail.r0)
+                b = word("romdata")
+                taps = [[l.u for l in pair] for pair in inputs[0].rails[:2]]
+                high = [pair[1].u for pair in inputs[0].rails[2:]]
+                same = {i: rom_values[0] >> i & 1 for i in range(width)
+                        if len({value >> i & 1 for value in rom_values}) == 1}
+                for i, r in same.items():
+                    add_veto_relay(net, drive, f"rom.b{i}", act, [], b[i].latches[r])
+                for address, value in enumerate(rom_values):
+                    veto = add_veto_neuron(net, drive, f"rom.w{address}", address_vetoes(taps, address) + high)
+                    for i, rail in enumerate(b):
+                        if i not in same:
+                            add_veto_relay(net, drive, f"rom.w{address}.b{i}", act, [],
+                                           rail.latches[value >> i & 1], veto_neurons=[veto])
+                fixed_op = "MOV"
+            if shape.endswith("-specialized") and fixed_op in ("AND", "OR", "XOR", "MOV"):
+                result, c, v = add_specialized_alu_logic_tokens(g, name, a, b, sub, act, fixed_op)
+            else:
+                unit = _unit_rails(net, drive, f"{name}.unit", fixed_op, g)
+                image.extend(rail.latches[int(k == g.unit_rails[-1][1])] for k, rail in enumerate(unit))
+                result, c, v = add_alu_logic_tokens(g, name, a, b, unit, sub, act)
+        wire_alu(net, drive, result, c, v, stage)
+        extend_reset(net, drive, stage, g.latches, g.gates)
+        stages.append(stage)
+        masters.append(sr.master)
+        commits.append(sr)
+        domains += stage.all_latches() + sr.master.all_latches() + g.latches
+        domains += [stage.fault_latch, sr.commit, sr.granted, sr.copy]
+    if op in ("each", "wrap"):
+        rings, wrap = add_pacing_ring(net, drive, "pacing", 2 if op == "wrap" else 1,
+                                     [sr.done_relay for sr in commits], image, true_guards=True)
+    add_experimental_autapses(net, drive)
+    return SimpleNamespace(net=net, drive=drive, inputs=inputs, image=image, stages=stages,
+                           masters=masters, acts=acts, domains=domains, rings=rings, wrap=wrap,
+                           rom_values=rom_values)
+
+
+def wide16_datapath_survey(shape, trials, noisy=False):
+    """Repeated physical copies, complemented reloads and real staged COPY.
+
+    MULP chains all sixteen rows through the preceding master's done pulse.
+    Host-paced streams inspect independent words and completion ordering; rings
+    consume actual commit-done pulses rather than synthetic host completions.
+    This is a primitive composition, not the compiler's full request/watchdog FSM.
+    """
+    from drosophilos.lib.alu import alu_reference
+
+    fixture = wide16_fixture(shape)
+    base_shape = shape.removesuffix("-specialized")
+    net, drive = fixture.net, fixture.drive
+    result = dict(trials=2 * trials, wrong=0, double=0, missing=0,
+                  repeated=0, survivors=0, rearm_missing=0, faults=0, bad_wraps=0, bad_order=0)
+    once = [i for i, role in enumerate(net.roles) if ".once" in role and role.endswith(".edge")]
+    members = sorted({m for latch in fixture.domains for m in latch.members} |
+                     {i for i, role in enumerate(net.roles) if role.endswith((".commit2.u", ".commit2.v"))})
+    # Include stage -> grant -> master READY/COPY -> completion, after the
+    # 16-bit worst-case carry. Ordered phases also wait for the second stream.
+    duration = (16000 * 16 if shape == "MULP" else
+                24000 if base_shape in ("each", "wrap") else 16000)
+    for start in range(0, trials, 16):
+        size = min(16, trials - start)
+        sim = MixSurvey(net, size, 16100 + start, noisy)
+        av, bv = sim.rng.integers(0, 65536, (2, size))
+        # Directed long carry, signed overflow, zero and alternating high rails
+        # lead each condition; the remaining pairs are deterministic random draws.
+        directed = [(65535, 1), (32767, 1), (0, 65535), (0xaaaa, 0x5555)]
+        for k in range(min(size, max(0, len(directed) - start))):
+            av[k], bv[k] = directed[start + k]
+        for latch in fixture.image:
+            sim.pulse(latch.u, 0, drive)
+        sim.run(2000)
+        for tx in range(2):
+            origin = sim.step_index
+            sim.counts.fill(0)
+            sim.first.fill(-1)
+            addr = ((np.arange(start, start + size) + tx) % 4 if shape.startswith("rom") else av)
+            sim.load(fixture.inputs[0].rails, addr, origin, drive)
+            sim.load(fixture.inputs[1].rails, bv, origin, drive)
+            scheduled_acts = fixture.acts[:1] if base_shape in ("MULP", "each", "wrap") else fixture.acts
+            for j, act in enumerate(scheduled_acts):
+                sim.pulse(act, origin + 400 + j * 1000, drive)
+            sim.run(duration)
+            for j, master in enumerate(fixture.masters):
+                if shape == "MULP":
+                    acc = av * (bv & ((1 << (j + 1)) - 1)) & 65535
+                    want = acc | ((acc == 0).astype(np.int64) << 17) | (av << 19) | (bv << 35)
+                else:
+                    op = shape.removesuffix("-specialized")
+                    if op == "rom":
+                        values = np.asarray(fixture.rom_values)[addr]
+                        want = values | ((values == 0).astype(np.int64) << 17)
+                    else:
+                        if base_shape in ("streams", "each", "wrap"):
+                            op = "ADD" if j == 0 else "MOV"
+                        want = [alu_reference(int(a), int(b), op, 16)["word"] for a, b in zip(av, bv)]
+                score_rails(sim, master.rails, want, result, since=sim.step_index - 300)
+                result["rearm_missing"] += int((sim.counts[:, master.completion.u] == 0).sum())
+            result["repeated"] += int((sim.counts[:, once] > 1).sum())
+            for stage in fixture.stages:
+                result["faults"] += int((sim.counts[:, stage.fault_latch.u] > 0).sum())
+            if base_shape in ("each", "wrap"):
+                times = sim.first[:, [master.completion.u for master in fixture.masters]]
+                result["bad_order"] += int(((times[:, 0] < 0) | (times[:, 1] <= times[:, 0])).sum())
+            if fixture.rings:
+                count = 2 if base_shape == "wrap" else 1
+                for lines in fixture.rings:
+                    for k, pair in enumerate(lines):
+                        score_rails(sim, [pair], np.full(size, int(k == (tx + 1) % count)),
+                                    result, since=sim.step_index - 300)
+                result["bad_wraps"] += int((sim.counts[:, fixture.wrap] != int((tx + 1) % count == 0)).sum())
+            # Clear masters too so survivors cannot masquerade as a valid reload.
+            # An explicit master clear raises READY and hence COPY again.
+            # Drain that real READY path before clearing the stage domain;
+            # simultaneous clears would leave a newly ignited COPY behind.
+            for reg in fixture.masters:
+                sim.pulse(reg.reset_trigger, sim.step_index, drive)
+            sim.run(2000)
+            for reg in fixture.inputs + fixture.stages:
+                sim.pulse(reg.reset_trigger, sim.step_index, drive)
+            sim.run(2000)
+            result["survivors"] += int((sim.last[:, members] >= sim.step_index - 500).sum())
+            av, bv = av ^ 65535, bv ^ 65535
+    return result
+
+
+def run_wide16_survey(shape, noisy, *, smoke=False):
+    """One shape/physical condition per cluster job, with visible timing/counters."""
+    wall_start, cpu_start = perf_counter(), process_time()
+    if shape in ("ram", "ram-shared"):
+        result = ram_survey(16, 1 if smoke else 16, noisy,
+                            cycles=8 if smoke else 16, shared=shape == "ram-shared")
+        failure_keys = ("wrong", "double", "missing", "survivors", "rearm_missing")
+    elif shape == "MUL":
+        trials = 1 if smoke else (256 if not noisy else 128)
+        result = multiplier_survey(16, trials, noisy,
+                                   operands=[(65535, 1)] if smoke else None, mul_version=1)
+        failure_keys = ("wrong", "double", "missing", "repeated", "survivors")
+    else:
+        # ADD/SUB match the largest width-8 arithmetic survey (2,048 pairs /
+        # 4,096 transactions). Other datapaths use 16 pairs / 32 transactions,
+        # >= the small kernel and width-8 MULP exposures per condition.
+        trials = ((4 if shape.startswith("rom") else 1) if smoke else
+                  (2048 if shape in ("ADD", "SUB") else 16))
+        result = wide16_datapath_survey(shape, trials, noisy)
+        failure_keys = ("wrong", "double", "missing", "repeated", "survivors",
+                        "rearm_missing", "faults", "bad_wraps", "bad_order")
+    print("wide16 survey", shape, "mix-B" if noisy else "nominal", "smoke" if smoke else "cluster",
+          result, f"wall_s={perf_counter() - wall_start:.3f}", f"cpu_s={process_time() - cpu_start:.3f}",
+          flush=True)
+    assert all(result[key] == 0 for key in failure_keys), result
+    if shape in ("ram", "ram-shared"):
+        assert result["min_copy_after_clear_steps"] > 0, result
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("DROSO_WIDE16") != "1",
+                    reason="width-16 cluster evidence requires DROSO_WIDE16=1")
+@pytest.mark.parametrize("noisy", [pytest.param(False, id="nominal"), pytest.param(True, id="mix-B")])
+@pytest.mark.parametrize("shape", WIDE16_SHAPES)
+def test_width16_cluster_survey(shape, noisy):
+    run_wide16_survey(shape, noisy)
+
+
+@pytest.mark.skipif(os.environ.get("DROSO_WIDE16_SMOKE") != "1",
+                    reason="width-16 laptop smoke requires DROSO_WIDE16_SMOKE=1")
+@pytest.mark.parametrize("shape", WIDE16_SHAPES)
+def test_width16_smoke_survey(shape):
+    run_wide16_survey(shape, False, smoke=True)

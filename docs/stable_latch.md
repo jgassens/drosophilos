@@ -647,3 +647,274 @@ the primitive only; no kernel-level noisy campaign for array MUL has been run.
 2026-10-13: The first kernel-level noisy campaign with array MUL passed for
 `mul8` (width 8): Juno 453175/453176/453177 as recorded in
 `docs/perf_campaign.md`.
+
+## Width-16 qualification plan for configuration F (2026-10-13)
+
+This is an evidence plan for `rate_robust + experimental_autapse +
+ordered_xor_oneshot`, not a width-16 qualification. The 16-bit Doom kernels in
+`examples/doom*.c` and `render2.c` remain outside the public F envelope.
+No builder/circuit code or gate was changed: `build_pipeline` still rejects F
+above width eight, and the existing width-16 rejection tests remain in place.
+
+### Surveys that depend on width
+
+| Survey to repeat at 16 | Why the smaller-width result does not extend automatically | Shape IDs |
+|---|---|---|
+| Ordered ADD/SUB and full ALU stage | The carry path doubles, high-bit carry/overflow and the zero/completion trees change, reset fan-out grows, and more sum one-shots must clear/re-arm. Check result plus C/Z/V, master commit/COPY, repeated spent edges and survivors. | `ADD`, `SUB` |
+| Generic and specialized logic/PASSB | Each additional bit adds operand/XOR/mux tokens and readers, and changes whole-word zero/completion/reset fan-out. The specialized path removes the mux and some unused units, so it needs its own conditions. | `AND`, `OR`, `XOR`, `MOV`, and each `-specialized` variant |
+| ROM/LOAD | Wider addresses add high-address veto inputs; sixteen output token rails, the constant-bit optimization, PASSB and whole-word completion must work together and clear. Repeated initialized, valid-address reads visit all four words. | `rom`, `rom-specialized` |
+| RAM write/read, including shared ports | Word masters, read registers and COPY fan-out double. Measure the last-clear-to-COPY interval, all peer words after every overwrite, write/read completion and COPY/read-register survivors. Shared-port marks must exclude a bystander holding opposite data. | `ram`, `ram-shared` |
+| Pipelined MULP | There are sixteen rows rather than eight; each row carries a 51-bit accumulator/flags/A/B word rather than 27 bits. Repeat row sampling, B/A/acc delays (6/17/23 hops), ordered carry, stage/master commit, spent-edge/reset checks and complemented reloads through the entire row chain. Every intermediate master is scored. | `MULP` |
+| Multiple streams and pacing composition | The rings themselves have no word width, but the input/output registers and the completion pulses feeding them do. Check two independent outputs and repeated reloads; each/wrap ordering waits for the first stream's real commit-done pulse. K=1/K=2 rings and their join receive real staged commit-done pulses. | `streams`, `each`, `wrap`, and each `-specialized` variant |
+| Array MUL (included, expensive) | Partial products, suffix adders, retiming completion and reset populations grow roughly quadratically. The existing primitive helper supports width sixteen with the zero-prefix bypass explicitly selected as `ordered_xor_oneshot_mul_version=1`. Retain its original width-scaled deadline and inspect every multiplier latch after clear. | `MUL` |
+
+The isolated single ordered-XOR scenarios (copy82 witness, input-order corners,
+long gaps and spent-latch reset) and bare K=1/2/3/8 pacing-ring surveys have no
+word-width parameter. Their existing results still apply to those unchanged
+local circuits; duplicating them with a cosmetic “16” label would add no width
+evidence. The wider surveys above repeat the relevant fan-out, carry, completion,
+reset-survivor and spent-edge exposures. The K=8, three-source, 4,608-advance
+ring result remains separate evidence, not a newly repeated width-16 result.
+Likewise, frozen builder fingerprints and version/gate checks are regressions,
+not width surveys.
+
+The new fixtures call the existing primitives directly, using float64 RefSim,
+rate-robust readers, v1 sum one-shots, the final v1 autapse transform and ordinary
+four-tap clears. They do not call an ungated or monkeypatched F builder. The ALU
+fixtures use `add_alu_logic_tokens` / `add_specialized_alu_logic_tokens`,
+`wire_alu`, real completion/fault circuits and staged master commits with
+required-rail COPY. MULP connects each preceding master's done pulse to the next
+row's sampling delay. These are primitive compositions: the public compiler's
+full request/commit guards, watchdog FSM and phase input-gating FSM are not
+reconstructed. Passing them would still require a separate review and future
+compiler/kernel campaign before considering any gate change. No Doom or render2
+kernel was run here.
+
+### Cases, sample sizes and observation windows
+
+Every full case is marked `slow`, skipped unless `DROSO_WIDE16=1`, and named
+`test_width16_cluster_survey[SHAPE-nominal]` or
+`test_width16_cluster_survey[SHAPE-mix-B]`. Each node ID is one cluster job.
+Mix B uses the existing independent log-weight sigma .04, threshold/bias sigma
+.2 mV, Bernoulli 5 Hz / 150 q background and 0–100-step host-load jitter.
+All failure counters must be zero; RAM also asserts a positive clear-to-COPY
+margin. Counts are finite samples, not confidence bounds or exhaustive coverage
+of the 2^32 operand space.
+
+| Shapes | Full nominal | Full mix B | Nominal smoke |
+|---|---:|---:|---:|
+| ADD, SUB (each fixed operation) | 2,048 pairs + complements = 4,096 transactions | Same | 1 pair + complement = 2 |
+| Each generic/specialized AND/OR/XOR/MOV | 16 pairs + complements = 32 transactions | Same | 1 pair + complement = 2 |
+| Each ROM variant | 16 copies, two reads each = 32 reads | Same | 4 copies, two reads each = 8 |
+| Each RAM variant | 16 copies × 16 cycles = 256 writes / 1,024 reads | Same | 1 copy × 8 cycles = 8 writes / 32 reads |
+| MULP | 16 pairs + complements = 32 full products, 512 row transactions | Same | 1 pair + complement = 2 products, 32 row transactions |
+| Each streams/each/wrap variant | 16 pairs + complements = 32 transactions per output (64 outputs) | Same | 1 pair + complement = 2 transactions per output (4 outputs) |
+| Array MUL, bypass v1 | 256 pairs + complements = 512 transactions | 128 pairs + complements = 256 transactions | 1 pair + complement = 2 |
+
+ADD/SUB match or exceed the largest width-eight arithmetic survey (2,048
+pairs, 4,096 transactions including reuse), for each fixed operation separately.
+RAM matches its expanded 256-write / 1,024-read survey in both conditions.
+MULP exceeds its width-eight four-copy/eight-transaction survey and matches the
+earlier sixteen-copy nominal small pipeline exposure. Other primitive
+compositions exceed the two-copy repeated-kernel exposures. Array MUL exactly
+matches the width-eight cluster survey's 256 nominal / 128 noisy pairs.
+Batches are at most sixteen physical copies; each copy is reused.
+
+Directed operands lead each datapath condition: 65535×/+/−1, 32767 and 1,
+zero/all-ones, and alternating rails, followed by seed-16100 random pairs.
+Smoke uses the first pair (65535, 1); array MUL also explicitly uses that pair.
+ROM reads fixed contents 0, 0x7fff, 0x2aaa, 0x4001, exercising a constant-zero
+high bit and differing lower-bit decodes. RAM overwrites with complemented data;
+its inactive shared port holds the opposite word.
+
+At dt=0.1 ms, the new staged single-unit observation window is 1,600 ms per
+transaction, each/wrap is 2,400 ms, and the sixteen-row MULP chain is 25,600 ms.
+The existing array helper remains at
+`1000 + width*width*500 = 129000` steps (12,900 ms at width sixteen), followed
+by its unchanged 200 ms ordinary-clear recovery. RAM retains its 600 ms write
+window and 200 ms clear recovery, but uses a 400 ms read window above width
+eight. Startup settling above width eight also waits 400 ms for initialized
+words to complete and their shared-port mark-clear trains to drain. Its original
+200 ms startup, 250 ms read window and all original random draws remain
+unchanged at widths 1..8; ordinary-clear recovery is still 200 ms at every width.
+
+Harness bring-up exposed observation/order mistakes, which were corrected
+before the final smoke results: a simultaneous host master/stage clear raises
+a late READY-driven COPY latch, so explicit cleanup now drains master READY
+before clearing the stage. A long-carry ADD stage completed at step 10,234
+(1,023.4 ms after origin), leaving insufficient time for master completion in
+the initial 1,200 ms observation; that short-window run reported
+`survivors=224, rearm_missing=1`. With the old 250 ms RAM read window, the
+16-bit nominal probe reported 32 missing read completions in 32 reads, while
+wrong/double/missing data rails and COPY survivors stayed zero. The 400 ms
+window observes completion. These are observations about the test deadlines,
+not claims that the narrower deadlines are satisfied at sixteen bits. No
+circuit timing, reset strength or ordinary-clear recovery constant was changed.
+
+The opposite-data shared-RAM smoke also exposed a real startup-window finding:
+with the original 200 ms startup it reported **64 wrong, 64 double and 64 missing
+rails, four missing completions, zero reset survivors**, with COPY margins
+622..627 steps. All four initialized word masters first completed at step
+**2,277 (227.7 ms)**, after the helper had already advanced toward the first
+write. Their completion-triggered shared-port mark clears overlap that write;
+this violates the initialized/non-overlapping startup contract. A foreground
+control changing only startup observation to 400 ms passed the same eight
+writes / 32 reads, with every failure counter zero and COPY margin 622 steps.
+The generalized helper uses that settling window above width eight. This
+does not claim correctness with a 200 ms startup, and the failed exposure is
+retained here rather than relabeled as a pass.
+
+### Foreground laptop smoke and estimated cluster CPU cost
+
+Foreground validation on 2026-10-13 covered every one of the **22 smoke node
+IDs**. The 22-case matrix ran for **879.09 s** and reported **21 passed / one
+failed**: the shared-RAM 200 ms startup exposure recorded above. After startup
+generalization, the two RAM cases were rerun and reported **2 passed in
+36.61 s**, with all counters zero. Thus all final smoke node IDs have passed
+across these foreground runs; the earlier failed matrix is not presented as
+an all-pass run. The table uses the corrected RAM measurements and the second
+matrix's measurements for the unchanged datapaths.
+
+Each ordinary datapath smoke reports `trials=2` (`trials=8` for ROM), with
+`wrong=double=missing=repeated=survivors=rearm_missing=faults=bad_wraps=bad_order=0`.
+Array MUL reports `trials=2` and
+`wrong=double=missing=repeated=survivors=0`.
+Each corrected RAM smoke reports `writes=8, reads=32`,
+`wrong=double=missing=survivors=rearm_missing=0`, and
+`min_copy_after_clear_steps=max_copy_after_clear_steps=622` (**62.2 ms**).
+These are tiny nominal exposures, not nominal or noisy qualification.
+
+| Shape (both full conditions have separate node IDs) | Final smoke result | Smoke wall seconds | Smoke CPU seconds | Full nominal CPU estimate | Full mix-B CPU allowance |
+|---|---|---:|---:|---:|---:|
+| `ADD` | pass | 3.645 | 3.624 | 2.06 h | 4.12 h–8.25 h |
+| `SUB` | pass | 3.476 | 3.455 | 1.97 h | 3.93 h–7.86 h |
+| `AND` | pass | 3.910 | 3.883 | 1.0 min | 2.1 min–4.1 min |
+| `OR` | pass | 3.751 | 3.681 | 58.9 s | 2.0 min–3.9 min |
+| `XOR` | pass | 3.710 | 3.661 | 58.6 s | 2.0 min–3.9 min |
+| `MOV` | pass | 3.823 | 3.795 | 1.0 min | 2.0 min–4.0 min |
+| `AND-specialized` | pass | 2.575 | 2.558 | 40.9 s | 1.4 min–2.7 min |
+| `OR-specialized` | pass | 2.630 | 2.608 | 41.7 s | 1.4 min–2.8 min |
+| `XOR-specialized` | pass | 2.612 | 2.599 | 41.6 s | 1.4 min–2.8 min |
+| `MOV-specialized` | pass | 2.541 | 2.521 | 40.3 s | 1.3 min–2.7 min |
+| `rom` | pass | 11.853 | 11.745 | 47.0 s | 1.6 min–3.1 min |
+| `rom-specialized` | pass | 8.027 | 7.929 | 31.7 s | 1.1 min–2.1 min |
+| `ram` | pass | 17.305 | 17.009 | 9.1 min | 18.1 min–36.3 min |
+| `ram-shared` | pass | 17.999 | 17.847 | 9.5 min | 19.0 min–38.1 min |
+| `MULP` | pass | 673.683 | 661.406 | 2.94 h | 5.88 h–11.76 h |
+| `streams` | pass | 6.654 | 6.594 | 1.8 min | 3.5 min–7.0 min |
+| `each` | pass | 9.420 | 9.282 | 2.5 min | 5.0 min–9.9 min |
+| `wrap` | pass | 9.833 | 9.516 | 2.5 min | 5.1 min–10.2 min |
+| `streams-specialized` | pass | 5.318 | 5.224 | 1.4 min | 2.8 min–5.6 min |
+| `each-specialized` | pass | 7.229 | 7.165 | 1.9 min | 3.8 min–7.6 min |
+| `wrap-specialized` | pass | 7.565 | 7.500 | 2.0 min | 4.0 min–8.0 min |
+| `MUL` | pass | 72.120 | 71.167 | 5.06 h | 5.06 h–10.12 h |
+
+CPU estimates multiply observed smoke CPU by the full/smoke operand count
+(or copies × cycles for RAM). They intentionally do not assume a speedup from
+sixteen-copy vectorization; they are conservative planning extrapolations,
+not measured upper bounds. The mix-B column budgets **2–4×** the same nominal
+work for background sampling/events and quenched draws. Array MUL's mix-B
+sample is half its nominal sample, which is included in the estimate. No full
+batch-scaling or mix-B timing was measured, and these are laptop CPU seconds,
+not GPU time or Juno wall-time promises. Pilot a case on the target CPU before
+allocating the full matrix. In particular, optional array MUL costs about
+**5.06 h nominal / 5.06 h–10.12 h mix B** by this estimate;
+MULP also needs an hours-scale CPU budget. Single-condition jobs let those
+costs be reviewed independently.
+
+The staged datapath survey scores survivors after explicit cleanup: clear the
+masters, drain their READY path for 200 ms, then clear input/stage domains and
+observe another 200 ms before reuse. Its ordinary automatic staged-commit
+clears remain active too. This is a manually cycled primitive-composition
+check; it does not by itself isolate every automatic FSM clear/re-arm margin.
+Array MUL and RAM retain their separate primitive clear/COPY checks.
+
+The required foreground regression passed (exit 0): **202 passed, 22 skipped,
+82 slow cases deselected**. A direct baseline-helper comparison against the
+original `HEAD` implementation also passed at widths **2 and 8**, nominal
+and mix B, one copy / two cycles each: every returned counter and margin was
+identical. Width-eight mix B reproduced **584..670 steps (58.4–67.0 ms)**.
+
+The corrected RAM smoke rerun command was:
+
+```sh
+DROSO_WIDE16_SMOKE=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_smoke_survey[ram]' 'tests/test_config_f_kernels.py::test_width16_smoke_survey[ram-shared]' -q -s -p no:warnings -o addopts=''
+```
+
+Full cluster cases have not been run; no qualification is claimed.
+
+### Exact cluster commands
+
+Run from the repository root in an installed project environment. Each command
+selects exactly one shape and physical condition:
+
+```sh
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ADD-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ADD-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[SUB-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[SUB-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[AND-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[AND-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[OR-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[OR-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[XOR-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[XOR-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MOV-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MOV-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[AND-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[AND-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[OR-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[OR-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[XOR-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[XOR-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MOV-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MOV-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[rom-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[rom-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[rom-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[rom-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ram-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ram-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ram-shared-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[ram-shared-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MULP-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MULP-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[streams-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[streams-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[each-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[each-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[wrap-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[wrap-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[streams-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[streams-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[each-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[each-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[wrap-specialized-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[wrap-specialized-mix-B]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MUL-nominal]' -q -s -p no:warnings
+DROSO_WIDE16=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_cluster_survey[MUL-mix-B]' -q -s -p no:warnings
+```
+
+The smoke suite is nominal only, has no slow marker, and skips unless its
+separate opt-in is set. To rerun one shape, append its bracketed node ID:
+
+```sh
+DROSO_WIDE16_SMOKE=1 uv run pytest tests/test_config_f_kernels.py -q -s -k test_width16_smoke_survey -p no:warnings --durations=0
+# Example single smoke case:
+DROSO_WIDE16_SMOKE=1 uv run pytest 'tests/test_config_f_kernels.py::test_width16_smoke_survey[ADD]' -q -s -p no:warnings
+```
+
+Required foreground regression (without either width-16 opt-in):
+
+```sh
+uv run pytest tests/test_build_options.py tests/test_config_f_kernels.py tests/test_ordered_xor.py -q -m 'not slow' -p no:warnings
+```
+
+Set `UV_CACHE_DIR` to a writable directory if the default uv cache is not
+writable. Runs can reuse an already installed project environment without
+syncing, with imports explicitly pointing to this worktree:
+
+```sh
+export UV_NO_SYNC=1
+export PYTHONPATH="$PWD"
+```
