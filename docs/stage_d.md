@@ -424,3 +424,28 @@ uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --d
 uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 100 --mix B --seed 110 --repeats 1000 --max-ms <CEIL> --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_s110.json
 uv run python -m drosophilos.bench.kernel_campaign mul8 --backend torch-fast --device cuda --copies 100 --mix B --seed 113 --repeats 1000 --max-ms <CEIL> --rate-robust --experimental-autapse --ordered-xor-oneshot --out mul8_f_s113.json
 ```
+
+### Result (2026-10-13)
+
+Configuration F's array-MUL kernel block `mul8` was merged as `9aec10c`. The
+8-bit wrap-around kernel computes `c1 = MUL(input, 5)`, `c2 = ADD(c1, 3)`,
+`c3 = MUL(c2, input)` for tokens 0, 1, 7, 13, 51, 128, 200 and 255; it has
+16,674 neurons / 35,703 synapses and ran torch-fast on H200. The width-8
+primitive results at commit `07e28ed` are recorded in `docs/stable_latch.md`; Juno 453007 passed
+the width-4 and width-8 kernel nominal tests at `3f4f8ba`.
+
+Calibration Juno 453152 (mix B seed 110, 100 copies, 2 passes,
+`--max-ms 60000`) hit the 60 s neural cap: 1,299 ok, 301 missing because
+unfinished, 0 wrong, 0 faults and 0 timeouts, at about 4.4-4.6 s neural per
+output. Therefore the long runs used 250 passes (2,000 outputs per copy), not
+1,000, with `--max-ms 14000000`. Nominal Juno 453175 (1 copy) passed 2,000/2,000,
+with 0 wrong/missing/extra/faults/timeouts/refusals/retries, 8,786.7 s neural
+and 16,010 s wall. Mix B seed 110 Juno 453176 passed 200,000/200,000 with the
+same zero counts; its one-sided 95% upper bound is 1.4979e-5 per output,
+8,816.3 s neural and 45,146 s wall. Seed 113 Juno 453177 passed 200,000/200,000
+with the same zero counts, 8,803.4 s neural and 44,412 s wall. Pooled seeds:
+0 non-ok / 400,000 outputs, bound `1 - 0.05^(1/400000) = 7.4893e-6`.
+
+`kernel_campaign` applies no input arrival jitter. This is one small 8-bit
+kernel; widths 3, 5-7 and above 8 remain refused, and 16-bit kernels are
+unqualified. See `docs/perf_campaign.md` for the ledger row.

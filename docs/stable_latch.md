@@ -644,3 +644,6 @@ complemented reloads and reported `{'trials': 512, 'wrong': 0, 'double': 0,
 
 Width 8 is now allowed by the public array-MUL builder. These results qualify
 the primitive only; no kernel-level noisy campaign for array MUL has been run.
+2026-10-13: The first kernel-level noisy campaign with array MUL passed for
+`mul8` (width 8): Juno 453175/453176/453177 as recorded in
+`docs/perf_campaign.md`.
