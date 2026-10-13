@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from drosophilos.bench import kernel_campaign as kc
 from drosophilos.sim.model import Params
 
@@ -59,7 +61,8 @@ def test_mul8_reference_matches_integer_arithmetic():
     assert [int(row[0]) for row in ref] == [((x * 5 + 3) * x) & 255 for x in tokens]
 
 
-def test_mul8_cli_smoke_writes_record(tmp_path, monkeypatch):
+@pytest.mark.parametrize("block", ["mul8", "perspective"])
+def test_f_cli_smoke_writes_record(tmp_path, monkeypatch, block):
     seen = {}
     real_block = kc.block
 
@@ -77,8 +80,27 @@ def test_mul8_cli_smoke_writes_record(tmp_path, monkeypatch):
     monkeypatch.setattr(kc, "block", recording_block)
     monkeypatch.setattr(kc, "make_perturbed_sim", lambda *a, **k: object())
     monkeypatch.setattr(kc, "run_pipeline_batched", fake_run)
-    out = tmp_path / "mul8.json"
-    kc.main(["mul8", "--copies", "1", "--max-ms", "1", "--rate-robust", "--experimental-autapse",
-             "--ordered-xor-oneshot", "--out", str(out)])
+    out = tmp_path / f"{block}.json"
+    kc.main([block, "--copies", "1", "--max-ms", "1", "--rate-robust", "--experimental-autapse",
+             "--ordered-xor-oneshot", "--out", str(out),
+             *(["--f-width16-experimental"] if block == "perspective" else [])])
     rec = json.loads(out.read_text())
-    assert rec["block"] == "mul8" and rec["ordered_xor_oneshot"] is True
+    assert rec["block"] == block and rec["ordered_xor_oneshot"] is True
+    if block == "perspective":
+        assert seen["build"][1].n == 16
+        assert rec["f_width16_experimental"] is True
+    else:
+        assert "f_width16_experimental" not in rec
+
+
+@pytest.mark.slow
+def test_perspective_width16_experimental_cli_real_simulator_smoke(tmp_path):
+    out = tmp_path / "perspective.json"
+    kc.main(["perspective", "--copies", "1", "--max-ms", "1", "--rate-robust",
+             "--experimental-autapse", "--ordered-xor-oneshot", "--f-width16-experimental",
+             "--out", str(out)])
+    rec = json.loads(out.read_text())
+    assert rec["f_width16_experimental"] is True
+    assert rec["copies"] == 1 and rec["block"] == "perspective"
+    assert rec["simulator"] == "TorchSim"
+    assert rec["faults"] == rec["timeouts"] == rec["bad_outputs"] == 0

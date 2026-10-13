@@ -971,3 +971,26 @@ All 44 opt-in width-16 cluster cases (`tests/test_config_f_kernels.py::test_widt
 | MUL | mix-B | 454038 | 256 transactions | all failure counters 0 | 211.9 min |
 
 These are primitive-composition RefSim surveys (float64), not a compiler/kernel campaign; the builder still refuses configuration F above width 8; per this section's own plan, opening width 16 needs a separate review and a kernel-level campaign.
+
+### Experimental kernel campaign opt-in (2026-10-13)
+
+After all 44 width-16 primitive surveys passed, `build_pipeline` gained
+`f_width16_experimental=True`, exposed as `--f-width16-experimental` in
+`kernel_campaign` and Stage D. This opt-in exists only to run the kernel-level
+width-16 campaign required by the qualification plan. It requires complete
+configuration F: `rate_robust`, `experimental_autapse`, and
+`ordered_xor_oneshot`. It permits width 16, including array MUL with the
+surveyed v1 zero-prefix bypass; widths 9..15 and above 16 remain refused, as
+do unsupported array MUL widths 3, 5, 6, and 7. Timing and reset restrictions
+still apply. The flag is recorded in `build_options` only when enabled and
+retained and checked on campaign replay and Stage D recheck.
+
+The default gate is unchanged: without this flag, F remains limited to widths
+1..8, with array MUL restricted to 1, 2, 4, and 8. This opt-in does not declare
+width 16 qualified for general use; a kernel-level campaign is still needed.
+For example, the 16-bit `render2.c` perspective block with pipelined MULP can
+be smoke-tested with:
+
+```sh
+uv run python -m drosophilos.bench.kernel_campaign perspective --rate-robust --experimental-autapse --ordered-xor-oneshot --f-width16-experimental --copies 1 --max-ms 1
+```

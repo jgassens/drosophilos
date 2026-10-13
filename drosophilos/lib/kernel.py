@@ -290,7 +290,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
                    experimental_register_reset: bool = False, experimental_autapse: bool = False,
-                   ordered_xor_oneshot: bool = False) -> Pipeline:
+                   ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -359,17 +359,24 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Array MUL widths 4 and 8 use the independently versioned zero-prefix
     bypass; other wider arrays remain rejected.
     MULP/MULP_ROW use separately reset rows instead.
+    `f_width16_experimental=True` additionally permits width 16, including
+    array MUL's v1 bypass, only with complete configuration F. It exists for
+    the kernel-level width-16 campaign; widths 9..15 and above 16 stay rejected.
     Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
+    if f_width16_experimental and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
+        raise ValueError("f_width16_experimental requires rate_robust=True, experimental_autapse=True "
+                         "and ordered_xor_oneshot=True (complete configuration F)")
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
-    if ordered_xor_oneshot and n not in (1, 2, 4, 8) and any(cs["op"] == "MUL" for cs in spec):
+    if (ordered_xor_oneshot and n not in (1, 2, 4, 8) and
+            not (f_width16_experimental and n == 16) and any(cs["op"] == "MUL" for cs in spec)):
         raise ValueError(f"configuration F rejects unqualified or unsupported array MUL width {n}: "
                          "qualified supported widths are 1, 2, 4, 8; "
                          "MULP uses separately reset pipelined rows")
     if ordered_xor_oneshot and (
-            params != Params() or not 1 <= n <= 8 or
+            params != Params() or not (1 <= n <= 8 or (f_width16_experimental and n == 16)) or
             drive not in (None, Drive.from_params(params)) or
             act_hops != 11 or idle_hops != 20 or watchdog_hops != 170 or
             in_watchdog_hops is not None or not relight_requests or
@@ -378,7 +385,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             kernel_kill_pulses != 4 or not true_guards or not relight_repair_delay or
             not copy_requires_rail or robust_request_clear or robust_register_reset or
             verified_register_reset or experimental_register_reset):
-        raise ValueError("ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
+        widths = "1..8 and experimental 16" if f_width16_experimental else "1..8"
+        raise ValueError(f"ordered_xor_oneshot supports only default timing/reset policy, widths {widths}, "
                          "untested shapes and reset policies are rejected")
     if zero_once and (experimental_autapse or ordered_xor_oneshot) and (
             mems or phases or (streams and len(streams) != 1) or
@@ -1018,6 +1026,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         "true_guards": true_guards,
         "true_guard_version": TRUE_GUARD_VERSION,
     }
+    if f_width16_experimental:
+        pl.build_options["f_width16_experimental"] = True
     if drive.rate_robust:
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     if ordered_xor_oneshot:

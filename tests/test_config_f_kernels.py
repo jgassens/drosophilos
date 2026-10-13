@@ -238,6 +238,66 @@ def test_unevaluated_timing_and_width_remain_rejected(options):
         small_shape("MULP", **options)
 
 
+@pytest.mark.parametrize("op", ["ADD", "MULP", "MUL"])
+def test_width16_default_f_refusal_is_unchanged(op):
+    spec = [dict(name="out", op=op, a="input", b="input")]
+    expected = ("configuration F rejects unqualified or unsupported array MUL width 16: "
+                "qualified supported widths are 1, 2, 4, 8; "
+                "MULP uses separately reset pipelined rows" if op == "MUL" else
+                "ordered_xor_oneshot supports only default timing/reset policy, widths 1..8, "
+                "untested shapes and reset policies are rejected")
+    with pytest.raises(ValueError) as exc:
+        build_pipeline(P, 16, spec, **F)
+    assert str(exc.value) == expected
+
+
+def test_perspective_width16_builds_with_experimental_f_opt_in():
+    from drosophilos.bench import kernel_campaign
+
+    ks, pl, tokens, reference = kernel_campaign.block("perspective", P, f_width16_experimental=True, **F)
+    assert ks.width == pl.n == 16
+    assert any(cell["op"] in {"MULP", "MULP_ROW"} for cell in ks.cells)
+    assert pl.build_options["f_width16_experimental"] is True
+    assert len(tokens) == len(reference) == 8
+
+
+@pytest.mark.parametrize("flags", [dict(zip(F, [(bits >> i) & 1 == 1 for i in range(3)]))
+                                  for bits in range(7)])
+@pytest.mark.parametrize("width", [2, 16])
+def test_width16_opt_in_requires_complete_f(flags, width):
+    with pytest.raises(ValueError, match="f_width16_experimental requires.*complete configuration F"):
+        build_pipeline(P, width, [dict(name="out", op="ADD", a="input", b="input")],
+                       f_width16_experimental=True, **flags)
+
+
+@pytest.mark.parametrize("width", [0, *range(9, 16), 17, 32])
+@pytest.mark.parametrize("op", ["ADD", "MULP", "MUL"])
+def test_width16_opt_in_keeps_other_unqualified_widths_rejected(width, op):
+    with pytest.raises(ValueError, match="supports only|rejects unqualified or unsupported array MUL width"):
+        build_pipeline(P, width, [dict(name="out", op=op, a="input", b="input")],
+                       f_width16_experimental=True, **F)
+
+
+@pytest.mark.parametrize("width", [3, 5, 6, 7])
+def test_width16_opt_in_keeps_unsupported_array_widths_rejected(width):
+    with pytest.raises(ValueError, match="rejects unqualified or unsupported array MUL width"):
+        small_shape("MUL", width, f_width16_experimental=True)
+
+
+def test_width16_opt_in_records_array_mul_bypass_version():
+    pl, _, _ = small_shape("MUL", 16, f_width16_experimental=True)
+    assert pl.n == 16
+    assert pl.build_options["f_width16_experimental"] is True
+    assert pl.build_options["ordered_xor_oneshot_mul_version"] == 1
+
+
+@pytest.mark.parametrize("options", [dict(act_hops=10), dict(kernel_kill_pulses=3),
+                                    dict(experimental_register_reset=True), dict(robust_request_clear=True)])
+def test_width16_opt_in_preserves_f_timing_reset_policy(options):
+    with pytest.raises(ValueError, match="ordered_xor_oneshot supports only"):
+        small_shape("MULP", 16, f_width16_experimental=True, **options)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("shape", SHAPES)
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])

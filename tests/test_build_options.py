@@ -437,7 +437,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot", "f_width16_experimental"])
 def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 
@@ -470,7 +470,8 @@ def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch
     out = tmp_path / "stage_d.json"
     record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--" + option.replace("_", "-"),
                            "--rate-robust", "--out", str(out),
-                           *(["--experimental-autapse"] if option == "ordered_xor_oneshot" else [])])
+                           *(["--experimental-autapse"] if option in {"ordered_xor_oneshot", "f_width16_experimental"} else []),
+                           *(["--ordered-xor-oneshot"] if option == "f_width16_experimental" else [])])
     original = seen[-1]
     assert record[option] is record["build_options"][option] is True
     assert record["experimental_autapse_version"] == record["build_options"]["experimental_autapse_version"] == 1
@@ -485,7 +486,7 @@ def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch
     assert seen[-1].build_options[option] is True
     record["build_options"].pop(option)
     stage_d.recheck_record(record)
-    assert seen[-1].build_options[option] is False
+    assert seen[-1].build_options.get(option, False) is False
 
 
 def test_stall_diag_rejects_unidentified_or_obsolete_rate_circuits():
@@ -521,6 +522,48 @@ def test_wider_f_campaign_versions_and_options_are_enforced(monkeypatch):
                 kernel_campaign.rebuild_record(record | {key: value})
     with pytest.raises(ValueError, match="neurons differs"):
         kernel_campaign.rebuild_record(record | {"neurons": 1})
+
+
+def test_width16_campaign_opt_in_replayed_and_checked(monkeypatch):
+    flags = dict(rate_robust=True, experimental_autapse=True, ordered_xor_oneshot=True)
+
+    def block(_name, params, **options):
+        pl = build_pipeline(params, 16, [dict(name="out", op="ADD", a="input", b="input")], **options)
+        return None, pl, [], []
+
+    monkeypatch.setattr(kernel_campaign, "block", block)
+    pl = block("width16", PARAMS, f_width16_experimental=True, **flags)[1]
+    record = {"block": "width16", **pl.build_options}
+    rebuilt = kernel_campaign.rebuild_record(record)[1]
+    assert rebuilt.build_options["f_width16_experimental"] is True
+    assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(pl)
+    for value in (False, None, 1, "true"):
+        with pytest.raises(ValueError):
+            kernel_campaign.rebuild_record(record | {"f_width16_experimental": value})
+    del record["f_width16_experimental"]
+    with pytest.raises(ValueError, match="widths 1..8"):
+        kernel_campaign.rebuild_record(record)
+
+
+def test_width16_flag_does_not_change_existing_f_netlists():
+    flags = dict(rate_robust=True, experimental_autapse=True, ordered_xor_oneshot=True)
+    spec = [dict(name="out", op="ADD", a="input", b="input")]
+    off = build_pipeline(PARAMS, 2, spec, **flags)
+    on = build_pipeline(PARAMS, 2, spec, f_width16_experimental=True, **flags)
+    assert "f_width16_experimental" not in off.build_options
+    assert _pipeline_fingerprint(off) == _pipeline_fingerprint(on)
+    assert on.build_options == off.build_options | {"f_width16_experimental": True}
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_stage_d_recheck_checks_width16_opt_in_type(nested):
+    from drosophilos.bench import stage_d
+
+    record = {"f_width16_experimental": "true"}
+    if nested:
+        record = {"build_options": record}
+    with pytest.raises(ValueError, match="unsupported campaign build option f_width16_experimental"):
+        stage_d.recheck_record(record)
 
 
 def test_campaign_repeats_recompute_stateful_oracle(tmp_path, monkeypatch):
