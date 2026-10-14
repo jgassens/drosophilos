@@ -51,7 +51,8 @@ import numpy as np
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
 from ..protocol.latch import (
-    EXPERIMENTAL_AUTAPSE_VERSION, Latch, add_edge_relay, add_experimental_autapses,
+    EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
+    Latch, add_edge_relay, add_experimental_autapses,
     add_latch, connect_trigger,
 )
 from ..protocol.token import decode_recent, rails_for
@@ -290,7 +291,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    zero_once: bool = False, robust_request_clear: bool = False,
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
                    experimental_register_reset: bool = False, experimental_autapse: bool = False,
-                   ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False) -> Pipeline:
+                   ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
+                   master_ignition: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -340,6 +342,15 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     four compact 1.75-loop taps / eight delayed READY links candidate. It is
     explicitly experimental, not an alias for either rejected robust option.
     Producer and machine resets retain their original policy; off is unchanged.
+    `master_ignition=True` assists the partner of a selected master rail 60 steps
+    after the original u ignition, from its existing qualified one-shot COPY
+    arm, avoiding simultaneous ignition's fast orbit and a weak first hand-off
+    during reset recovery. It preserves READY timing, reset charge, storage
+    and readers. Requires rate readers, experimental autapses, selected-rail
+    COPY and ordinary four-tap resets;
+    configuration F, including f_width16_experimental, is allowed. It adds one
+    synapse per master rail and no neurons. The opt-in/version are recorded
+    only when enabled, preserving historical records and default fingerprints.
     `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
     Memories/RAM, phases/pacing, multiple streams and multipliers require the
     complete configuration F (also ordered_xor_oneshot); autapse alone remains
@@ -365,6 +376,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
+    if master_ignition and (
+            params != Params() or not (rate_robust and experimental_autapse and copy_requires_rail) or
+            experimental_register_reset or request_clear_pulses not in (None, 4) or kernel_kill_pulses != 4 or
+            drive not in (None, Drive.from_params(params))):
+        raise ValueError("master_ignition requires default physics, rate_robust=True, "
+                         "experimental_autapse=True, copy_requires_rail=True and ordinary four-tap resets")
     if f_width16_experimental and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
         raise ValueError("f_width16_experimental requires rate_robust=True, experimental_autapse=True "
                          "and ordered_xor_oneshot=True (complete configuration F)")
@@ -464,7 +481,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         # commit then copied an empty stage as double rails (measured).
         add_liveness(net, drive, P, S, in_watchdog_hops if in_watchdog_hops is not None else 60 + 4 * n)
         reg = add_staged_commit(net, drive, pre, S, P, ordered_grant=True,
-                                copy_requires_rail=copy_requires_rail)
+                                copy_requires_rail=copy_requires_rail, master_ignition=master_ignition)
         creq = add_kill_pair(net, drive, f"{pre}.creq")  # [nothing to commit, commit pending]
         rl = add_edge_relay(net, drive, f"{pre}.autocommit", S.completion.u, fast_inhibitor=True)
         net.synapse(rl, creq[1].u, drive.ignite)
@@ -515,7 +532,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         image.append(c.idle[1])
         _fault_latch(net, drive, c.name, c.stage)
         c.reg = add_staged_commit(net, drive, c.name, c.stage, _NoProducer(), ordered_grant=True,
-                                  copy_requires_rail=copy_requires_rail)
+                                  copy_requires_rail=copy_requires_rail, master_ignition=master_ignition)
         c.master = c.reg.master
         c.creq = add_kill_pair(net, drive, f"{c.name}.creq")
         rl = add_edge_relay(net, drive, f"{c.name}.autocommit", c.stage.completion.u, fast_inhibitor=True)
@@ -1028,6 +1045,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     }
     if f_width16_experimental:
         pl.build_options["f_width16_experimental"] = True
+    if master_ignition:
+        pl.build_options.update(master_ignition=True, master_ignition_version=MASTER_IGNITION_VERSION)
     if drive.rate_robust:
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     if ordered_xor_oneshot:

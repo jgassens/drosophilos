@@ -32,7 +32,9 @@ import numpy as np
 
 from ..protocol.celement import add_and_latched, add_delay_chain, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
-from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
+from ..protocol.latch import (
+    MASTER_IGNITION_PARTNER_DELAY_STEPS, Latch, add_edge_relay, add_latch, connect_trigger,
+)
 from ..protocol.token import decode_at, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
@@ -57,7 +59,7 @@ class StagedRegister:
 
 def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Register,
                       M: Register | None = None, ordered_grant: bool = False, guard_hops: int = 12,
-                      copy_requires_rail: bool = False) -> StagedRegister:
+                      copy_requires_rail: bool = False, master_ignition: bool = False) -> StagedRegister:
     """Wrap consumer register S (with completion and fault latch, i.e. after wire_fault_path)
     with a master M and a commit controller. The caller must NOT wire the producer's CLEARED
     to S's reset: S is cleared by commit-done, by F, or by the producer's TIMEOUT.
@@ -104,10 +106,18 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
             # every master bit.  The required form remains a one-shot coincidence (rather
             # than the old rate-mode AND that leaked while COPY held for ~100 ms).
             require = [S.rails[i][r].u] if copy_requires_rail else []
-            copy_gates.append(add_veto_relay(
+            arm = add_veto_relay(
                 net, drive, f"{name}.cp{i}r{r}", COPY.u,
                 [S.rails[i][1 - r].u, F.u], M.rails[i][r], require=require,
-            ))
+            )
+            copy_gates.append(arm)
+            if master_ignition:
+                if not copy_requires_rail:
+                    raise ValueError("master_ignition requires selected-rail COPY")
+                # Stagger the partner assist to avoid simultaneous ignition's
+                # fast orbit. Qualification and READY retain their timing.
+                net.synapse(arm, M.rails[i][r].v, drive.ignite,
+                            MASTER_IGNITION_PARTNER_DELAY_STEPS)
     # commit done = W_M's first spike, through an edge relay as a single pulse: W_M then holds
     # for as long as M is valid, and a train into the stage's edge-detected reset trigger would
     # hold that trigger down and block the F / TIMEOUT discards

@@ -17,6 +17,11 @@ EXPERIMENTAL_AUTAPSE_VERSION = 1
 EXPERIMENTAL_AUTAPSE_GAIN = 0.2
 EXPERIMENTAL_AUTAPSE_DELAY_STEPS = 0
 
+# Version 1 (rejected): simultaneous u/v ignition admits fast reset survivors.
+# Version 2: keep u at delay 18, assist v 60 steps later from the SAME COPY arm.
+MASTER_IGNITION_VERSION = 2
+MASTER_IGNITION_PARTNER_DELAY_STEPS = 78
+
 
 # Physical timing choices, independent of the simulator's delay-ring capacity.
 COMPACT_READY_DELAY_STEPS = 100
