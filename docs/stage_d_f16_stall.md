@@ -263,9 +263,10 @@ imports this worktree rather than the shared environment's editable checkout.
 The new helper was also exercised on the complete external dump: no unavailable
 probes, the five reset emissions above, and exactly one u spike / zero v spikes.
 
-## 2026-10-14: selected-master dual-member ignition, version 1
+## 2026-10-14: rejected v1 selected-master simultaneous ignition
 
-The candidate opt-in is `build_pipeline(..., master_ignition=True)`: the
+**Rejected v1 history.** The candidate opt-in was `build_pipeline(...,
+master_ignition=True)`: the
 **existing selected-rail COPY one-shot drives both u and v**, each at
 `drive.ignite` with the ordinary 18-step delay. The original u connection is
 retained; one additional synapse connects that same arm to v. This avoids
@@ -309,8 +310,9 @@ datapaths are supported. The input master and every cell master, including all
 MULP row masters, receive partner ignition. Stage, producer, request, RAM-word
 and power-up image writers retain their old wiring.
 
-`kernel_campaign` and `stage_d` expose `--master-ignition`. Enabled build records
-carry `master_ignition=true` and `master_ignition_version=1`.
+`kernel_campaign` and `stage_d` expose `--master-ignition`. Historical enabled
+records for this rejected v1 candidate carried `master_ignition=true` and
+`master_ignition_version=1`; the current v2 candidate records version 2.
 `kernel_campaign.rebuild_record`, Stage D recheck and `stall_diag` reject an
 enabled record with a missing, mistyped or changed version. Missing option
 keys mean off, as in historical records. Off preserves existing topology and
@@ -359,10 +361,10 @@ the four close initial pulses before the existing 300-q kick and random clear.
 Both members must be live before reset. New dual-member clear evidence is
 required even though all clearing edges are structurally unchanged.
 
-Qualification in progress: initial corner and captured-clear smoke probes,
-all 4,096 independent corners, and 1,024 copy-75/mix-B reload probes pass with
-zero missing establishment, double rails or survivors. Full survey results
-will be recorded here before completion.
+**V1 qualification was rejected.** This simultaneous-ignition circuit produced
+**127 reset survivors in 40,000 fast-corner first-load trials**, despite the
+earlier smoke, grid, and captured-clear passes. V2 qualification is pending its
+cluster results; the v1 evidence below cannot qualify it.
 
 ### Costs and latency
 

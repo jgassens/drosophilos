@@ -183,8 +183,9 @@ def ignition_survey(case, initial, copies, seed=17531, *, stray=True,
                     q[e] = 4661
             th[list(latch.members)] = [-45.12705001632755, -44.42221141037541]
             bias[list(latch.members)] = [.03693153370274249, -.7152384644970224]
-    totals = dict(copies=copies, missing=0, double_rails=0, survivors=0,
-                  not_live_before_clear=0, old_survivors=0, multiple_copy=0)
+    totals = dict(copies=copies, selected_rail_not_established=0,
+                  double_rails=0, old_rail_survivors=0, survivors=0,
+                  multiple_copy=0)
     for lo in range(0, copies, 1000):
         count = min(1000, copies - lo)
         rng = np.random.default_rng(seed + lo)
@@ -224,33 +225,34 @@ def ignition_survey(case, initial, copies, seed=17531, *, stray=True,
                            [D.ignite, D.relay_in, D.relay_in])
             if initial == "reload":
                 sim.add_events(b, [10, 10+partner_delay-18], list(master[0].members), [round(D.ignite * exc)] * 2)
-        sim.run(7000)
-        first_copy = np.full(count, 7000)
-        arm_steps, arm_nodes = sim.spikes(arms[1])
-        np.minimum.at(first_copy, arm_nodes, arm_steps)
-        live = np.ones(count, bool)
+        # The latest clear is 5,299.  Run through its 1,500-step settle and
+        # a further 1,000-step observation interval for sustained survivors.
+        sim.run(8000)
+        selected_live = np.ones(count, bool)
         established = np.ones(count, bool)
         survived = np.zeros(count, bool)
-        old_survived = np.zeros(count, bool)
-        old_live = np.ones(count, bool)
+        old_rail_live = np.ones(count, bool)
+        old_rail_survived = np.ones(count, bool)
         for member in master[1].members:
             steps, nodes = sim.spikes(member)
             hit = (steps > resets[nodes] + 1600) & (steps < clears[nodes] - 200)
             established &= np.bincount(nodes[hit], minlength=count) >= 2
             hit = (steps > clears[nodes] - 200) & (steps < clears[nodes])
-            live &= np.bincount(nodes[hit], minlength=count) >= 1
+            selected_live &= np.bincount(nodes[hit], minlength=count) >= 1
         for member in master[0].members:
             steps, nodes = sim.spikes(member)
-            old_live &= np.bincount(nodes[(steps > resets[nodes]-200) & (steps < resets[nodes])], minlength=count) >= 1
-            old_survived[nodes[(steps >= first_copy[nodes]) & (steps < clears[nodes])]] = True
+            hit = (steps > clears[nodes] - 200) & (steps < clears[nodes])
+            old_rail_live &= np.bincount(nodes[hit], minlength=count) >= 1
+            hit = (steps > clears[nodes] + 1500) & (steps < clears[nodes] + 2500)
+            old_rail_survived &= np.bincount(nodes[hit], minlength=count) >= 2
         for member in [*members, *readers]:
             steps, nodes = sim.spikes(member)
-            survived[nodes[steps > clears[nodes]+1500]] = True
-        totals["missing"] += int((~established | ~live).sum())
-        totals["double_rails"] += int(old_survived.sum())
-        totals["old_survivors"] += int(old_survived.sum())
+            hit = (steps > clears[nodes] + 1500) & (steps < clears[nodes] + 2500)
+            survived |= np.bincount(nodes[hit], minlength=count) >= 2
+        totals["selected_rail_not_established"] += int((~established).sum())
+        totals["double_rails"] += int((selected_live & old_rail_live).sum())
+        totals["old_rail_survivors"] += int(old_rail_survived.sum()) if initial == "reload" else 0
         totals["survivors"] += int(survived.sum())
-        totals["not_live_before_clear"] += int((~live).sum()) + (int((~old_live).sum()) if initial == "reload" else 0)
         totals["multiple_copy"] += int((sim.counts(arms[1]) != 1).sum())
     return totals
 
@@ -276,8 +278,9 @@ def run_ignition_survey(case, initial, *, smoke=False):
     result = ignition_survey(case, initial, copies=count)
     print("ignition", MASTER_IGNITION_VERSION, case, initial, "smoke" if smoke else "cluster",
           result, f"wall_s={perf_counter()-wall:.3f}", f"cpu_s={process_time()-cpu:.3f}", flush=True)
-    assert result == dict(copies=count, missing=0, double_rails=0, survivors=0,
-                         not_live_before_clear=0, old_survivors=0, multiple_copy=0), result
+    assert result == dict(copies=count, selected_rail_not_established=0,
+                         double_rails=0, old_rail_survivors=0, survivors=0,
+                         multiple_copy=0), result
 
 
 @pytest.mark.slow
@@ -286,8 +289,9 @@ def run_ignition_survey(case, initial, *, smoke=False):
 def test_all_independent_corners_establish_without_strays(initial):
     result = ignition_survey("independent3sigma", initial, copies=4096, stray=False)
     print("deterministic independent corners", initial, result, flush=True)
-    assert result == dict(copies=4096, missing=0, double_rails=0, survivors=0,
-                         not_live_before_clear=0, old_survivors=0, multiple_copy=0)
+    assert result == dict(copies=4096, selected_rail_not_established=0,
+                         double_rails=0, old_rail_survivors=0, survivors=0,
+                         multiple_copy=0)
 
 
 @pytest.mark.slow
@@ -341,17 +345,22 @@ def delayed_clear_survey(case, copies, seed=108):
                 sim.add_events(b, [s + offset for s in (10, 11, 14, 23)], [member] * 4, [D.ignite] * 4)
             sim.add_events(b, [2520, int(clear)], [latch.v if b % 2 else latch.u, trigger],
                            [300, D.relay_in])
-        sim.run(6200)
+        # The latest clear is 4,499; retain a full 1,000-step interval after
+        # the 1,500-step settle so a survivor must be a sustained train.
+        sim.run(7100)
         live, survived = np.ones(count, bool), np.zeros(count, bool)
         for member in latch.members:
             steps, nodes = sim.spikes(member)
             live &= np.bincount(nodes[(steps > clears[nodes]-200) & (steps < clears[nodes])], minlength=count) > 0
-            survived[nodes[steps > clears[nodes]+1500]] = True
+            hit = (steps > clears[nodes]+1500) & (steps < clears[nodes]+2500)
+            survived |= np.bincount(nodes[hit], minlength=count) >= 2
         totals["not_live_before_clear"] += int((~live).sum())
         totals["survivors"] += int(survived.sum())
         for reader in readers:
             steps, nodes = sim.spikes(reader)
-            totals["reader_survivors"] += len(np.unique(nodes[steps > clears[nodes]+1500]))
+            hit = (steps > clears[nodes]+1500) & (steps < clears[nodes]+2500)
+            sustained = np.bincount(nodes[hit], minlength=count) >= 2
+            totals["reader_survivors"] += int(sustained.sum())
     return totals
 
 
@@ -363,8 +372,9 @@ def test_simultaneous_ignition_fast_clear_counterexample():
     new = ignition_survey("fast3sigma", "empty", copies=256)
     print("simultaneous / staggered fast clear", old, new, flush=True)
     assert old["survivors"] == 2, old
-    assert new == dict(copies=256, missing=0, double_rails=0, survivors=0,
-                       not_live_before_clear=0, old_survivors=0, multiple_copy=0), new
+    assert new == dict(copies=256, selected_rail_not_established=0,
+                       double_rails=0, old_rail_survivors=0, survivors=0,
+                       multiple_copy=0), new
 
 
 @pytest.mark.parametrize("stage_value,fault_on", [(None, False), (0, False), (1, False), (1, True), ("both", False)])
@@ -406,9 +416,9 @@ def test_stage_discard_before_copy_cannot_write():
     assert not np.isin(ev["neuron"], [m for l in master for m in l.members]).any()
 
 
-@pytest.mark.parametrize("candidate", ["legacy", "dual", "delay"])
+@pytest.mark.parametrize("candidate", ["legacy", "staggered", "delay"])
 def test_rejected_delay_candidate_copies_an_uncommitted_next_word(candidate):
-    net, master, stage, fault, copy, trigger, ready, arms, readers = _fixture(repair=candidate == "dual")
+    net, master, stage, fault, copy, trigger, ready, arms, readers = _fixture(repair=candidate == "staggered")
     if candidate == "delay":
         roles = {role: i for i, role in enumerate(net.roles)}
         chain = [trigger, *[roles[f"M.ready_delay{k}"] for k in range(15)], ready]
