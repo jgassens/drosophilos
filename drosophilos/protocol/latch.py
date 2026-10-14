@@ -17,6 +17,9 @@ EXPERIMENTAL_AUTAPSE_VERSION = 1
 EXPERIMENTAL_AUTAPSE_GAIN = 0.2
 EXPERIMENTAL_AUTAPSE_DELAY_STEPS = 0
 
+# Version 1: the qualified COPY arm ignites both selected storage members.
+MASTER_IGNITION_VERSION = 1
+
 
 # Physical timing choices, independent of the simulator's delay-ring capacity.
 COMPACT_READY_DELAY_STEPS = 100

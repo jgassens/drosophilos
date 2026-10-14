@@ -262,3 +262,127 @@ This isolated worktree used a writable `UV_CACHE_DIR`, the existing shared
 imports this worktree rather than the shared environment's editable checkout.
 The new helper was also exercised on the complete external dump: no unavailable
 probes, the five reset emissions above, and exactly one u spike / zero v spikes.
+
+## 2026-10-14: selected-master dual-member ignition, version 1
+
+The candidate opt-in is `build_pipeline(..., master_ignition=True)`: the
+**existing selected-rail COPY one-shot drives both u and v**, each at
+`drive.ignite` with the ordinary 18-step delay. The original u connection is
+retained; one additional synapse connects that same arm to v. This avoids
+relying on the weaker u-to-v loop for the first partner spike while v is still
+recovering from reset. It adds no driver, enable, retry, validity pulse or DONE
+pulse. The opposite-rail and fault vetoes and the required selected stage rail
+are shared by both member ignitions. Both members belong to one logical rail;
+this does not energize the other rail of a bit.
+
+### Recovery-only candidate rejected
+
+A first candidate changed the sixteen master READY delays from 18 to 100 steps,
+adding 1,312 steps / 131.2 ms, without changing any weights. Copy 75 and eight
+40,000-trial first-load/reload surveys passed (nominal, weak and fast corners
+in both load scenarios, slow reload and mix-B reload; 320,000 trials with zero
+missing, double rails or reset survivors). **It was nevertheless rejected.**
+After a granted master reset at step 1,000, a stage discard at 1,500 releases
+its next DATA through ordinary stage READY. The delayed old master READY then
+COPYs this new word although no new COMMIT was issued: its master u/v first
+fire at 3,354 / 3,407. Ordinary timing produces no master spikes in that test.
+`test_rejected_delay_candidate_copies_an_uncommitted_next_word` retains this
+counterexample and checks that dual-member ignition also leaves the next word
+unwritten. The delay-only circuit is not an available build option. Extending
+recovery alone would need additional transaction cancellation, not merely a
+larger analogue settling margin.
+
+This selects direction (a). Storage loop weights, autapses, reset charge and
+all READY/controller delays retain their old values. Driving both members can
+change the storage orbit, so the earlier single-member clear results were
+not treated as sufficient evidence: dual-member clear surveys are repeated
+below. This is neither stronger reset nor the rejected verification/READY
+interlock. No storage veto, certificate or feedback is added to READY.
+
+### Build policy and reconstruction
+
+The option requires default physics/drive, rate readers, experimental autapses,
+selected-rail COPY and ordinary four-tap resets. It is allowed with complete
+configuration F, including `f_width16_experimental=True`; the stronger
+experimental register-reset combination is rejected. Generic and specialized
+datapaths are supported. The input master and every cell master, including all
+MULP row masters, receive partner ignition. Stage, producer, request, RAM-word
+and power-up image writers retain their old wiring.
+
+`kernel_campaign` and `stage_d` expose `--master-ignition`. Enabled build records
+carry `master_ignition=true` and `master_ignition_version=1`.
+`kernel_campaign.rebuild_record`, Stage D recheck and `stall_diag` reject an
+enabled record with a missing, mistyped or changed version. Missing option
+keys mean off, as in historical records. Off preserves existing topology and
+build-option records; frozen digest expectations are not edited.
+
+The diagnostic frozen-draw hand-off machinery is reused as an adverse control:
+the same reset arrivals still prevent the original 3,281-q hand-off. Adding a
+partner ignition at the original COPY arrival, weakened by exp(-0.12), makes
+v fire. The two-member test retains both reconstructed loop and autapse weights,
+both thresholds/biases, both reset trains and the 4,661-q u ignition. Off gives
+only u at relative step 1,210; on sustains both members through the final
+observation window. A new partner edge has no historical captured draw; it is
+tested at the weak three-sigma weight and sampled independently in surveys.
+These are conditional RefSim mechanism probes, not a replay of GPU strays.
+
+### Bounded RefSim qualification
+
+`tests/test_master_ignition.py` uses unchanged float64 RefSim, the real ordinary
+four-tap controller, real READY chain, rate readers and both real required-rail
+COPY arms. Each trial begins with empty storage or a live opposite old rail,
+resets, COPYs the selected new rail once, checks sustained establishment of
+both members, and clears again. The terminal ordinary clear also clears the
+source stage/COPY so a legitimate subsequent rewrite cannot masquerade as a
+reset survivor. Both storage members and readouts must be dark after clear;
+a surviving old orbit cannot count as establishment. Strays cover every
+fixture neuron, including dark rails and control/qualification neurons, and
+clear phases are randomized. Fast tests cover absent stage rails, either
+selected rail, both stage rails, fault veto, no COPY, and stage discard followed
+by new DATA with no new COMMIT.
+
+Corner weights use log offsets +/-0.12; thresholds and biases use +/-0.6 mV.
+Fast/slow correlated corners include adverse incoming clear/autapse weights;
+weak-loop, high-threshold and negative-bias cases are also separate. The
+independent grid enumerates all 4,096 signs of two loop, two autapse, two clear,
+two threshold, two bias and both ignition weights, repeated ten times per
+scenario (40,960 trials). These corners apply to master storage and ignition;
+controls/readouts are nominal except in mix B, which samples every edge and
+neuron independently. Copy-75 surveys retain its reconstructed storage draws
+and u ignition, with independent mix-B partner-edge draws and strays.
+
+The five earlier captured clear scenarios (request28, master74, master17,
+master24, stage18), fast/slow corners and independent mix B are rerun at 40,000
+trials each. They reuse `test_stable_latch.clear_fixture` and its reconstruction,
+reader/reset mirrors and added-edge draw law, but ignite **both members** for
+the four close initial pulses before the existing 300-q kick and random clear.
+Both members must be live before reset. New dual-member clear evidence is
+required even though all clearing edges are structurally unchanged.
+
+Qualification in progress: initial corner and captured-clear smoke probes,
+all 4,096 independent corners, and 1,024 copy-75/mix-B reload probes pass with
+zero missing establishment, double rails or survivors. Full survey results
+will be recorded here before completion.
+
+### Costs and latency
+
+Measured configuration-F builds, generic datapath and ordinary resets:
+
+| Build | Neurons, off / on | Synapses, off / on | Added neurons / synapses | Added controller latency |
+|---|---:|---:|---:|---:|
+| `tick2.c` | 31,363 / 31,363 | 64,238 / 64,540 | 0 / 302 | 0 ms |
+| `render.c` | 11,768 / 11,768 | 24,228 / 24,332 | 0 / 104 | 0 ms |
+| perspective (`render2.c`, F16) | 123,323 / 123,323 | 249,940 / 251,794 | 0 / 1,854 | 0 ms |
+
+There is exactly one added synapse per master rail (two per bit). Ordered neuron
+roles/biases and every pre-existing edge weight/delay are identical off/on.
+READY and COPY times are unchanged. The nominal one-bit fixture has READY at
+1,872 and the selected COPY arm at 2,009 in both builds; u first fires at 2,056.
+The partner first fires at 2,116 off versus 2,056 on: **6.0 ms earlier**, with
+no additional reset-to-COPY waiting in any of the three builds. The direct
+partner pulse supplies ignition margin within that existing recovery budget. This is a
+primitive timing measurement, not an end-to-end kernel throughput benchmark;
+pipeline overlap and completion timing determine output latency. No full GPU
+campaign or end-to-end throughput comparison was run here. Finite surveys do
+not prove indefinite holding or safety under unbounded Gaussian tails, remove
+F's separate rate-floor limitation, or diagnose the other seven freezes.

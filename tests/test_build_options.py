@@ -51,6 +51,54 @@ CURRENT_PIPELINE_OPTIONS = {
 }
 
 
+@pytest.mark.parametrize("entry", ["campaign", "diagnostic", "recheck"])
+@pytest.mark.parametrize("version", [None, 0, 2, True, "1"])
+def test_master_ignition_replay_rejects_missing_or_changed_version(entry, version):
+    from drosophilos.bench.stage_d import recheck_record
+    record = dict(block="tick", rate_robust=True, experimental_autapse=True,
+                  master_ignition=True)
+    if version is not None:
+        record["master_ignition_version"] = version
+    with pytest.raises(ValueError, match="master-ignition circuit version"):
+        if entry == "campaign":
+            kernel_campaign.rebuild_record(record)
+        elif entry == "diagnostic":
+            build_tick_pipeline(record)
+        else:
+            recheck_record({"build_options": record})
+
+
+@pytest.mark.parametrize("datapath", ["generic", "specialized"])
+def test_master_ignition_option_records_rebuilds_and_defaults_off(datapath):
+    from drosophilos.bench.stage_d import recheck_record
+    _, pl, _, _ = kernel_campaign.block("tick", PARAMS, datapath=datapath, rate_robust=True,
+                                       experimental_autapse=True, master_ignition=True)
+    assert pl.build_options["master_ignition"] is True
+    assert pl.build_options["master_ignition_version"] == 1
+    record = dict(block="tick", **pl.build_options)
+    _, _, rebuilt = build_tick_pipeline(record)
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)
+    assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(kernel_campaign.rebuild_record(record)[1])
+    recheck_record(dict(build_options=pl.build_options, ticks=0))
+    record.pop("master_ignition")
+    record.pop("master_ignition_version")
+    _, _, fallback = build_tick_pipeline(record)
+    _, off, _, _ = kernel_campaign.block("tick", PARAMS, datapath=datapath, rate_robust=True,
+                                        experimental_autapse=True, master_ignition=False)
+    assert _pipeline_fingerprint(off) == _pipeline_fingerprint(fallback)
+
+
+@pytest.mark.parametrize("options", [{"rate_robust": False}, {"experimental_autapse": False},
+                                    {"copy_requires_rail": False}, {"experimental_register_reset": True},
+                                    {"params": replace(PARAMS, default_delay_ms=1.9)}])
+def test_master_ignition_rejects_unqualified_policy(options):
+    opts = dict(params=PARAMS, rate_robust=True, experimental_autapse=True, master_ignition=True)
+    opts.update(options)
+    with pytest.raises(ValueError, match="master_ignition requires"):
+        build_pipeline(n=2, spec=[dict(name="out", op="MOV", a="input", b=("const", "k"))],
+                       consts={"k": 0}, **opts)
+
+
 class _ImageRecorder:
     def __init__(self):
         self.neurons = []
@@ -403,7 +451,7 @@ def test_opt_in_is_recorded_and_rebuilt_with_legacy_false_fallback(rate_robust, 
         _assert_conditioned_train_inputs(pl.net, pl.drive)
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot", "master_ignition"])
 def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch, option):
     real_block = kernel_campaign.block
     seen = {}
@@ -427,7 +475,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     out = tmp_path / "campaign.json"
     kernel_campaign.main(["tick", "--copies", "1", "--max-ms", "1",
                           "--" + option.replace("_", "-"), "--out", str(out),
-                          *(["--rate-robust", "--experimental-autapse"] if option == "ordered_xor_oneshot" else
+                          *(["--rate-robust", "--experimental-autapse"] if option in {"ordered_xor_oneshot", "master_ignition"} else
                             ["--rate-robust"] if option == "experimental_autapse" else [])])
     record = json.loads(out.read_text())
     assert seen[option] is seen["build"][1].build_options[option] is True
@@ -437,7 +485,7 @@ def test_kernel_campaign_cli_builds_and_records_the_option(tmp_path, monkeypatch
     assert _pipeline_fingerprint(rebuilt) == _pipeline_fingerprint(seen["build"][1])
 
 
-@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot", "f_width16_experimental"])
+@pytest.mark.parametrize("option", ["zero_once", "robust_request_clear", "experimental_register_reset", "experimental_autapse", "ordered_xor_oneshot", "f_width16_experimental", "master_ignition"])
 def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch, option):
     from drosophilos.bench import stage_d
 
@@ -470,7 +518,7 @@ def test_stage_d_cli_record_recheck_and_diagnostic_rebuild(tmp_path, monkeypatch
     out = tmp_path / "stage_d.json"
     record = stage_d.main(["--ticks", "2", "--max-ms", "1", "--" + option.replace("_", "-"),
                            "--rate-robust", "--out", str(out),
-                           *(["--experimental-autapse"] if option in {"ordered_xor_oneshot", "f_width16_experimental"} else []),
+                           *(["--experimental-autapse"] if option in {"ordered_xor_oneshot", "f_width16_experimental", "master_ignition"} else []),
                            *(["--ordered-xor-oneshot"] if option == "f_width16_experimental" else [])])
     original = seen[-1]
     assert record[option] is record["build_options"][option] is True

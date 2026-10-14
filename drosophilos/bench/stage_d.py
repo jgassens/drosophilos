@@ -683,6 +683,8 @@ def parser() -> argparse.ArgumentParser:
                           "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
+    ap.add_argument("--master-ignition", action="store_true",
+                    help="ignite both selected master members from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
                     help="EXPERIMENTAL: allow width 16 for the kernel campaign; requires all three configuration F flags")
     ap.add_argument("--zero-once", action="store_true",
@@ -779,6 +781,14 @@ def recheck_record(rec: dict) -> dict:
     if type(width16) is not bool:
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     flags["f_width16_experimental"] = width16
+    ignition = options.pop("master_ignition", rec.get("master_ignition", False))
+    if type(ignition) is not bool:
+        raise ValueError("unsupported campaign build option master_ignition: expected a bool")
+    flags["master_ignition"] = ignition
+    from ..protocol.latch import MASTER_IGNITION_VERSION
+    ignition_version = options.pop("master_ignition_version", rec.get("master_ignition_version"))
+    if ignition and (type(ignition_version) is not int or ignition_version != MASTER_IGNITION_VERSION):
+        raise ValueError("unsupported master-ignition circuit version")
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
     from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION
 
@@ -932,7 +942,7 @@ def main(argv=None):
                verified_register_reset=a.verified_register_reset,
                experimental_register_reset=a.experimental_register_reset,
                experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
-               f_width16_experimental=a.f_width16_experimental)
+               f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -1023,6 +1033,9 @@ def main(argv=None):
     }
     if a.f_width16_experimental:
         rec["f_width16_experimental"] = pl.build_options["f_width16_experimental"]
+    if a.master_ignition:
+        rec["master_ignition"] = True
+        rec["master_ignition_version"] = pl.build_options["master_ignition_version"]
     summary = {x: rec[x] for x in ("verdict", "counters", "faults", "timeouts", "stop", "neural_s", "wall_s",
                                    "per_tick_neural_ms", "retried_commit_applied_once")}
     if a.out:

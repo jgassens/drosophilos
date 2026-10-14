@@ -35,7 +35,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           zero_once: bool = False, robust_request_clear: bool = False,
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
-          ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False):
+          ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
+          master_ignition: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -75,7 +76,7 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         verified_register_reset=verified_register_reset,
                         experimental_register_reset=experimental_register_reset,
                         experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
-                        f_width16_experimental=f_width16_experimental)
+                        f_width16_experimental=f_width16_experimental, master_ignition=master_ignition)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -89,7 +90,14 @@ def rebuild_record(record: dict):
     """
     flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
              "verified_register_reset", "experimental_register_reset", "experimental_autapse",
-             "ordered_xor_oneshot", "f_width16_experimental")
+             "ordered_xor_oneshot", "f_width16_experimental", "master_ignition")
+    from ..protocol.latch import MASTER_IGNITION_VERSION
+    if "master_ignition" in record and type(record["master_ignition"]) is not bool:
+        raise ValueError("unsupported campaign build option master_ignition: expected a bool")
+    if record.get("master_ignition", False) and (
+            type(record.get("master_ignition_version")) is not int or
+            record["master_ignition_version"] != MASTER_IGNITION_VERSION):
+        raise ValueError("unsupported master-ignition circuit version")
     if "f_width16_experimental" in record and type(record["f_width16_experimental"]) is not bool:
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
@@ -128,6 +136,8 @@ def parser() -> argparse.ArgumentParser:
                           "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
+    ap.add_argument("--master-ignition", action="store_true",
+                    help="ignite both selected master members from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
                     help="EXPERIMENTAL: allow width 16 for the kernel campaign; requires all three configuration F flags")
     ap.add_argument("--zero-once", action="store_true",
@@ -160,7 +170,7 @@ def main(argv=None):
                               verified_register_reset=a.verified_register_reset,
                               experimental_register_reset=a.experimental_register_reset,
                               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
-                              f_width16_experimental=a.f_width16_experimental)
+                              f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition)
     if a.repeats != 1:
         tokens = tokens * a.repeats
         ref = kernel_outputs(ks, tokens)
