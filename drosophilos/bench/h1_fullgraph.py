@@ -24,7 +24,7 @@ the wall seconds. One addition is ~12,000 RefSim steps of 166,700 neurons: tens 
 a cluster node. Do not run it on a laptop.
 
     python -m drosophilos.bench.h1_fullgraph --n-cases 50 --seed 0 --surround silent --out data/h1_fullgraph/silent.json
-    python -m drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/whole_brain_w4_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/inputs-50.json
+    python -m drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/all_w0_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/inputs-50.json
 """
 
 from __future__ import annotations

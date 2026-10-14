@@ -15,5 +15,5 @@ An autapse is a neuron-to-itself anatomical connection; Dale's law means all out
 The real F build directly supplies the demand, split by its netlist self-edge quanta rather than a hand-matched circuit pattern.
 The two standalone latch candidates are bodyIds 10540, 801562; neither could also host the excitatory loop to which its autapse belongs.
 Both full-rule counts are zero because every relevant designed source votes excitatory while its self-edge is inhibitory.
-Thus inhibitory self-feedback on an excitatory neuron needs a separate inhibitory neuron, making a two-step loop through an interneuron anatomically possible.
+Inhibitory self-feedback on an excitatory neuron would therefore need a separate inhibitory neuron (a two-step loop through an interneuron); whether MCNS has such loops at the needed strength was not checked.
 The optional cross-check against the driven mutual-inhibitory-pair pool was not done.
