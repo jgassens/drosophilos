@@ -580,7 +580,16 @@ The scheduler job IDs were: `fast3sigma` Juno 457262;
 `reload-weak_loop` G2 4018685; `request28` G2 4018675; `slow3sigma` Juno
 457265; `stage18` G2 4018676.
 
-V2 now passes its bounded RefSim qualification. It has not yet run in a full
-kernel campaign; the next step is a 100-copy 16-bit perspective campaign with
-it enabled. The copy-85/57 operand-XOR freeze class is not covered by this
-option.
+Three additional cluster-gated cases were run at commit `cbb4cc1`; each passed:
+
+| Case | Node / job | Result |
+|---|---|---|
+| `tests/test_master_ignition.py::test_all_independent_corners_establish_without_strays[first-load]` | Juno 457306 | deterministic independent corners empty: `copies=4096, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0`; 1 passed |
+| `tests/test_master_ignition.py::test_all_independent_corners_establish_without_strays[reload]` | G2 4018734 | deterministic independent corners reload: `copies=4096, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0`; 1 passed |
+| `tests/test_master_ignition.py::test_master_ignition_two_cell_kernel_computes_and_reloads` | Juno 457307 | 1 passed |
+
+All **29 cluster-gated cases pass**: **1,050,112 trials** across the 28
+survey/grid cases, plus the two-cell kernel test. This completes v2's bounded
+RefSim qualification. It has not yet run in a full kernel campaign; the next
+step is a 100-copy 16-bit perspective campaign with it enabled. The
+copy-85/57 operand-XOR freeze class is not covered by this option.
