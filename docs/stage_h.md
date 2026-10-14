@@ -2,7 +2,7 @@
 
 ## Answer
 
-No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 100% of all_w0's host inputs (4,131,952) or 90% of vnc_w2's (1,291,471).  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
+No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 100% of all_w0's host inputs (4,131,952) or 90% of vnc_w2's (1,291,471).  The all_w0 input minimum is confirmed at 1.00; its 0.95 rung reached 10/10 but was not run at 50, placing the threshold above 0.90 and possibly at or below 0.95.  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
 
 An earlier whole-brain batch was discarded because `h1_fullgraph` did not inject the flip-flop register's power-on pulse (every addition faulted even with the brain fully cut off); this was fixed in `e8f5f3b`, after which the sealed control computed 3/3.
 
@@ -29,7 +29,7 @@ Condition A restores every missing designed edge and therefore cannot rank place
 
 ## Inside the whole brain
 
-All runs below used the condition-A image, commit `e8f5f3b`, RefSim float64, and 50 additions.  The final pair is the sealed control, not a live run.
+All runs below used the condition-A image, RefSim float64, and 50 additions.  The final row is the sealed control, not a live run.
 
 | placement | surround | correct | wrong / fault / no ACCEPT / timeout / incomplete | maximum entering spikes per ms, exc / inh |
 | --- | --- | ---: | ---: | ---: |
@@ -69,6 +69,8 @@ The ladder tables retain every measured rung.  “Cut” is edge pairs / anatomi
 
 Minimal confirmed rungs: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inputs/2 Hz **1.00, 4,131,952 synapses, 50/50**.
 
+For all_w0 inputs, the 50/50 minimum is 1.00; the 0.95 rung reached 10/10 but was not confirmed at 50, so the threshold lies above 0.90 and possibly at or below 0.95.
+
 ### vnc_w2
 
 | boundary and surround | fraction | cut: edges / synapses | correct/n |
@@ -83,7 +85,7 @@ Minimal confirmed rungs: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inp
 | outputs, silent (confirmation) | 0.50 | 81,549 / 1,379,734 | 50/50 |
 | outputs, silent | 0.70 | 114,169 / 1,434,777 | 10/10 |
 | outputs, silent | 1.00 | 163,098 / 1,483,706 | 10/10 |
-| inputs, 2 Hz Poisson | 0.10 | 17,009 / 512,715 | 0/10 |
+| inputs, 2 Hz Poisson | 0.10 | 17,009 / 795,764 | 0/10 |
 | inputs, 2 Hz Poisson | 0.30 | 51,026 / 1,095,744 | 0/10 |
 | inputs, 2 Hz Poisson | 0.60 | 102,051 / 1,236,955 | 4/10 |
 | inputs, 2 Hz Poisson | 0.70 | 119,059 / 1,257,454 | 8/10 |
@@ -94,23 +96,23 @@ Minimal confirmed rungs: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inp
 | inputs, 2 Hz Poisson | 1.00 | 170,084 / 1,308,479 | 10/10 |
 | inputs, 2 Hz Poisson (confirmation) | 1.00 | 170,084 / 1,308,479 | 50/50 |
 
-Minimal confirmed rungs: outputs/silent **0.40, 1,334,045 synapses, 50/50**; inputs/2 Hz **0.90, 1,291,471 synapses, 50/50**.  VNC's quiet-host placement reduces the needed cut relative to all_w0, but does not eliminate it.  The earlier H1 latch adder was also 0/30 live and 10/10 only after cutting all about 327 k host inputs or, in a silent surround, all about 302 k host outputs.
+Minimal confirmed rungs: outputs/silent **0.40, 1,334,045 synapses, 50/50**; inputs/2 Hz **0.90, 1,291,471 synapses, 50/50**.  VNC's quiet-host placement reduces the needed cut relative to all_w0, but does not eliminate it.  The earlier H1 latch adder was also 0/30 live and 10/10 only after cutting all about 327 k host input edges or, in a silent surround, all about 302 k host output edges (docs/h1_placement.md).
 
 ## What blocks it
 
 1. **Wiring fit.**  The best F coverage is 809/1,516 pairs (53.4%) and condition B is 0/50 for every grid point.  So anatomy alone has not supplied a functioning adder image.
 2. **Parts supply.**  F demands 140 inhibitory latch autapses at -724 quanta and eight one-shot self-edges at -15,932.  The autapse census finds 101 anatomical self-edges, and zero full-rule-carriable latch or one-shot demands.  Under Dale's law, all relevant designed sources vote excitatory while their self-edge is inhibitory, so no real neuron can carry either demanded self-edge under the full rule.
-3. **Live surround.**  With condition A complete, all live placements still score 0/50; suppressing their boundary is what restores 50/50.  In the silent case the circuit's output wakes the surround; under 2 Hz sensory drive, the surround's inputs flood the hosts.
+3. **Live surround.**  With condition A complete, all live placements still score 0/50; suppressing their boundary is what restores 50/50.  Output cuts were measured only with a silent surround and input cuts only under 2 Hz Poisson drive, so attributing the failure to the circuit's own output waking the brain (silent) versus sensory drive flooding the inputs (2 Hz) also relies on H1's cross-condition control, where outputs zeroed under 2 Hz yielded 0/10 (docs/h1_placement.md).
 
 On the present evidence, the live surround decides the whole-brain outcome: the same complete image computes in the sealed 3/3 control and only becomes reliable at the measured boundary thresholds.  Wiring fit and the unavailable F autapses independently rule out an unmodified Profile-2 realization, but they do not explain the transition within the already-complete image.
 
 ## Limits
 
-This is one placement seed.  Ladder rungs use 10 additions, with only the minimal rungs confirmed at 50 (and extra non-minimal VNC confirmations reported above).  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
+This is one placement seed.  Ladder rungs use 10 additions, with only the minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); all_w0 input 0.95 reached 10/10 but was not confirmed at 50, so unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
 
 ## Reproduce
 
-All full-graph runs used `e8f5f3b`.  The placement command (substitute the region, weight, and output names for each grid point) was:
+The Slurm logs record commits `e8f5f3b` and `6f9a702`; they differ only in `stall_diag.py`, `fault_diag.py`, and `test_stall_diag.py`, which whole-brain runs do not import, so the simulated code is identical.  The placement command (substitute the region, weight, and output names for each grid point) was:
 
 ```sh
 python -m drosophilos.bench.h_stage_place --region vnc --isolation-weight 2 \

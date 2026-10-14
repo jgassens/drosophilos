@@ -388,7 +388,7 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
                         cut_inputs_frac: float = 0.0) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
-    `base` must be the anatomical topology from `MCNS.topology` (quanta = sign * synapse count * QUANTA_PER_SYNAPSE), because the cut fractions recover synapse counts from it.
+
       carried    each carried designed synapse rescales its hosts' anatomical edge to the designed
                  quanta (two designed synapses on one pair sum onto the one edge) at the designed delay;
       parasitic  zeroed when the image zeroes them (kept otherwise: they are the anatomy);
@@ -403,6 +403,8 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
       cut_outputs_frac / cut_inputs_frac  zero just the strongest fraction of those respective
                  anatomical boundary edges.  Ties use (post, pre) order so a cut ladder is
                  reproducible; a non-zero fraction cuts at least one edge.
+    `base` must be the anatomical topology from `MCNS.topology` (quanta = sign * synapse count * QUANTA_PER_SYNAPSE), because the cut fractions recover synapse counts from it.
+
     Returns the topology, the index map designed -> full-graph, and the counts of each edit."""
     for name, fraction in (("cut_outputs_frac", cut_outputs_frac), ("cut_inputs_frac", cut_inputs_frac)):
         if not np.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
