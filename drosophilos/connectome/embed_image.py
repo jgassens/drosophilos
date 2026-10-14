@@ -43,6 +43,8 @@ import dataclasses
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from fractions import Fraction
+import math
 from pathlib import Path
 
 import numpy as np
@@ -297,6 +299,28 @@ def image_manifest(net: Netlist, m: MCNS, img: Image, policy: Policy, params: Pa
 # ----------------------------------------------------------------------------------------
 # saving / loading a mapping
 # ----------------------------------------------------------------------------------------
+MAPPING_META_KEYS = (
+    "builder", "width", "ordered", "watchdog_hops", "storage", "rate_robust",
+    "experimental_autapse", "ordered_xor_oneshot", "k_max", "isolation_weight",
+    "region", "restarts", "seed",
+)
+
+
+def _mapping_json(path: str) -> dict:
+    """Read a saved mapping."""
+    return json.loads(Path(path).read_text())
+
+
+def load_mapping_meta(path: Path) -> dict:
+    """The recognized, top-level build/placement metadata in a saved mapping.
+
+    Old mapping files did not have the Stage-H contract and simply return whichever of these
+    keys they happen to contain (notably the old flip-flop mapping's ``storage``).
+    """
+    d = _mapping_json(str(Path(path)))
+    return {key: d[key] for key in MAPPING_META_KEYS if key in d}
+
+
 def save_mapping(path: Path, net: Netlist, m: MCNS, pl: Placement, meta: dict | None = None) -> None:
     bodies = m.neurons["bodyId"].to_numpy()
     out = {**(meta or {}), "summary": pl.summary(net), "strategy": pl.strategy, "order_note": pl.order_note,
@@ -309,7 +333,17 @@ def save_mapping(path: Path, net: Netlist, m: MCNS, pl: Placement, meta: dict | 
 def load_mapping(path: Path, net: Netlist, m: MCNS) -> Placement:
     """A Placement rebuilt from a saved mapping (roles -> bodyIds); `carried` and `missing` are
     taken from the file, `build_image` re-derives both from the data."""
-    d = json.loads(Path(path).read_text())
+    d = _mapping_json(str(Path(path)))
+    saved_mapping_roles = set(d["mapping"])
+    saved_unplaced_roles = set(d.get("unplaced", []))
+    saved_roles = saved_mapping_roles | saved_unplaced_roles
+    net_roles = set(net.roles)
+    if saved_roles != net_roles:
+        raise ValueError(
+            "mapping roles do not match rebuilt netlist: "
+            f"{len(saved_mapping_roles)} mapped + {len(saved_unplaced_roles)} unplaced "
+            f"({len(saved_roles)} unique saved) vs {len(net_roles)} netlist roles"
+        )
     roles = {r: i for i, r in enumerate(net.roles)}
     mapping = {roles[role]: int(m.index_of(np.array([v["bodyId"]]))[0]) for role, v in d["mapping"].items()}
     missing = [(roles[e["src"]], roles[e["dst"]], int(e["quanta"]), e["reason"]) for e in d.get("missing", [])]
@@ -350,7 +384,8 @@ def _locate(base: Topology, pre: int, post: int) -> range:
 
 
 def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: bool = False, zero_inputs: bool = False,
-                        base: Topology | None = None) -> FullGraph:
+                        base: Topology | None = None, cut_outputs_frac: float = 0.0,
+                        cut_inputs_frac: float = 0.0) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
       carried    each carried designed synapse rescales its hosts' anatomical edge to the designed
@@ -364,7 +399,17 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
                  outputs-zeroed condition: the circuit cannot disturb the brain);
       zero_inputs    also zero every edge from outside the circuit into a host (the isolated case
                  embedded: the brain cannot disturb the circuit; a control).
+      cut_outputs_frac / cut_inputs_frac  zero just the strongest fraction of those respective
+                 anatomical boundary edges.  Ties use (post, pre) order so a cut ladder is
+                 reproducible; a non-zero fraction cuts at least one edge.
     Returns the topology, the index map designed -> full-graph, and the counts of each edit."""
+    for name, fraction in (("cut_outputs_frac", cut_outputs_frac), ("cut_inputs_frac", cut_inputs_frac)):
+        if not np.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+            raise ValueError(f"{name} must be a finite float in [0, 1], got {fraction!r}")
+    if zero_outputs and cut_outputs_frac:
+        raise ValueError("zero_outputs and cut_outputs_frac cannot be combined")
+    if zero_inputs and cut_inputs_frac:
+        raise ValueError("zero_inputs and cut_inputs_frac cannot be combined")
     base = base if base is not None else m.topology(params)
     if base.n != m.n:
         raise ValueError("base topology is not the connectome's")
@@ -404,17 +449,34 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
     hosts = index_map[image.real >= 0]
     in_circuit = np.zeros(n_full, bool)
     in_circuit[index_map] = True
-    n_out = n_in = 0
-    if zero_outputs:
-        for x in hosts.tolist():
-            lo, hi = int(base.indptr[x]), int(base.indptr[x + 1])
-            outside = ~in_circuit[base.dst[lo:hi]]
-            n_out += int(outside.sum())
-            quanta[lo:hi][outside] = 0
-    if zero_inputs:
-        sel = in_circuit[base.dst] & ~in_circuit[base.src]
-        n_in = int(sel.sum())
-        quanta[sel] = 0
+    output_sel = np.isin(base.src, hosts) & ~in_circuit[base.dst]
+    input_sel = in_circuit[base.dst] & ~in_circuit[base.src]
+
+    def cut_boundary(sel: np.ndarray, fraction: float, zero: bool) -> dict:
+        """Zero all or a strongest deterministic prefix of one anatomical boundary."""
+        edges = np.flatnonzero(sel)
+        # MCNS.topology sets quanta to sign * count * QUANTA_PER_SYNAPSE.  `base` is never
+        # edited, so this recovers anatomical counts without a per-edge Python lookup.
+        counts = np.abs(base.quanta[edges]).astype(np.int64) // QUANTA_PER_SYNAPSE
+        n_cut = len(edges) if zero else math.ceil(Fraction(str(fraction)) * len(edges))
+        if n_cut:
+            # np.lexsort's final key is primary: stronger first, then post and pre ascending.
+            rank_order = np.lexsort((base.src[edges], base.dst[edges], -counts))
+            cut = edges[rank_order[:n_cut]]
+            cut_counts = counts[rank_order[:n_cut]]
+            quanta[cut] = 0
+            cut_synapses = int(cut_counts.sum())
+            weakest = int(cut_counts.min())
+        else:
+            cut_synapses, weakest = 0, None
+        total_synapses = int(counts.sum())
+        return {"edges": int(len(edges)), "synapses": total_synapses,
+                "cut_edges": int(n_cut), "cut_synapses": cut_synapses,
+                "remaining_edges": int(len(edges) - n_cut), "remaining_synapses": total_synapses - cut_synapses,
+                "weakest_cut_synapses": weakest}
+
+    outputs = cut_boundary(output_sel, float(cut_outputs_frac), bool(zero_outputs))
+    inputs = cut_boundary(input_sel, float(cut_inputs_frac), bool(zero_inputs))
 
     src = base.src
     dst = base.dst
@@ -439,8 +501,19 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
     topo = Topology.from_edges(n_full, src, dst, quanta.astype(np.int32), delay, bias=bias)
     counts = {"n": n_full, "n_real": int(m.n), "synthetic_neurons": n_syn, "topology_edges": topo.nnz,
               "carried_synapses": len(image.carried_syn), "carried_edges_rescaled": len(per_edge), "delay_edits": int(n_delay_edits),
-              "profile3_added": len(image.profile3), "parasitic_zeroed": n_par, "outputs_zeroed": n_out, "inputs_zeroed": n_in,
+              "profile3_added": len(image.profile3), "parasitic_zeroed": n_par,
+              # The legacy names are retained, but now mean all boundary edges actually cut.
+              "outputs_zeroed": outputs["cut_edges"], "inputs_zeroed": inputs["cut_edges"],
               "zero_outputs": bool(zero_outputs), "zero_inputs": bool(zero_inputs),
+              "cut_outputs_frac": float(cut_outputs_frac), "cut_inputs_frac": float(cut_inputs_frac),
+              "outputs_edges": outputs["edges"], "outputs_synapses": outputs["synapses"],
+              "outputs_cut_edges": outputs["cut_edges"], "outputs_cut_synapses": outputs["cut_synapses"],
+              "outputs_remaining_edges": outputs["remaining_edges"], "outputs_remaining_synapses": outputs["remaining_synapses"],
+              "outputs_weakest_cut_synapses": outputs["weakest_cut_synapses"],
+              "inputs_edges": inputs["edges"], "inputs_synapses": inputs["synapses"],
+              "inputs_cut_edges": inputs["cut_edges"], "inputs_cut_synapses": inputs["cut_synapses"],
+              "inputs_remaining_edges": inputs["remaining_edges"], "inputs_remaining_synapses": inputs["remaining_synapses"],
+              "inputs_weakest_cut_synapses": inputs["weakest_cut_synapses"],
               "biases": n_bias, "biases_synthetic": n_bias_syn,
               "nonzero_edges": int((topo.quanta != 0).sum())}
     return FullGraph(topo, index_map, int(m.n), counts)

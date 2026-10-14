@@ -315,6 +315,109 @@ def test_full_graph_topology_embeds_the_image_and_the_index_map_round_trips():
     assert full3[(m.n, pl.mapping[ids["edge"]])] == net.quanta[net.src.index(ids["edge_inh"])]
 
 
+def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed_edges_alone():
+    """The cut ladder works entirely on a small synthetic MCNS graph, including its tie rule."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.connectome.mcns import MCNS
+
+    net, _, ids, policy, m, _, pl = _placed_latch_relay()
+    hosts = set(pl.mapping.values())
+    outside = [i for i in range(m.n) if i not in hosts]
+    pairs = set(zip(m.pre.tolist(), m.post.tolist()))
+
+    def available(pre, post_candidates):
+        found = []
+        for post in post_candidates:
+            if (pre, post) not in pairs:
+                found.append((pre, post))
+                pairs.add((pre, post))
+        return found
+
+    # These large tied groups dominate the random weak edges.  Each is bigger than half of
+    # its boundary, so f=.5 cuts a deterministic *prefix* of equal-count edges by (post, pre).
+    out_pairs = available(pl.mapping[ids["src"]], outside)
+    in_pairs = [(pre, pl.mapping[ids["u"]]) for pre in outside if (pre, pl.mapping[ids["u"]]) not in pairs]
+    pairs.update(in_pairs)
+    assert out_pairs and in_pairs
+    extra_pairs = out_pairs + in_pairs
+    extra_counts = [100_000] * len(out_pairs) + [90_000] * len(in_pairs)
+    m2 = MCNS(m.neurons, np.append(m.pre, [a for a, _ in extra_pairs]).astype(np.int32),
+              np.append(m.post, [b for _, b in extra_pairs]).astype(np.int32),
+              np.append(m.count, extra_counts).astype(np.int32), min_syn=1)
+    img = build_image(net, m2, pl, policy)
+    params, base = Params(), m2.topology(Params())
+    plain = full_graph_topology(m2, params, img, base=base)
+    zero_o = full_graph_topology(m2, params, img, zero_outputs=True, base=base)
+    zero_i = full_graph_topology(m2, params, img, zero_inputs=True, base=base)
+    cut0 = full_graph_topology(m2, params, img, cut_outputs_frac=0, cut_inputs_frac=0, base=base)
+    cut_o = full_graph_topology(m2, params, img, cut_outputs_frac=.5, base=base)
+    cut_i = full_graph_topology(m2, params, img, cut_inputs_frac=.5, base=base)
+    cut1_o = full_graph_topology(m2, params, img, cut_outputs_frac=1, base=base)
+    cut1_i = full_graph_topology(m2, params, img, cut_inputs_frac=1, base=base)
+
+    assert np.array_equal(cut0.topology.quanta, plain.topology.quanta)  # f=0 is today
+    assert np.array_equal(cut1_o.topology.quanta, zero_o.topology.quanta)  # f=1 is zero_outputs
+    assert np.array_equal(cut1_i.topology.quanta, zero_i.topology.quanta)  # f=1 is zero_inputs
+
+    anatomy = {(int(a), int(b)): int(c) for a, b, c in zip(m2.pre, m2.post, m2.count)}
+
+    def expected(direction):
+        if direction == "out":
+            edges = [j for j, (a, b) in enumerate(zip(base.src, base.dst)) if a in hosts and b not in hosts]
+        else:
+            edges = [j for j, (a, b) in enumerate(zip(base.src, base.dst)) if a not in hosts and b in hosts]
+        ranked = sorted(edges, key=lambda j: (-anatomy[int(base.src[j]), int(base.dst[j])], int(base.dst[j]), int(base.src[j])))
+        return ranked, ranked[: (len(ranked) + 1) // 2]
+
+    for direction, cut in (("out", cut_o), ("in", cut_i)):
+        boundary, expected_cut = expected(direction)
+        actual_cut = [j for j in boundary if cut.topology.quanta[j] == 0 and plain.topology.quanta[j] != 0]
+        assert set(actual_cut) == set(expected_cut)
+        prefix = "outputs" if direction == "out" else "inputs"
+        assert cut.counts[f"{prefix}_cut_edges"] == len(expected_cut)
+        assert cut.counts[f"{prefix}_cut_synapses"] == sum(anatomy[int(base.src[j]), int(base.dst[j])] for j in expected_cut)
+        assert cut.counts[f"{prefix}_remaining_edges"] == len(boundary) - len(expected_cut)
+        assert cut.counts[f"{prefix}_remaining_synapses"] == sum(
+            anatomy[int(base.src[j]), int(base.dst[j])] for j in boundary if j not in expected_cut)
+        assert cut.counts[f"{prefix}_weakest_cut_synapses"] == min(anatomy[int(base.src[j]), int(base.dst[j])] for j in expected_cut)
+        tied = out_pairs if direction == "out" else in_pairs
+        assert 0 < sum((int(base.src[j]), int(base.dst[j])) in tied for j in expected_cut) < len(tied)
+
+    # Designed host-to-host image edges are outside both boundary selections.
+    for s, d, q in zip(net.src, net.dst, net.quanta):
+        pair = (pl.mapping[s], pl.mapping[d])
+        j = np.flatnonzero((base.src == pair[0]) & (base.dst == pair[1]))
+        assert len(j) == 1
+        assert cut_o.topology.quanta[j[0]] == cut_i.topology.quanta[j[0]] == plain.topology.quanta[j[0]] == q
+    with pytest.raises(ValueError, match="cannot be combined"):
+        full_graph_topology(m2, params, img, zero_outputs=True, cut_outputs_frac=.5, base=base)
+    with pytest.raises(ValueError, match="must be a finite float"):
+        full_graph_topology(m2, params, img, cut_inputs_frac=1.1, base=base)
+
+
+def test_full_graph_cut_uses_exact_decimal_ceil():
+    """0.07 of exactly 100 boundary edges cuts seven, not eight from float roundoff."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.connectome.mcns import MCNS
+
+    net, drive, ids = latch_relay_netlist()
+    policy = Policy()
+    m, idx = synthetic_mcns(policy, drive, n_distractors=101, n_weak=0)
+    pl = Placement({ids["src"]: idx["S"], ids["edge"]: idx["E"], ids["edge_inh"]: idx["I"],
+                    ids["u"]: idx["U"], ids["v"]: idx["V"]}, [], 0, [], 0, 0.0)
+    outside = np.array([i for i in range(m.n) if i not in pl.mapping.values()][:100], np.int32)
+    assert len(outside) == 100
+    pre = np.append(m.pre, np.full(100, idx["S"], np.int32))
+    post = np.append(m.post, outside)
+    count = np.append(m.count, np.ones(100, np.int32))
+    order = np.lexsort((post, pre))
+    m2 = MCNS(m.neurons, pre[order], post[order], count[order], min_syn=1)
+    img = build_image(net, m2, pl, policy)
+    fg = full_graph_topology(m2, Params(), img, cut_outputs_frac=.07)
+    assert fg.counts["outputs_edges"] == 100
+    assert fg.counts["outputs_cut_edges"] == 7
+
+
 def test_latch_ignites_and_holds_inside_the_synthetic_full_graph():
     """The planted latch + relay inside the synthetic connectome with the decoy neurons active: it
     ignites and holds when the parasitic edges are zeroed (the anatomy's weak stray edges into the
