@@ -377,6 +377,8 @@ def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed
         assert cut.counts[f"{prefix}_cut_edges"] == len(expected_cut)
         assert cut.counts[f"{prefix}_cut_synapses"] == sum(anatomy[int(base.src[j]), int(base.dst[j])] for j in expected_cut)
         assert cut.counts[f"{prefix}_remaining_edges"] == len(boundary) - len(expected_cut)
+        assert cut.counts[f"{prefix}_remaining_synapses"] == sum(
+            anatomy[int(base.src[j]), int(base.dst[j])] for j in boundary if j not in expected_cut)
         assert cut.counts[f"{prefix}_weakest_cut_synapses"] == min(anatomy[int(base.src[j]), int(base.dst[j])] for j in expected_cut)
         tied = out_pairs if direction == "out" else in_pairs
         assert 0 < sum((int(base.src[j]), int(base.dst[j])) in tied for j in expected_cut) < len(tied)
@@ -391,6 +393,29 @@ def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed
         full_graph_topology(m2, params, img, zero_outputs=True, cut_outputs_frac=.5, base=base)
     with pytest.raises(ValueError, match="must be a finite float"):
         full_graph_topology(m2, params, img, cut_inputs_frac=1.1, base=base)
+
+
+def test_full_graph_cut_uses_exact_decimal_ceil():
+    """0.07 of exactly 100 boundary edges cuts seven, not eight from float roundoff."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.connectome.mcns import MCNS
+
+    net, drive, ids = latch_relay_netlist()
+    policy = Policy()
+    m, idx = synthetic_mcns(policy, drive, n_distractors=101, n_weak=0)
+    pl = Placement({ids["src"]: idx["S"], ids["edge"]: idx["E"], ids["edge_inh"]: idx["I"],
+                    ids["u"]: idx["U"], ids["v"]: idx["V"]}, [], 0, [], 0, 0.0)
+    outside = np.array([i for i in range(m.n) if i not in pl.mapping.values()][:100], np.int32)
+    assert len(outside) == 100
+    pre = np.append(m.pre, np.full(100, idx["S"], np.int32))
+    post = np.append(m.post, outside)
+    count = np.append(m.count, np.ones(100, np.int32))
+    order = np.lexsort((post, pre))
+    m2 = MCNS(m.neurons, pre[order], post[order], count[order], min_syn=1)
+    img = build_image(net, m2, pl, policy)
+    fg = full_graph_topology(m2, Params(), img, cut_outputs_frac=.07)
+    assert fg.counts["outputs_edges"] == 100
+    assert fg.counts["outputs_cut_edges"] == 7
 
 
 def test_latch_ignites_and_holds_inside_the_synthetic_full_graph():

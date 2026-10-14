@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -41,3 +42,22 @@ def test_stage_h_mapping_meta_rebuilds_configuration_f_and_legacy_is_latch(tmp_p
         adder_build_kwargs(loaded, storage_override="latch")
     with pytest.raises(ValueError, match="disagrees"):
         adder_build_kwargs(loaded, width_override=3)
+
+
+def test_saved_docs_mappings_rebuild_their_exact_role_sets():
+    """Legacy mappings still identify every role after their builder is reconstructed."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for name in ("h1_placement_mapping.json", "h1_placement_mapping_isolated.json", "h1_ffadder_mapping.json"):
+        path = docs / name
+        saved = json.loads(path.read_text())
+        options = adder_build_kwargs(load_mapping_meta(path))
+        channel = build_adder_channel(Params(), **options)
+        assert set(channel.net.roles) == set(saved["mapping"]) | set(saved["unplaced"])
+
+
+def test_mapping_metadata_reader_observes_a_rewritten_path(tmp_path):
+    path = tmp_path / "mapping.json"
+    path.write_text(json.dumps({"storage": "latch"}))
+    assert load_mapping_meta(path) == {"storage": "latch"}
+    path.write_text(json.dumps({"storage": "flipflop"}))
+    assert load_mapping_meta(path) == {"storage": "flipflop"}

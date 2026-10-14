@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from functools import lru_cache
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from fractions import Fraction
+import math
 from pathlib import Path
 
 import numpy as np
@@ -305,9 +306,8 @@ MAPPING_META_KEYS = (
 )
 
 
-@lru_cache(maxsize=32)
 def _mapping_json(path: str) -> dict:
-    """Read a saved mapping once when its placement and metadata are both needed."""
+    """Read a saved mapping."""
     return json.loads(Path(path).read_text())
 
 
@@ -334,6 +334,16 @@ def load_mapping(path: Path, net: Netlist, m: MCNS) -> Placement:
     """A Placement rebuilt from a saved mapping (roles -> bodyIds); `carried` and `missing` are
     taken from the file, `build_image` re-derives both from the data."""
     d = _mapping_json(str(Path(path)))
+    saved_mapping_roles = set(d["mapping"])
+    saved_unplaced_roles = set(d.get("unplaced", []))
+    saved_roles = saved_mapping_roles | saved_unplaced_roles
+    net_roles = set(net.roles)
+    if saved_roles != net_roles:
+        raise ValueError(
+            "mapping roles do not match rebuilt netlist: "
+            f"{len(saved_mapping_roles)} mapped + {len(saved_unplaced_roles)} unplaced "
+            f"({len(saved_roles)} unique saved) vs {len(net_roles)} netlist roles"
+        )
     roles = {r: i for i, r in enumerate(net.roles)}
     mapping = {roles[role]: int(m.index_of(np.array([v["bodyId"]]))[0]) for role, v in d["mapping"].items()}
     missing = [(roles[e["src"]], roles[e["dst"]], int(e["quanta"]), e["reason"]) for e in d.get("missing", [])]
@@ -439,27 +449,24 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
     hosts = index_map[image.real >= 0]
     in_circuit = np.zeros(n_full, bool)
     in_circuit[index_map] = True
-    # `base` is anatomical here.  Take counts from MCNS instead of the possibly rescaled
-    # quanta so this is explicitly a strongest-*synapse-count* cut.  The fallback keeps the
-    # helper useful with a caller-provided synthetic base topology.
-    anatomical = {(int(pre), int(post)): int(count) for pre, post, count in zip(m.pre, m.post, m.count)}
-    synapses = np.fromiter((anatomical.get((int(pre), int(post)), abs(int(q)) // QUANTA_PER_SYNAPSE)
-                            for pre, post, q in zip(base.src, base.dst, base.quanta)), np.int64, count=base.nnz)
     output_sel = np.isin(base.src, hosts) & ~in_circuit[base.dst]
     input_sel = in_circuit[base.dst] & ~in_circuit[base.src]
 
     def cut_boundary(sel: np.ndarray, fraction: float, zero: bool) -> dict:
         """Zero all or a strongest deterministic prefix of one anatomical boundary."""
         edges = np.flatnonzero(sel)
-        counts = synapses[edges]
-        n_cut = len(edges) if zero else int(np.ceil(fraction * len(edges)))
+        # MCNS.topology sets quanta to sign * count * QUANTA_PER_SYNAPSE.  `base` is never
+        # edited, so this recovers anatomical counts without a per-edge Python lookup.
+        counts = np.abs(base.quanta[edges]).astype(np.int64) // QUANTA_PER_SYNAPSE
+        n_cut = len(edges) if zero else math.ceil(Fraction(str(fraction)) * len(edges))
         if n_cut:
             # np.lexsort's final key is primary: stronger first, then post and pre ascending.
-            ranked = edges[np.lexsort((base.src[edges], base.dst[edges], -counts))]
-            cut = ranked[:n_cut]
+            rank_order = np.lexsort((base.src[edges], base.dst[edges], -counts))
+            cut = edges[rank_order[:n_cut]]
+            cut_counts = counts[rank_order[:n_cut]]
             quanta[cut] = 0
-            cut_synapses = int(synapses[cut].sum())
-            weakest = int(synapses[cut].min())
+            cut_synapses = int(cut_counts.sum())
+            weakest = int(cut_counts.min())
         else:
             cut_synapses, weakest = 0, None
         total_synapses = int(counts.sum())
