@@ -26,6 +26,80 @@ def perspective_f16():
     return block("perspective", PARAMS, **F16)[:2]
 
 
+@pytest.mark.parametrize("partner_captured", [False, True])
+def test_completion_view_distinguishes_one_spike_from_storage_and_missing_capture(
+        perspective_f16, tmp_path, partner_captured):
+    from drosophilos.bench.stall_diag import completion_view, load_dump, write_compact_dump
+
+    _ks, pl = perspective_f16
+    cell = next(c for c in pl.cells if c.name == "c4_mulp.r4")
+    u, v = cell.master.rails[40][1].members
+    # Compact evidence around the actual failing packed B5 write, without depending
+    # on the external 797-MB artifact. Include a later event to test exclusive stop.
+    neurons = [cell.master.reset_inh, cell.commit_pulse, u, u]
+    path = tmp_path / "completion.npz"
+    capture = set(neurons + ([v] if partner_captured else []))
+    write_compact_dump(path, [100, 110, 200, 300], neurons, pl.net.roles,
+                       capture_ids=sorted(capture), window={"start_step": 0, "end_step": 400})
+    dump = load_dump(path, pl.net.roles)
+    view = completion_view(pl, dump, cell.name, 110, stop=300)
+    assert view["signals"][u]["count"] == 1
+    assert view["signals"][u]["sample_steps"] == [200]
+    assert view["signals"][u]["median_isi"] is None
+    assert view["signals"][v]["count"] == 0
+    assert view["signals"][v]["available"] == partner_captured
+    assert (v in view["unavailable_ids"]) != partner_captured
+    assert view["signals"][cell.commit_pulse]["first_step"] == 110
+    assert view["signals"][cell.master.reset_inh]["count_before_start"] == 1
+    assert view["reset_emissions"] == []
+    assert view["bits"][40]["label"] == "B5"
+    assert view["bits"][40]["master_rails"][1] == [u, v]
+    assert {"target": v, "quanta": -2716, "delay_steps": 18} in view["reset_edges"]
+    with pytest.raises(ValueError, match="inside the capture"):
+        completion_view(pl, dump, cell.name, 401)
+
+
+def test_arrival_alignment_preserves_same_step_and_no_spike_evidence():
+    from drosophilos.bench.stall_diag import arrival_alignment
+
+    assert arrival_alignment([10, 20, 30], 18, [28, 35]) == [
+        dict(emission_step=10, arrival_step=28, last_spike_step=28, age_steps=0, next_spike_step=35),
+        dict(emission_step=20, arrival_step=38, last_spike_step=35, age_steps=3, next_spike_step=None),
+        dict(emission_step=30, arrival_step=48, last_spike_step=35, age_steps=13, next_spike_step=None),
+    ]
+    assert arrival_alignment([111439], 18, [112208])[0] == dict(
+        emission_step=111439, arrival_step=111457, last_spike_step=None,
+        age_steps=None, next_spike_step=112208)
+    assert arrival_alignment([1], 0, [])[0]["next_spike_step"] is None
+    with pytest.raises(ValueError):
+        arrival_alignment([20, 10], 18, [])
+
+
+@pytest.mark.parametrize("with_reset", [False, True])
+def test_copy75_partner_handoff_at_reconstructed_draws(with_reset):
+    """Prescribe the captured u spike/reset inputs to v alone: no GPU stray replay.
+
+    Static draws: default_rng(110), B=100, topology 123323/249940, copy 75.
+    This isolates residual reset inhibition from COPY, fan-out and autapse effects:
+    v has never fired, so its own autapse cannot cause the first missing spike.
+    """
+    from drosophilos.sim.model import Topology
+    from drosophilos.sim.ref64 import RefSim
+
+    sim = RefSim(Topology.empty(1), PARAMS, V_th=[-44.42221141037541],
+                 bias=[-0.7152384644970224], record=[(0, 0)])
+    sim.V[:] = PARAMS.E_L - 0.7152384644970224  # long-empty master at resting equilibrium
+    if with_reset:
+        sim.add_events(0, [249, 293, 337, 384, 457], [0] * 5, [-2707] * 5)
+    sim.add_events(0, [1226], [0], [3281])  # observed u @112208, loop delay +18; origin 111000
+    sim.run(1800)
+    assert sim.trace.events["step"].tolist() == ([] if with_reset else [1287])
+    if with_reset:
+        voltage, _g = sim.recorded()
+        assert int(np.argmax(voltage)) == 1322
+        assert float(voltage.max()) == pytest.approx(-44.46283430294871, abs=1e-9)
+
+
 def test_perspective_f16_record_rebuilds_the_juno_topology(perspective_f16):
     ks, pl = perspective_f16
     assert (pl.net.n, pl.net.nnz) == (123_323, 249_940)
