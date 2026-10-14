@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
-from drosophilos.bench.h1_fullgraph import adder_build_kwargs
-from drosophilos.connectome.embed_image import load_mapping_meta
+from drosophilos.bench.h1_fullgraph import adder_build_kwargs, make_sims
+from drosophilos.connectome.embed_h0 import Policy
+from drosophilos.connectome.embed_image import all_missing, build_image, full_graph_topology, load_mapping_meta, run_words
+from drosophilos.connectome.embed_netlist import Placement
+from drosophilos.connectome.mcns import MCNS
 from drosophilos.lib.adder import build_adder_channel
+from drosophilos.protocol.handshake import build_channel
 from drosophilos.sim.model import Params
 
 
@@ -61,3 +67,41 @@ def test_mapping_metadata_reader_observes_a_rewritten_path(tmp_path):
     assert load_mapping_meta(path) == {"storage": "latch"}
     path.write_text(json.dumps({"storage": "flipflop"}))
     assert load_mapping_meta(path) == {"storage": "flipflop"}
+
+
+def test_h1_simulators_power_on_a_flipflop_channel_on_a_cut_synthetic_connectome():
+    """The paired H1 setup matches its isolated reference after both graph boundaries are cut."""
+    params = Params()
+    ch = build_channel(params, 2, storage="flipflop", watchdog_hops=40)
+    assert ch.power_on_events(0)  # This regression is meaningful only for the flip-flop store.
+    n = ch.net.n
+    # One host for each designed neuron, plus a brain-only neuron with edges across both sides of
+    # the boundary.  The image supplies every designed edge as Profile 3.
+    neurons = pd.DataFrame({"bodyId": 10_000 + np.arange(n + 1), "type": "synthetic",
+                            "superclass": "central", "class": None, "somaSide": "R",
+                            "nt": "acetylcholine", "nt_conf": .9, "sign": np.ones(n + 1, np.int8)})
+    brain = n
+    m = MCNS(neurons, np.array([0, brain], np.int32), np.array([brain, 0], np.int32),
+             np.array([1, 1], np.int32), min_syn=1)
+    placement = Placement(dict(enumerate(range(n))), [], 0, [], 0, 0)
+    image = build_image(ch.net, m, placement, Policy(), profile3=all_missing)
+    full = full_graph_topology(m, params, image, zero_inputs=True, zero_outputs=True)
+    assert full.counts["inputs_cut_edges"] and full.counts["outputs_cut_edges"]
+
+    # Fresh H1 mode: the factory is called once for each word.
+    for word in (1, 2):
+        iso, whole = make_sims(ch, image.topology, full.topology, full.index_map, params)
+        ri, _, _ = run_words(ch, iso, [word], [word], params, 8000)
+        rf, _, _ = run_words(ch, whole, [word], [word], params, 8000)
+        assert (rf[0].status, rf[0].decoded) == ("valid", word)
+        assert whole.trace == iso.trace
+        assert (ri[0].status, ri[0].decoded) == (rf[0].status, rf[0].decoded)
+
+    # Chained H1 mode: the same pair is retained for all words, so its pulse must be injected
+    # once at creation rather than once per transaction.
+    iso, whole = make_sims(ch, image.topology, full.topology, full.index_map, params)
+    ri, _, _ = run_words(ch, iso, [1, 2], [1, 2], params, 8000)
+    rf, _, _ = run_words(ch, whole, [1, 2], [1, 2], params, 8000)
+    assert [(r.status, r.decoded) for r in rf] == [("valid", 1), ("valid", 2)]
+    assert whole.trace == iso.trace
+    assert [(r.status, r.decoded) for r in ri] == [(r.status, r.decoded) for r in rf]
