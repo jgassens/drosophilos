@@ -22,8 +22,10 @@ from .netlist import Drive, Netlist
 ORDERED_XOR_ONESHOT_VERSION = 1
 # Wide F arrays omit the zero-addend prefix of each row. Independent of sum v1.
 ORDERED_XOR_ONESHOT_MUL_VERSION = 1
-# Experimental extension: consume the delayed operand at each ordered FA's x XOR.
-OPERAND_XOR_ONESHOT_VERSION = 1
+# v1 delayed x alone, exposing unprotected carry relays. v2 shares the
+# transaction pulses across operand XOR, generate/kill and carry propagation,
+# with 1.5-loop clears for operand output/spent storage.
+OPERAND_XOR_ONESHOT_VERSION = 2
 
 
 def validate_operand_xor_record(record: dict) -> None:
@@ -83,6 +85,30 @@ class Gates:
         self.ordered_xor_oneshot_mul_version = ordered_xor_oneshot_mul_version
         self.latches: list[Latch] = []
         self.gates: list[int] = []
+        self._transaction_inputs: dict[str, Rail2] = {}
+        self._operand_reset_members: set[int] = set()
+
+    def finalize_operand_reset(self, inhibitor: int) -> None:
+        """Give operand output/consumption storage 1.5-loop clear pulses.
+
+        Call after its ordinary reset fan-out is installed. V1's output latch
+        can survive a noisy controller's three emitted pulses at 0.75 loop.
+        Source/hold inhibitors must keep draining; they are not reset targets.
+        """
+        if not self.operand_xor_oneshot:
+            return
+        for member in self._operand_reset_members:
+            edges = [e for e in self.net.incoming[member]
+                     if self.net.src[e] == inhibitor and self.net.quanta[e] < 0]
+            if len(edges) != 1:
+                raise ValueError("operand reset requires one ordinary clear edge per member")
+            self.net.quanta[edges[0]] = -round(1.5 * self.drive.loop)
+            for reader, gain in self.net.inhibition_mirrors.get(member, ()):
+                mirrored = [e for e in self.net.incoming[reader]
+                            if self.net.src[e] == inhibitor and self.net.quanta[e] < 0]
+                if len(mirrored) != 1:
+                    raise ValueError("operand reset requires its reader's clear edge")
+                self.net.quanta[mirrored[0]] = round(self.net.quanta[edges[0]] * gain)
 
     def _and(self, name, a, b) -> Latch:
         g, l = add_and_latched(self.net, self.drive, name, [a, b])
@@ -128,7 +154,8 @@ class Gates:
         """Ordered XOR; optionally consume each LATE rail once until stage reset.
 
         The ripple adder opts in separately for sums and operand XORs. Returned
-        spent latches belong to this reset domain; carry generation is unchanged.
+        spent latches belong to this reset domain. The operand-v2 adder shares
+        these pulses with its carry branches through _transaction_inputs.
         """
         if oneshot:
             taps = []
@@ -137,6 +164,7 @@ class Gates:
                 self.latches.append(spent)
                 taps.append(Tap(edge))
             LATE = Rail2(*taps)
+            self._transaction_inputs[name] = LATE
         y1, y0 = self.latch(f"{name}.y1"), self.latch(f"{name}.y0")
         self.veto(f"{name}.y1.a", LATE.r0.u, [EARLY.r0.u], y1)  # E1 and L0
         self.veto(f"{name}.y1.b", LATE.r1.u, [EARLY.r1.u], y1)  # E0 and L1
@@ -179,22 +207,40 @@ class Gates:
         relays (driver delayed carry-in, veto x), sum = x xor carry-in (ordered).
         Returns (sums, carries, x, delayed carry-ins)."""
         n = len(Ad)
+        latch_start = len(self.latches)
         x = [self.xor2_ordered(f"{name}.fa{i}.x", bx[i], Ad[i],
                               oneshot=self.operand_xor_oneshot) for i in range(n)]
+        if self.operand_xor_oneshot:
+            self._operand_reset_members.update(m for latch in self.latches[latch_start:]
+                                               for m in latch.members)
         sums, carries, cds = [], [], []
         for i in range(n):
             c1, c0 = self.latch(f"{name}.fa{i}.c1"), self.latch(f"{name}.fa{i}.c0")
-            self.veto(f"{name}.fa{i}.g", Ad[i].r1.u, [bx[i].r0.u], c1)  # generate: A=1 and bx=1
-            self.veto(f"{name}.fa{i}.k", Ad[i].r0.u, [bx[i].r1.u], c0)  # kill: A=0 and bx=0
+            operand = (self._transaction_inputs[f"{name}.fa{i}.x"]
+                       if self.operand_xor_oneshot else Ad[i])
+            self.veto(f"{name}.fa{i}.g", operand.r1.u, [bx[i].r0.u], c1)  # generate: A=1 and bx=1
+            self.veto(f"{name}.fa{i}.k", operand.r0.u, [bx[i].r1.u], c0)  # kill: A=0 and bx=0
             if i == 0:
-                self.veto(f"{name}.fa0.p1", x[0].r1.u, [Cin.r0.u], c1)  # propagate with cin=1
-                self.veto(f"{name}.fa0.p0", x[0].r1.u, [Cin.r1.u], c0)  # propagate with cin=0
-                s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0], oneshot=self.ordered_xor_oneshot)
+                if self.operand_xor_oneshot:
+                    s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0], oneshot=True)
+                    propagate = self._transaction_inputs[f"{name}.fa0.s"]
+                else:
+                    propagate = x[0]
+                self.veto(f"{name}.fa0.p1", propagate.r1.u, [Cin.r0.u], c1)  # propagate with cin=1
+                self.veto(f"{name}.fa0.p0", propagate.r1.u, [Cin.r1.u], c0)  # propagate with cin=0
+                if not self.operand_xor_oneshot:
+                    s_ = self.xor2_ordered(f"{name}.fa0.s", Cin, x[0], oneshot=self.ordered_xor_oneshot)
             else:
                 cd = self.delayed(f"{name}.fa{i}.cin", carries[-1], carry_hops)
-                self.veto(f"{name}.fa{i}.p1", cd.r1.u, [x[i].r0.u], c1)
-                self.veto(f"{name}.fa{i}.p0", cd.r0.u, [x[i].r0.u], c0)
-                s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd, oneshot=self.ordered_xor_oneshot)
+                if self.operand_xor_oneshot:
+                    s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd, oneshot=True)
+                    propagate = self._transaction_inputs[f"{name}.fa{i}.s"]
+                else:
+                    propagate = cd
+                self.veto(f"{name}.fa{i}.p1", propagate.r1.u, [x[i].r0.u], c1)
+                self.veto(f"{name}.fa{i}.p0", propagate.r0.u, [x[i].r0.u], c0)
+                if not self.operand_xor_oneshot:
+                    s_ = self.xor2_ordered(f"{name}.fa{i}.s", x[i], cd, oneshot=self.ordered_xor_oneshot)
                 cds.append(cd)
             sums.append(s_)
             carries.append(Rail2(c0, c1))

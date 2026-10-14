@@ -304,6 +304,10 @@ the orchestrator.
 
 ## 2026-10-14: experimental operand-XOR transaction one-shot, version 1
 
+**Historical, rejected candidate (427af21).** The local observations in this
+section predate the failed cluster surveys below. V1 is not safe to qualify
+or enable by default; current enabled builds use independently identified v2.
+
 `operand_xor_oneshot=True` / `--operand-xor-oneshot` extends the existing
 transaction-edge circuit to the ordered adder's **`fa*.x` operand XORs**.
 It is independently recorded as `operand_xor_oneshot_version=1`, and defaults
@@ -499,3 +503,219 @@ frozen digest checks pass unchanged. The mandatory suite takes approximately
 builds; the new operand smoke stays under a minute. `git diff --check` passes.
 No cluster survey, full-kernel latency benchmark, GPU campaign or commit was
 performed. Only the nine owned files are changed.
+
+## 2026-10-14: failed v1 cluster surveys and opt-in v2 redesign
+
+**V1 protects the operand XOR but exposes the unprotected carry path, and its
+operand output storage can survive a weak clear.** The named wrong sums do
+not originate in a wrong first operand-XOR edge. V2 shares the transaction
+pulses with carry branches and increases clear strength only for operand-XOR
+output/spent storage. It remains **unqualified and default off**.
+
+### Failed results retained as history
+
+Read-only logs in
+`/Users/jeremiahgassensmith/programming/drosophilos/data/stage_d/opxor_cluster/`:
+
+| Log / v1 scenario | Transactions | Wrong | Double | Missing | Survivors |
+|---|---:|---:|---:|---:|---:|
+| `slurm-457245.out`, `copy85` | 40,000 | 0 | 0 | 0 | **32 latch members** |
+| `slurm-457246.out`, `addsub8-mix-B` | 4,096 | **19** | **19** | 0 | 0 |
+| `slurm-4018656.out`, `addsub4-mix-B` | 1,024 | **4** | **4** | 0 | 0 |
+
+Consumed-edge repetitions are zero. The arithmetic failure counts are wrong
+**bit rails**, not necessarily that many distinct transactions; e.g. the
+four-bit copy 75 has both R3 and carry/no-borrow wrong. The earlier sum-only
+one-shot survey's zero failures in 1,024 four-bit and 4,096 eight-bit noisy
+transactions did not justify extending its circuit without checking carry
+timing and the extra reset state.
+
+### First incorrect events in the named arithmetic cases
+
+All steps below match the log and the local v1 RefSim replay exactly.
+
+| Evidence | Eight-bit copy 175, tx 0: 14 − 161 | Four-bit copy 75, tx 1: 5 − 2 |
+|---|---:|---:|
+| Correct operand XOR | `fa1.x.y0.u/v`: 1347 / 1406 | `fa2.x.y0.u/v`: 6361 / 6416 |
+| Wrong operand rail `x.y1.u/v` | Both silent | Both silent |
+| Selected operand one-shot | `fa1.x.once1.edge`: once at 1258 | `fa2.x.once1.edge`: once at 6272 |
+| Selected EARLY operand veto | `fa1.x.y1.b.veto`: 726 | `fa2.x.y1.b.veto`: 5720 |
+| Correct generate carry-1 | `fa1.c1.u`: 1301 | `fa2.c1.u`: 6312 |
+| Carry-0 delayed driver | `fa1.cinr0.d4`: 1460 | `fa2.cinr0.d4`: 6460 |
+| Carry-propagate x0 veto | `fa1.p0.veto`: 1400 | `fa2.p0.veto`: 6417 |
+| **Wrong first carry-propagate ignition** | **`fa1.p0.edge`: 1536** | **`fa2.p0.edge`: 6530** |
+| Strong source inhibitor emission → arrival | 1518 → **1536** | 6514 → **6532** |
+| Incorrect carry-0 establishes | `fa1.c0.u`: 1577 | `fa2.c0.u`: 6571 |
+| Next sum accepts both carries | `fa2.s.once1/once0.edge`: 1604 / 1876 | `fa3.s.once1/once0.edge`: 6608 / 6886 |
+
+V1 delays x by a nominal **42 steps** while generate/kill still take raw Ad
+and propagate still takes the raw delayed carry train. The x0 veto therefore
+has less time to settle before carry propagation. The wrong propagate relay
+escapes before its strong source inhibition takes effect. Once it establishes
+the second carry rail, two independent sum one-shots each correctly consume
+one of the two asserted rails; they do not arbitrate exclusive carry data.
+The sums then become double-railed, producing silent wrong-value observations.
+
+Captured carry excitations arrive at **1478/1522** and **6478/6522**,
+respectively: 44-step doublets. Cold single-neuron controls using those first
+two pulses, the actual veto pulses and reconstructed receiving draws reproduce
+the wrong spikes at **1536 / 6530**; a first-excitation-only control stays
+silent in both cases. Copy 175 uses q **+4491 / −7631 / −1674** (driver /
+source inhibitor / veto). Copy 75 uses **+4489 / −7403 / −1622**, plus its
+captured **150-q background arrival at 6371**. Removing that background pulse
+in the reduced copy-75 experiment delays the spike to 6531; it still escapes
+before strong source inhibition arrives at 6532. These cold controls establish
+a sufficient second-pulse mechanism; the full two-word batch replay preserves
+actual history and background rather than assuming a cold transaction start.
+Advancing only the two captured veto arrivals by 42 steps also prevents both
+reduced escapes, with excitation and receiving draws held fixed. This supports
+the lost-veto-margin explanation directly. The earlier sum-only surveys used
+a different topology/draw assignment; their clean counts alone cannot isolate
+the latency change. The v1/v2 comparisons below preserve v1's physical draws.
+
+The operand's EARLY veto precedes its consumed edge by 532/552 steps in these
+two slices, and the correct x0 alone establishes. This rejects a premature
+operand edge or a SUB rail-swap error for these failures. The logged ADD cases
+(four-bit copies 140/338 and eight-bit copies 497/536) also rule out a
+SUB-specific explanation. This does not establish safety under reversed
+EARLY/LATE ordering, which remains outside the ordered primitive's contract.
+
+### A frozen survivor: output storage, not a spent latch
+
+The original copy85 log reports only an aggregate survivor count, so it cannot
+identify which latch or ignition survived. A bounded local diagnostic prefix
+of 4,096 single-bit probes localized **copy 2174**; the permanent regression
+reconstructs its draws and simulates only that one copy.
+
+With v1, `add.fa0.x.y0.u/v` continue through steps **6179 / 6156** after the
+clear at 4200. Their corresponding spent latch does not survive. The noisy
+ordinary reset controller emits **three** inhibitor spikes, the last at
+**4461**, rather than the nominal five. All delayed prescribed excitation
+ends by 2705, well before clear. This is held output storage surviving the
+available clear charge, not a late source pulse re-igniting a cleared output.
+Two continuing members account for the two failures in this frozen case;
+the aggregate 32 need not all have the same cause.
+
+The shared-pulse redesign alone still leaves both members alive under the
+same draws. Raising only operand-XOR output/spent clear links from **0.75 to
+1.5 loop** extinguishes both. No controller or READY delay is changed, and
+source/hold inhibitors remain outside reset so draining trains remain blocked.
+The existing four-transaction polarity-change probes and two-word arithmetic
+replays exercise reloading after these stronger clears. Copy 2174 additionally
+reloads the opposite EARLY polarity after its 2000-step recovery, checks one
+exclusive output and one consumed edge, and clears again. Tighter recovery
+times and all 40,000 original clear draws still require cluster evaluation.
+
+### V2 circuit and replay policy
+
+`OPERAND_XOR_ONESHOT_VERSION = 2`. The flag and complete-F prerequisites stay
+the same; absent/false flags retain the old arrays, image and record keys.
+Enabled records with missing, v1, string, boolean or unknown versions are
+rejected by campaign rebuild, Stage D recheck and diagnostic reconstruction;
+v1 is reproduced only by a test fixture, never silently upgraded on replay.
+
+The existing transaction edges are reused:
+
+- `fa*.x.once{0,1}.edge` drive both operand XOR candidates and the matching
+  generate/kill branches. Generate/kill now share the operand's delay and
+  receive only the consumed pulse.
+- `fa*.s.once{0,1}.edge` drive both sum candidates and matching carry-propagate
+  branches. Bit zero uses the existing `s.once1` pulse for both Cin-qualified
+  propagation candidates; later bits use their respective carry pulses.
+- `Gates.finalize_operand_reset` strengthens the completed stage-reset fan-out
+  to operand XOR output/spent members and their registered reader mirrors.
+  Sum spent storage, other state and reset generators keep their policy.
+
+This adds **no neurons or synapses beyond v1**: the neuron/synapse counts in
+the v1 table still apply (10 neurons / 26 synapses per protected bit). Eight
+existing storage clear weights per bit become 1.5 loop; the v1 weight-dependent
+anatomical-capacity estimates therefore do not carry over. Some node IDs
+change because sum pulses are allocated before their carry consumers. Standalone and SUB
+B-complement XORs remain unchanged. The ordinary sum-only option remains v1.
+
+Nominal operand primitive latency remains **84 steps off / 126 on**. Carry
+generation and propagation now also include the shared consumed edge, so
+end-to-end latency must be measured afresh; the v1 arithmetic latency table
+does not describe v2. No kernel throughput or F16 campaign claim follows.
+
+### Explicit frozen regressions and bounded local execution
+
+The existing eight cluster scenarios remain behind `DROSO_OPXOR_CLUSTER=1`.
+Ten additional scenario IDs reproduce every distinct copy in the logs'
+capped `failure_details`, plus the localized clear survivor:
+
+| Scenario | Frozen failing transaction: tx, bit, a, b, sub |
+|---|---|
+| `replay8-copy175` | 0, 2, 14, 161, 1 |
+| `replay8-copy391` | 0, 2, 238, 1, 1 |
+| `replay8-copy418` | 1, 4 (also 5), 103, 10, 1 |
+| `replay8-copy497` | 1, 8, 131, 137, 0 |
+| `replay8-copy536` | 0, 7 (also 8), 72, 218, 0 |
+| `replay8-copy699` | 0, 2, 233, 198, 1 |
+| `replay4-copy75` | 1, 3 (also 4), 5, 2, 1 |
+| `replay4-copy140` | 0, 4, 4, 6, 0 |
+| `replay4-copy338` | 1, 4, 9, 10, 0 |
+| `replay85-clear2174` | x0 output survives three emitted clear pulses |
+
+These also run as independent smoke parameters behind `DROSO_OPXOR_SMOKE=1`.
+Each arithmetic regression first asserts the adverse v1 result, including
+the reported operands/tx/bit, then requires zero wrong/double/missing/repeated
+rails or surviving state under v2. Both named cases additionally assert the
+exact wrong propagate pulse above. The existing noisy-16 frontier is retained
+as a v1-negative/v2-clean frozen 24-transaction probe, not a qualification.
+
+Copy indices are **not seeds**. Arithmetic reconstruction preserves RNG 718,
+64-copy batch sizes, all preceding static draws, operand choices, load jitter
+and 5-Hz/150-q background draws; preceding batches consume RNG without neural
+simulation. Only the batch containing the requested copy is simulated, and
+only that copy's two words are scored. V2 maps original perturbations by role
+and source/destination/delay; a rewired positive driver retains the original
+receiving edge's draw. Background events map to the same neuron roles. The
+copy85 regression preserves RNG 8585 and 256-copy draw blocks but simulates
+only selected rows. Assertions require complete bijections of nodes/edges.
+No changed-topology reseeding can make a failing physical draw disappear.
+
+Commands remain the two foreground commands in the v1 section above, using
+the existing environment and writable task temp/cache directories. Long
+cluster surveys and GPU/kernel campaigns have **not** been rerun locally.
+
+### V2 foreground validation results
+
+The required command passed with exit **0**:
+
+```sh
+uv run pytest tests/test_build_options.py tests/test_ordered_xor.py \
+  tests/test_operand_xor.py tests/test_config_f_kernels.py \
+  -q -m 'not slow' -p no:warnings
+```
+
+This includes the existing frozen default/F digests, explicit-off byte
+comparisons, v2 option replay and v1 rejection, both datapaths, F16 builds,
+master-ignition compatibility, and actual small pipeline reset/rearm cycles.
+No frozen digest was updated.
+
+The final operand smoke run passed **25 tests**, with **18 slow cluster
+parameters deselected**, in **269.99 seconds (4 minutes 30 seconds)**:
+
+```sh
+DROSO_OPXOR_SMOKE=1 uv run pytest tests/test_operand_xor.py \
+  -q -s -m 'not slow' -p no:warnings -o addopts=''
+```
+
+All eight original v2 smoke scenarios report zero wrong/double/missing rails,
+repeated consumed edges and post-clear survivors. All nine arithmetic frozen
+copies reproduce their logged v1 failure before passing with v2. The frozen
+clear draw reproduces two v1 survivors, retains them with shared pulses alone,
+and passes both clear and opposite-polarity reload/clear with complete v2.
+Both reduced receiver controls and the retained noisy-16 v1-negative/v2-clean
+probe pass. These observations remain **smoke, not qualification**.
+
+V2 arithmetic-fragment smoke latencies, measured from nominal load (including
+noisy load jitter where enabled), are **108.2–239.7 ms** for four-bit mix B,
+**102.6–401.4 ms** for eight-bit mix B, and **105.1–704.2 ms** for nominal
+sixteen-bit arithmetic. These are not full-kernel latency measurements.
+
+`git diff --check` passes. Only owned files are changed; no commit was made.
+Full cluster requalification, F16 kernel campaigns, tighter recovery margins,
+weight-dependent anatomical capacity and end-to-end performance remain to be
+evaluated before any qualification claim.

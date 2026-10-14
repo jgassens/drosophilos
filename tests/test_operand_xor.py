@@ -15,22 +15,50 @@ from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.protocol.latch import add_experimental_autapses, add_reset
 from drosophilos.sim.model import Topology
 from drosophilos.sim.ref64 import RefSim
-from test_ordered_xor import P, SurveySim, arithmetic_survey, prescribe
+from test_ordered_xor import P, SurveySim, arithmetic_survey, prescribe, replay_maps
 
 
 SCENARIOS = ("second-pulse", "order-15ms", "order-100ms", "mix-B", "copy85",
              "addsub4-mix-B", "addsub8-mix-B", "addsub16-nominal")
+# All distinct copies present in the cluster logs' capped failure_details.
+# (width, copy, tx, first reported wrong bit, a, b, sub)
+REPLAY_CASES = {
+    "replay8-copy175": (8, 175, 0, 2, 14, 161, 1),
+    "replay8-copy391": (8, 391, 0, 2, 238, 1, 1),
+    "replay8-copy418": (8, 418, 1, 4, 103, 10, 1),
+    "replay8-copy497": (8, 497, 1, 8, 131, 137, 0),
+    "replay8-copy536": (8, 536, 0, 7, 72, 218, 0),
+    "replay8-copy699": (8, 699, 0, 2, 233, 198, 1),
+    "replay4-copy75": (4, 75, 1, 3, 5, 2, 1),
+    "replay4-copy140": (4, 140, 0, 4, 4, 6, 0),
+    "replay4-copy338": (4, 338, 1, 4, 9, 10, 0),
+}
+SCENARIOS += (*REPLAY_CASES, "replay85-clear2174")
 FAILURES = ("double", "missing", "wrong", "repeated", "ignition_repeat", "survivors")
 
 
-def operand_fixture(enabled=True):
+class OperandV1Gates(Gates):
+    """Frozen v1 wiring via the unchanged default ripple and explicit x one-shots.
+
+    Diagnostic fixture only: production record replay rejects v1.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.operand_xor_oneshot = False
+
+    def xor2_ordered(self, name, early, late, *, oneshot=False):
+        return super().xor2_ordered(name, early, late, oneshot=oneshot or name.endswith(".x"))
+
+
+def operand_fixture(enabled=True, gates_type=Gates):
     net, drive = Netlist(P), Drive.from_params(P)
     early = Rail2(Tap(net.neuron("early0")), Tap(net.neuron("early1")))
     late = Rail2(Tap(net.neuron("late0")), Tap(net.neuron("late1")))
     cin = Rail2(Tap(net.neuron("cin0")), Tap(net.neuron("cin1")))
-    g = Gates(net, drive, ordered_xor_oneshot=True, operand_xor_oneshot=enabled)
+    g = gates_type(net, drive, ordered_xor_oneshot=True, operand_xor_oneshot=enabled)
     _, _, xs, _ = g.ripple_adder_ordered("add", [late], [early], cin)
     reset = add_reset(net, drive, "reset", g.latches, g.gates)
+    g.finalize_operand_reset(reset[1])
     add_experimental_autapses(net, drive)
     return net, drive, early, late, xs[0], reset, g
 
@@ -55,14 +83,51 @@ def copy85_receiver(*, nominal=False, first_only=False):
     return sim.trace.events["step"].tolist()
 
 
-def operand_survey(scenario, trials, *, enabled=True):
-    net, drive, early, late, out, reset, g = operand_fixture(enabled)
+def carry_escape_receiver(copy, *, first_only=False, background=True):
+    """Cold receiving-neuron controls from the exact arithmetic replays.
+
+    Origins are 1000 (copy 175) and 6000 (copy 75). Copy 75 includes its
+    captured 150-q background arrival at 6371; removing it delays the escape
+    one step in this reduced experiment. These are sufficient local mechanisms,
+    not claims that a cold receiver reconstructs every previous membrane state.
+    """
+    if copy == 175:
+        threshold, bias = -44.98305837509053, -.34870083385449524
+        excitation, inhibition, veto = 4491, -7631, -1674
+        veto_times, inhibition_time = [418, 492], 536
+    else:
+        assert copy == 75
+        threshold, bias = -45.18410708610765, -.046470447175844365
+        excitation, inhibition, veto = 4489, -7403, -1622
+        veto_times, inhibition_time = [435, 508], 532
+    sim = RefSim(Topology.empty(1), P, V_th=[threshold], bias=[bias])
+    sim.V[:] = P.E_L + bias
+    times = [478] if first_only else [478, 522]
+    sim.add_events(0, times, [0] * len(times), [excitation] * len(times))
+    sim.add_events(0, veto_times, [0, 0], [veto, veto])
+    sim.add_events(0, [inhibition_time], [0], [inhibition])
+    if copy == 75 and background:
+        sim.add_events(0, [371], [0], [150])
+    sim.run(550)
+    return sim.trace.events["step"].tolist()
+
+
+def operand_survey(scenario, trials, *, enabled=True, replay_copies=None, gates_type=Gates,
+                   reference_type=None, rearm=False):
+    net, drive, early, late, out, reset, g = operand_fixture(enabled, gates_type)
     topo = net.topology()
+    replay_nodes = replay_edges = None
+    if reference_type is not None:
+        replay_nodes, replay_edges, _ = replay_maps(net, operand_fixture(enabled, reference_type)[0])
     rng = np.random.default_rng(8585)
-    result = dict(copies=trials, trials=trials * (1 if scenario == "copy85" else 4),
+    copies = trials if replay_copies is None else len(replay_copies)
+    result = dict(copies=copies, trials=copies * (1 if scenario == "copy85" else 4),
                   double=0, missing=0, wrong=0, repeated=0,
-                  ignition_repeat=0, survivors=0, min_latency=10000, max_latency=0)
+                  ignition_repeat=0, survivors=0, min_latency=10000, max_latency=0,
+                  survivor_details=[])
     for start in range(0, trials, 256):
+        if replay_copies is not None and start > max(replay_copies):
+            break
         size = min(256, trials - start)
         gaussian = scenario == "mix-B"
         w = (rng.normal(0, .04, (size, topo.nnz)) if gaussian else
@@ -71,6 +136,18 @@ def operand_survey(scenario, trials, *, enabled=True):
               rng.choice([-.6, .6], (size, topo.n)))
         bias = (rng.normal(0, .2, (size, topo.n)) if gaussian else
                 rng.choice([-.6, .6], (size, topo.n)))
+        if reference_type is not None:
+            w, th, bias = w[:, replay_edges], th[:, replay_nodes], bias[:, replay_nodes]
+        # Draw skipping is only used for the single-transaction captured case.
+        if replay_copies is not None:
+            assert scenario == "copy85"
+            jitter = rng.integers(-5, 6, (size, 1))
+            jitter[0] = 0
+            selected = [c - start for c in replay_copies if start <= c < start + size]
+            if not selected:
+                continue
+            w, th, bias, jitter = (x[selected] for x in (w, th, bias, jitter))
+            size = len(selected)
         sim = SurveySim(topo, P, n_nodes=size, quanta=np.rint(topo.quanta * np.exp(w)),
                         V_th=P.V_th + th, bias=np.asarray(net.bias) + bias)
         # Each physical copy visits every truth-table row, changes polarities,
@@ -86,8 +163,9 @@ def operand_survey(scenario, trials, *, enabled=True):
                 ev = lv = 0
                 # Captured delayed acc6 emissions. Three real captured pulses
                 # suffice for the escape; added late pulses probe retention.
-                jitter = rng.integers(-5, 6, (size, 1))
-                jitter[0] = 0
+                if replay_copies is None:
+                    jitter = rng.integers(-5, 6, (size, 1))
+                    jitter[0] = 0
                 lt = np.array([548, 589, 627, 1600, 1642, 2700])[None, :] + jitter
                 wrong = net.roles.index("add.fa0.x.y1.a.edge")
                 sim.V_th[:, wrong] = -45.17450109365213
@@ -139,6 +217,40 @@ def operand_survey(scenario, trials, *, enabled=True):
             sim.run(2000)
             members = [m for latch in g.latches for m in latch.members]
             result["survivors"] += int((sim.last[:, members] >= origin + 5900).sum())
+            for node, member in zip(*np.nonzero(sim.last[:, members] >= origin + 5900)):
+                if len(result["survivor_details"]) < 8:
+                    result["survivor_details"].append(dict(
+                        copy=start + (int(node) if replay_copies is None else selected[node]), tx=tx,
+                        role=net.roles[members[member]], last=int(sim.last[node, members[member]]),
+                        reset_count=int(sim.counts[node, reset[1]]), reset_last=int(sim.last[node, reset[1]])))
+            if rearm:
+                assert scenario == "copy85" and enabled
+                # On the frozen clear draw, reload the opposite EARLY polarity
+                # after the same 2000-step recovery; the old captured veto has
+                # drained and is correctly silent for this new truth-table row.
+                reload_origin = sim.step_index
+                before = sim.counts.copy()
+                sim.first.fill(-1)
+                prescribe(sim, early.r1.u, reload_origin + np.arange(0, 4000, 60))
+                prescribe(sim, late.r0.u, reload_origin + np.array([200, 242, 284, 2500, 2542, 3500]))
+                sim.run(4200)
+                counts = sim.counts - before
+                seen = counts[:, out.taps] > 0
+                result["trials"] += size
+                result["double"] += int(seen.all(axis=1).sum())
+                result["wrong"] += int(seen[:, 0].sum())
+                result["missing"] += int((~seen[:, 1]).sum())
+                result["repeated"] += int((counts[:, once].sum(axis=1) != 1).sum())
+                result["ignition_repeat"] += int((counts[:, edges].sum(axis=1) > 1).sum())
+                latency = sim.first[:, out.r1.u] - reload_origin - 200
+                latency = latency[sim.first[:, out.r1.u] >= 0]
+                if len(latency):
+                    result["min_latency"] = min(result["min_latency"], int(latency.min()))
+                    result["max_latency"] = max(result["max_latency"], int(latency.max()))
+                for node in range(size):
+                    sim.add_events(node, [reload_origin + 4200], [reset[0]], [drive.ignite])
+                sim.run(2000)
+                result["survivors"] += int((sim.last[:, members] >= reload_origin + 5900).sum())
     return result
 
 
@@ -158,6 +270,11 @@ def test_operand_spent_latches_are_in_stage_reset_domain():
     targets = {d for s, d, q in zip(net.src, net.dst, net.quanta) if s == reset[1] and q < 0}
     assert len(spent) == 4
     assert spent <= targets
+    protected = spent | {m for latch in g.latches if ".x.y" in net.roles[latch.u]
+                         for m in latch.members}
+    for s, d, q in zip(net.src, net.dst, net.quanta):
+        if s == reset[1] and d in protected:
+            assert q == -round(1.5 * g.drive.loop)
     assert not any(".bx" in r and ".once" in r for r in net.roles)
 
 
@@ -179,6 +296,22 @@ def test_nominal_operand_latency():
     assert (latencies[1] - latencies[0] == 42).all()
 
 
+def test_operand_and_carry_branches_share_consumed_pulses():
+    from test_ordered_xor import arithmetic_fixture
+    net, _, _, *_ = arithmetic_fixture(2, operand_oneshot=True)
+    topo = net.topology()
+    for bit in range(2):
+        prefix = f"add.fa{bit}"
+        expected = {"g": f"{prefix}.x.once1.edge", "k": f"{prefix}.x.once0.edge",
+                    "p1": f"{prefix}.s.once1.edge",
+                    "p0": f"{prefix}.s.once{0 if bit else 1}.edge"}
+        for branch, source in expected.items():
+            for target in (f"{prefix}.{branch}.edge", f"{prefix}.{branch}.edge_inh"):
+                inputs = [net.roles[s] for s, d, q in zip(topo.src, topo.dst, topo.quanta)
+                          if net.roles[d] == target and q > 0]
+                assert inputs == [source]
+
+
 @pytest.mark.parametrize("datapath", ["generic", "specialized"])
 def test_pipeline_rearms_with_master_ignition_and_zero_once(datapath):
     from test_ordered_xor import test_pipeline_combinations_rearm
@@ -188,16 +321,12 @@ def test_pipeline_rearms_with_master_ignition_and_zero_once(datapath):
 @pytest.mark.skipif(os.environ.get("DROSO_OPXOR_SMOKE") != "1",
                     reason="operand-XOR laptop frontier requires DROSO_OPXOR_SMOKE=1")
 def test_noisy16_carry_escape_frontier():
-    """Preserve a rejected wider envelope; this is not a passing qualification.
-
-    The operand XOR consumes once and stays exclusive. An ordinary carry
-    propagate relay escapes its veto and feeds both sum one-shots downstream.
-    Extending protection to carry generation/propagation is a separate change.
-    """
-    result = arithmetic_survey(16, 12, True, operand_oneshot=True)
-    assert result["double"] == result["wrong"] == 1, result
-    assert result["missing"] == result["repeated"] == result["survivors"] == 0, result
-    failure, = result["failure_details"]
+    """The rejected v1 noisy-16 draw is a frozen regression, not qualification."""
+    legacy = arithmetic_survey(16, 12, True, operand_oneshot=True,
+                               gates_type=OperandV1Gates)
+    assert legacy["double"] == legacy["wrong"] == 1, legacy
+    assert legacy["missing"] == legacy["repeated"] == legacy["survivors"] == 0, legacy
+    failure, = legacy["failure_details"]
     assert {key: failure[key] for key in ("copy", "tx", "bit", "a", "b", "sub")} == dict(
         copy=9, tx=1, bit=12, a=0xaaaa, b=0x5555, sub=1)
     probes = failure["probes"]
@@ -206,12 +335,70 @@ def test_noisy16_carry_escape_frontier():
     assert probes["add.fa11.x.y0.u"][0] > 0
     assert probes["add.fa11.p0.edge"] == (1, 11527)
     assert probes["add.fa11.c0.u"][0] > 0 and probes["add.fa11.c1.u"][0] > 0
-    print("UNQUALIFIED noisy16 carry frontier: one double/wrong sum in 24 transactions;",
-          "fa11.p0.edge at 11527, operand XOR exclusive", flush=True)
+    fixed = arithmetic_survey(16, 12, True, operand_oneshot=True,
+                              reference_type=OperandV1Gates)
+    assert all(fixed[key] == 0 for key in FAILURES if key in fixed), fixed
+    print("noisy16 frozen v1 frontier: v1 one double/wrong, v2 zero failures in 24 transactions",
+          flush=True)
+
+
+def run_frozen_replay(scenario):
+    if scenario == "replay85-clear2174":
+        kwargs = dict(replay_copies=[2174])
+        legacy = operand_survey("copy85", 40_000, gates_type=OperandV1Gates, **kwargs)
+        assert legacy["copies"] == legacy["trials"] == 1
+        assert legacy["survivors"] == 2, legacy
+        assert {d["role"] for d in legacy["survivor_details"]} == {
+            "add.fa0.x.y0.u", "add.fa0.x.y0.v"}
+        assert all(d["reset_count"] == 3 and d["reset_last"] == 4461
+                   for d in legacy["survivor_details"]), legacy
+        class SharedPulsesOnly(Gates):
+            def finalize_operand_reset(self, inhibitor):
+                pass
+        unhardened = operand_survey("copy85", 40_000, gates_type=SharedPulsesOnly,
+                                    reference_type=OperandV1Gates, **kwargs)
+        assert unhardened["survivors"] == 2, unhardened
+        fixed = operand_survey("copy85", 40_000, reference_type=OperandV1Gates, rearm=True, **kwargs)
+        assert fixed["trials"] == 2
+        assert all(fixed[key] == 0 for key in FAILURES), fixed
+    else:
+        width, copy, tx, bit, a, b, sub = REPLAY_CASES[scenario]
+        trials = 512 if width == 4 else 2048
+        kwargs = dict(operand_oneshot=True, replay_copies=[copy])
+        legacy = arithmetic_survey(width, trials, True, gates_type=OperandV1Gates, **kwargs)
+        assert legacy["trials"] == 2
+        assert legacy["wrong"] == legacy["double"] > 0, legacy
+        assert any({k: f[k] for k in ("copy", "tx", "bit", "a", "b", "sub")} ==
+                   dict(copy=copy, tx=tx, bit=bit, a=a, b=b, sub=sub)
+                   for f in legacy["failure_details"]), scenario
+        if copy in (175, 75):
+            p = legacy["failure_details"][0]["probes"]
+            culprit, step = (1, 1536) if copy == 175 else (2, 6530)
+            assert p[f"add.fa{culprit}.p0.edge"] == (1, step)
+            assert p[f"add.fa{culprit}.x.y1.u"][0] == 0
+            assert p[f"add.fa{culprit}.x.y0.u"][0] > 0
+            replay = legacy["replay_details"][tx]
+            origin = 1000 if copy == 175 else 6000
+            assert [s + 18 - origin for s in
+                    replay["spikes"][f"add.fa{culprit}.cinr0.d4"][:2]] == [478, 522]
+            assert carry_escape_receiver(copy) == [step - origin]
+            assert carry_escape_receiver(copy, first_only=True) == []
+            if copy == 75:
+                assert carry_escape_receiver(copy, background=False) == [531]
+        fixed = arithmetic_survey(width, trials, True, reference_type=OperandV1Gates, **kwargs)
+        assert all(fixed[key] == 0 for key in FAILURES if key in fixed), {
+            k: v for k, v in fixed.items() if k != "replay_details"}
+    print("frozen replay", scenario, "v1 wrong/double/survivors",
+          [legacy[k] for k in ("wrong", "double", "survivors")],
+          "v2", {k: fixed[k] for k in FAILURES if k in fixed}, flush=True)
 
 
 def run_scenario(scenario, *, smoke=False):
     wall, cpu = perf_counter(), process_time()
+    if scenario.startswith("replay"):
+        run_frozen_replay(scenario)
+        print(scenario, f"wall_s={perf_counter() - wall:.3f}", flush=True)
+        return
     if scenario.startswith("addsub"):
         width = int(scenario.split("-")[0].removeprefix("addsub"))
         result = arithmetic_survey(width, 12 if smoke else 512 if width == 4 else 2048,

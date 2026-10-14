@@ -363,11 +363,14 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     existing restrictions; the control machine is unchanged.
     `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
     stage resets its spent latch. Carry-generation timing is unchanged.
-    `operand_xor_oneshot=True` experimentally extends the same spent-latch
-    protection to each ordered adder's operand XOR (`fa*.x`), independently
-    versioned and default off. Requires complete configuration F and inherits
-    its timing/reset restrictions; master_ignition and experimental F16 may
-    be combined. SUB's B-complement XORs and standalone logic are unchanged.
+    `operand_xor_oneshot=True` (experimental v2, default off) shares transaction
+    pulses across each ordered adder's operand XOR and generate/kill branches,
+    and across its sum XOR and carry propagation. Operand XOR output/spent
+    storage receives 1.5-loop clears; controller timing is unchanged. V1 failed
+    cluster correctness and clear surveys and cannot be replayed as v2.
+    Requires complete configuration F and its timing restrictions;
+    master_ignition and experimental F16 may be combined. SUB's B-complement
+    XORs and standalone logic are unchanged. This option is not qualified.
     Only the default timing/reset policy and widths 1..8 are supported.
     Wider shapes use the same v1 circuits and ordinary reset domains, including
     multiplier-row spent latches and RAM COPY/word latches. This bounded RefSim
@@ -801,6 +804,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)  # acc' -> bits 0..n-1, C, Z, V
             wire_outputs(net, drive, Ad + Bd, Sc, list(range(n + 3, 3 * n + 3)))  # A, B carried along (delayed tokens)
             extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+            G.finalize_operand_reset(Sc.reset_inh)
             built.add(c.name)
             continue
         if c.op == "STORE":  # RAM write of b at address a; the data also passes to the cell's master
@@ -934,6 +938,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
         wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)
         extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+        G.finalize_operand_reset(Sc.reset_inh)
         built.add(c.name)
 
     # ---- several STORE cells into one RAM: the ports' marks keep them off each other's writes

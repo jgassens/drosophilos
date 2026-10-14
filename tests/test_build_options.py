@@ -52,7 +52,7 @@ CURRENT_PIPELINE_OPTIONS = {
 
 
 @pytest.mark.parametrize("entry", ["campaign", "diagnostic", "recheck"])
-@pytest.mark.parametrize("version", [None, 0, 2, True, "1"])
+@pytest.mark.parametrize("version", [None, 0, 1, 3, True, "2"])
 def test_operand_xor_replay_rejects_missing_or_changed_version(entry, version):
     from drosophilos.bench.stage_d import recheck_record
     record = dict(block="tick", rate_robust=True, experimental_autapse=True,
@@ -108,7 +108,7 @@ def test_operand_xor_cost_defaults_replay_and_master_ignition(name, datapath):
     assert old.build_options == off.build_options
     assert "operand_xor_oneshot" not in old.build_options
     _, new, _, _ = kernel_campaign.block(name, PARAMS, operand_xor_oneshot=True, **flags)
-    assert new.build_options["operand_xor_oneshot_version"] == 1
+    assert new.build_options["operand_xor_oneshot_version"] == 2
     # One spent latch + edge/hold per LATE rail, including reset and autapses.
     bits = sum(role.endswith(".x.once0.edge") for role in new.net.roles)
     assert bits > 0
