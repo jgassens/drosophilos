@@ -387,6 +387,7 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
                         base: Topology | None = None, cut_outputs_frac: float = 0.0,
                         cut_inputs_frac: float = 0.0) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
+    `base` must be the anatomical topology from `MCNS.topology` (quanta = sign * synapse count * QUANTA_PER_SYNAPSE), because the cut fractions recover synapse counts from it.
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
       carried    each carried designed synapse rescales its hosts' anatomical edge to the designed
                  quanta (two designed synapses on one pair sum onto the one edge) at the designed delay;
