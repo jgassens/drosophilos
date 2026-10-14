@@ -38,6 +38,18 @@ def test_perspective_f16_record_rebuilds_the_juno_topology(perspective_f16):
     assert len([cell for cell in rebuilt.cells if cell.op == "MULP_ROW"]) == 16
 
 
+def test_perspective_rebuild_works_outside_repo_and_restores_cwd(perspective_f16, tmp_path, monkeypatch):
+    ks, pl = perspective_f16
+    record = dict(block="perspective", **pl.build_options, neurons=pl.net.n, edges=pl.net.nnz)
+    monkeypatch.chdir(tmp_path)
+
+    _params, rebuilt_ks, rebuilt = build_tick_pipeline(record)
+
+    assert Path.cwd() == tmp_path
+    assert rebuilt_ks == ks
+    assert rebuilt.build_options == pl.build_options
+
+
 @pytest.mark.parametrize("key,value", [
     ("f_width16_experimental", False), ("f_width16_experimental", 1),
     ("ordered_xor_oneshot_version", 999), ("experimental_autapse_version", 999),

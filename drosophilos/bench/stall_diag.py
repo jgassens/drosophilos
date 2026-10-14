@@ -23,6 +23,7 @@ import json
 import os
 import re
 import tempfile
+from contextlib import contextmanager
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -103,6 +104,17 @@ def write_compact_dump(path, steps, neurons, roles, *, window=None, capture_ids=
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+@contextmanager
+def _working_directory(path: Path):
+    """Temporarily change directories, restoring the caller's cwd on all exits."""
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
@@ -201,10 +213,11 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
                  "verified_register_reset", "experimental_register_reset", "experimental_autapse",
                  "ordered_xor_oneshot", "f_width16_experimental")
-        ks, pl, _tokens, _reference = block(
-            campaign["block"], params, datapath=campaign.get("datapath", "generic"),
-            **{key: campaign.get(key, False) for key in flags},
-        )
+        with _working_directory(_repo_root()):
+            ks, pl, _tokens, _reference = block(
+                campaign["block"], params, datapath=campaign.get("datapath", "generic"),
+                **{key: campaign.get(key, False) for key in flags},
+            )
         options = {key: campaign.get(key, value) for key, value in pl.build_options.items()
                    if not key.endswith("_version")}
         if "kill_train" in campaign:
