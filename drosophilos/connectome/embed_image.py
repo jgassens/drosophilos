@@ -601,6 +601,16 @@ def circuit_sim(topology: Topology, params: Params, index_map=None):
     return CircuitView(sim, index_map)
 
 
+def power_on(ch, sim) -> None:
+    """Inject a channel's power-on events into a made simulator.
+
+    ``CircuitView.add_events`` deliberately accepts designed indices, so this is correct both
+    for an isolated image and for its image embedded in a full graph.
+    """
+    for step, neuron, quanta in ch.power_on_events(0):
+        sim.add_events(0, [step], [neuron], [quanta])
+
+
 def underlying(sim) -> RefSim:
     return sim.sim if isinstance(sim, CircuitView) else sim
 
@@ -773,8 +783,7 @@ def simulate_channel(ch, image: Image, words: list[int], expected: list[int], pa
         sim = circuit_sim(topology, params, index_map)
         # the harness is handed a made simulator and so skips its own power-on injection
         # (protocol.run.run_transactions): a flip-flop channel needs its pulse here, by designed index
-        for st_, neuron, q in ch.power_on_events(0):
-            sim.add_events(0, [st_], [neuron], [q])
+        power_on(ch, sim)
         rs, re, st = run_words(ch, sim, ws, xs, params, max_steps_per_tx)
         recs += rs
         reached += re

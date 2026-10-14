@@ -39,7 +39,7 @@ import numpy as np
 from ..connectome.embed_h0 import Policy
 from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelope_ms, build_image, circuit_sim,
                                       full_graph_topology, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
-                                      tally, trace_since, underlying)
+                                      tally, trace_since, underlying, power_on)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
 from ..sim.model import Params
@@ -95,6 +95,19 @@ def top_recruited(m, trace, circuit: np.ndarray, k: int = 8) -> list:
              "spikes": int(cnts[j])} for j in top]
 
 
+def make_sims(ch, isolated_topology, full_topology, full_index_map, params: Params):
+    """Make the paired H1 simulators, including their one-time channel power-on pulse.
+
+    Kept separate so the small synthetic regression can exercise the same fresh and chained
+    simulator setup as the whole-brain driver.
+    """
+    sim_iso = circuit_sim(isolated_topology, params)
+    sim_full = circuit_sim(full_topology, params, full_index_map)
+    power_on(ch, sim_iso)
+    power_on(ch, sim_full)
+    return sim_iso, sim_full
+
+
 def run(args) -> dict:
     params = Params()
     max_steps = int(round(args.max_ms / params.dt))
@@ -125,8 +138,9 @@ def run(args) -> dict:
     recs, reached, additions, spikes = [], [], [], 0
     for k, ((a, b, c), w, x) in enumerate(zip(cases, words, expected)):
         if sim_iso is None or not args.chained:
-            sim_iso = circuit_sim(img.topology, params)
-            sim_full = circuit_sim(fg.topology, params, fg.index_map)
+            # run_words receives made simulators and therefore does not add this itself.
+            # Each simulator gets exactly one designed-index power-on pulse.
+            sim_iso, sim_full = make_sims(ch, img.topology, fg.topology, fg.index_map, params)
         usim = underlying(sim_full)
         t0 = time.time()
         r_iso, re_iso, _ = run_words(ch, sim_iso, [w], [x], params, max_steps)
