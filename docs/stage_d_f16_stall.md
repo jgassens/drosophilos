@@ -363,8 +363,9 @@ required even though all clearing edges are structurally unchanged.
 
 **V1 qualification was rejected.** This simultaneous-ignition circuit produced
 **127 reset survivors in 40,000 fast-corner first-load trials**, despite the
-earlier smoke, grid, and captured-clear passes. V2 qualification is pending its
-cluster results; the v1 evidence below cannot qualify it.
+earlier smoke, grid, and captured-clear passes. V2 qualification results are
+recorded in [master_ignition v2: cluster qualification results](#master_ignition-v2-cluster-qualification-results);
+the v1 evidence below cannot qualify it.
 
 ### Costs and latency
 
@@ -389,7 +390,7 @@ campaign or end-to-end throughput comparison was run here. Finite surveys do
 not prove indefinite holding or safety under unbounded Gaussian tails, remove
 F's separate rate-floor limitation, or diagnose the other seven freezes.
 
-## 2026-10-14 continuation: staggered partner ignition, version 2 (unqualified)
+## 2026-10-14 continuation: staggered partner ignition, version 2
 
 **Version 1 above is rejected.** Although simultaneous ignition passed both
 40,000-trial copy-75 scenarios, nominal first-load/reload, the independent
@@ -527,6 +528,59 @@ netlist hashes and the enabled-record reconstruction/version checks:
 DROSO_IGNITION_SMOKE=1 uv run pytest tests/test_build_options.py tests/test_master_ignition.py tests/test_config_f_kernels.py tests/test_stall_diag.py -q -m 'not slow' -p no:warnings
 ```
 
-**Qualification remains pending.** The v2 cluster cases, deterministic full
-grids, two-cell kernel and a full GPU campaign have not been run in this
-continuation. The earlier v1 passes cannot substitute for these v2 checks.
+### master_ignition v2: cluster qualification results
+
+On 2026-10-14, all 26 opt-in cluster cases (`DROSO_IGNITION_CLUSTER=1`,
+`tests/test_master_ignition.py::test_master_ignition_cluster_survey` and
+`tests/test_master_ignition.py::test_master_ignition_clear_cluster_survey`)
+were run at commit `cbb4cc1` on Juno and G2 CPU nodes. Every case passed, every
+failure counter was zero, and the cases completed **1,041,920 trials** in
+total. The reported counter values and trial counts are:
+
+| Case | Trials | Result |
+|---|---:|---|
+| ignition clear 2 fast3sigma | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 master24 | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 mix_b | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 slow3sigma | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition 2 copy75 empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 high_threshold empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 mix_b empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 nominal empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 weak_loop empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 fast3sigma reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 independent3sigma reload | 40,960 | `copies=40960, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 negative_bias reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 slow3sigma reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition clear 2 master17 | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 master74 | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 request28 | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition clear 2 stage18 | 40,000 | `copies=40000, survivors=0, not_live_before_clear=0, reader_survivors=0` |
+| ignition 2 fast3sigma empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 independent3sigma empty | 40,960 | `copies=40960, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 negative_bias empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 slow3sigma empty | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 copy75 reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 high_threshold reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 mix_b reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 nominal reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+| ignition 2 weak_loop reload | 40,000 | `copies=40000, selected_rail_not_established=0, double_rails=0, old_rail_survivors=0, survivors=0, multiple_copy=0` |
+
+The scheduler job IDs were: `fast3sigma` Juno 457262;
+`first-load-copy75` Juno 457266; `first-load-fast3sigma` G2 4018677;
+`first-load-high_threshold` Juno 457267; `first-load-independent3sigma` G2
+4018678; `first-load-mix_b` Juno 457268; `first-load-negative_bias` G2
+4018679; `first-load-nominal` Juno 457269; `first-load-slow3sigma` G2
+4018680; `first-load-weak_loop` Juno 457270; `master17` G2 4018673;
+`master24` Juno 457263; `master74` G2 4018674; `mix_b` Juno 457264;
+`reload-copy75` G2 4018681; `reload-fast3sigma` Juno 457271;
+`reload-high_threshold` G2 4018682; `reload-independent3sigma` Juno 457272;
+`reload-mix_b` G2 4018683; `reload-negative_bias` Juno 457273;
+`reload-nominal` G2 4018684; `reload-slow3sigma` Juno 457274;
+`reload-weak_loop` G2 4018685; `request28` G2 4018675; `slow3sigma` Juno
+457265; `stage18` G2 4018676.
+
+V2 now passes its bounded RefSim qualification. It has not yet run in a full
+kernel campaign; the next step is a 100-copy 16-bit perspective campaign with
+it enabled. The copy-85/57 operand-XOR freeze class is not covered by this
+option.
