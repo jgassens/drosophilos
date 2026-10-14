@@ -681,6 +681,8 @@ def parser() -> argparse.ArgumentParser:
                     help=("consume sum-XOR carry once per stage reset; requires --rate-robust "
                           "and --experimental-autapse (default timing, widths 1..8; "
                           "wider kernel qualification: docs/stable_latch.md)"))
+    ap.add_argument("--operand-xor-oneshot", action="store_true",
+                    help="EXPERIMENTAL: consume ordered-adder operand XOR inputs once per stage reset; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--master-ignition", action="store_true",
@@ -781,6 +783,10 @@ def recheck_record(rec: dict) -> dict:
     if type(width16) is not bool:
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     flags["f_width16_experimental"] = width16
+    from ..lib.gates import validate_operand_xor_record
+    validate_operand_xor_record({**rec, **options})
+    flags["operand_xor_oneshot"] = options.pop("operand_xor_oneshot", rec.get("operand_xor_oneshot", False))
+    options.pop("operand_xor_oneshot_version", None)
     ignition = options.pop("master_ignition", rec.get("master_ignition", False))
     if type(ignition) is not bool:
         raise ValueError("unsupported campaign build option master_ignition: expected a bool")
@@ -942,7 +948,8 @@ def main(argv=None):
                verified_register_reset=a.verified_register_reset,
                experimental_register_reset=a.experimental_register_reset,
                experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
-               f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition)
+               f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition,
+               operand_xor_oneshot=a.operand_xor_oneshot)
     calib = None
     if a.max_ms is None:
         calib = calibrate(k, pl, P, tokens, a, dtype)
@@ -1033,6 +1040,9 @@ def main(argv=None):
     }
     if a.f_width16_experimental:
         rec["f_width16_experimental"] = pl.build_options["f_width16_experimental"]
+    if a.operand_xor_oneshot:
+        rec["operand_xor_oneshot"] = True
+        rec["operand_xor_oneshot_version"] = pl.build_options["operand_xor_oneshot_version"]
     if a.master_ignition:
         rec["master_ignition"] = True
         rec["master_ignition_version"] = pl.build_options["master_ignition_version"]

@@ -159,7 +159,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     from ..lib.kernel import TRUE_GUARD_VERSION
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
     from ..protocol.latch import MASTER_IGNITION_VERSION
-    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION, ORDERED_XOR_ONESHOT_MUL_VERSION
+    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION, ORDERED_XOR_ONESHOT_MUL_VERSION, validate_operand_xor_record
+    validate_operand_xor_record(campaign)
 
     if "master_ignition" in campaign and type(campaign["master_ignition"]) is not bool:
         raise ValueError("unsupported campaign build option master_ignition: expected a bool")
@@ -189,7 +190,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
         options = dict(campaign.get("build_options", {}))
         for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version",
-                         "ordered_xor_oneshot_version", "ordered_xor_oneshot_mul_version", "master_ignition_version"):
+                         "ordered_xor_oneshot_version", "ordered_xor_oneshot_mul_version", "master_ignition_version", "operand_xor_oneshot_version"):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
@@ -200,6 +201,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         experimental_register_reset = options.pop("experimental_register_reset", campaign.get("experimental_register_reset", False))
         experimental_autapse = options.pop("experimental_autapse", campaign.get("experimental_autapse", False))
         ordered_xor_oneshot = options.pop("ordered_xor_oneshot", campaign.get("ordered_xor_oneshot", False))
+        operand_xor_oneshot = options.pop("operand_xor_oneshot", campaign.get("operand_xor_oneshot", False))
         master_ignition = options.pop("master_ignition", campaign.get("master_ignition", False))
         strength = options.pop("kill_strength", None)
         if strength is not None:
@@ -210,7 +212,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                    verified_register_reset=verified_register_reset,
                    experimental_register_reset=experimental_register_reset,
                    experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
-                   master_ignition=master_ignition, **options)
+                   master_ignition=master_ignition, operand_xor_oneshot=operand_xor_oneshot, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -222,7 +224,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         params = Params()
         flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
                  "verified_register_reset", "experimental_register_reset", "experimental_autapse",
-                 "ordered_xor_oneshot", "f_width16_experimental", "master_ignition")
+                 "ordered_xor_oneshot", "f_width16_experimental", "master_ignition", "operand_xor_oneshot")
         with _working_directory(_repo_root()):
             ks, pl, _tokens, _reference = block(
                 campaign["block"], params, datapath=campaign.get("datapath", "generic"),
@@ -293,6 +295,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             ordered_xor_oneshot=campaign.get("ordered_xor_oneshot", False),
             f_width16_experimental=campaign.get("f_width16_experimental", False),
             master_ignition=campaign.get("master_ignition", False),
+            operand_xor_oneshot=campaign.get("operand_xor_oneshot", False),
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

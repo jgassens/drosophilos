@@ -252,9 +252,10 @@ def test_transaction_memory_holds_across_long_gaps_and_resets(autapse):
     assert failures == 0 if autapse else failures > 0
 
 
-def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, recovery=2000):
+def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, recovery=2000,
+                      *, operand_oneshot=False):
     net, drive = Netlist(P), Drive.from_params(P)
-    gates = Gates(net, drive, ordered_xor_oneshot=oneshot)
+    gates = Gates(net, drive, ordered_xor_oneshot=oneshot, operand_xor_oneshot=operand_oneshot)
     def word(name, n):
         return [Rail2(gates.latch(f"{name}{i}r0"), gates.latch(f"{name}{i}r1")) for i in range(n)]
     a, b = word("A", width), word("B", width)
@@ -270,8 +271,10 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
         add_experimental_autapses(net, drive)
     topo = net.topology()
     rng = np.random.default_rng(718)
-    result = dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0,
+    result = dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0, survivors=0,
                   min_latency=10000, max_latency=0)
+    if operand_oneshot:
+        result["failure_details"] = []
     for start in range(0, trials, 64):
         size = min(64, trials - start)
         kwargs = {}
@@ -286,9 +289,22 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
         else:
             av, bv = rng.integers(0, 1 << width, (2, size))
             sv = rng.integers(0, 2, size)
+        if operand_oneshot and width == 4 and trials >= 512:
+            ids = np.arange(start, start + size)
+            av, bv, sv = ids // 32 % 16, ids // 2 % 16, ids % 2
+        elif operand_oneshot:
+            # Long carry/borrow, zero, overflow and alternating rails, for both
+            # fixed ADD and SUB images. Every copy reloads swapped operands.
+            mask = (1 << width) - 1
+            directed = [(mask, 1), (0, 1), (0, 0), (mask >> 1, 1),
+                        (mask // 3, 2 * (mask // 3)), (mask, mask)]
+            for k in range(min(size, max(0, 2 * len(directed) - start))):
+                index = start + k
+                av[k], bv[k] = directed[index // 2]
+                sv[k] = index % 2
         # Two different words through the same physical state, including the
         # complete delayed-input drain and inhibitory recovery after reset.
-        duration = 3000 if width <= 4 else 5000
+        duration = 3000 if width <= 4 else 5000 if width <= 8 else 8000
         for tx, origin in enumerate((0, duration + recovery)):
             if tx:
                 av, bv = bv, av
@@ -316,6 +332,16 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
                 result["double"] += int(seen.all(axis=1).sum())
                 result["missing"] += int((~seen.any(axis=1)).sum())
                 result["wrong"] += int(seen[np.arange(size), 1 - expected].sum())
+                if operand_oneshot:
+                    for node in np.flatnonzero(seen[np.arange(size), 1 - expected]):
+                        if len(result["failure_details"]) >= 8:
+                            break
+                        probes = {r: (int(sim.counts[node, i]), int(sim.first[node, i]))
+                                  for i, r in enumerate(net.roles)
+                                  if any(r.startswith(f"add.fa{j}.")
+                                         for j in range(max(0, bit - 2), min(width, bit + 1)))}
+                        result["failure_details"].append(dict(copy=start + int(node), tx=tx, bit=bit,
+                            a=int(av[node]), b=int(bv[node]), sub=int(sv[node]), probes=probes))
                 times = sim.first[np.arange(size), np.asarray(rail.taps)[expected]]
                 lat = times[times >= 0] - origin - 200
                 if len(lat):
@@ -323,10 +349,20 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
                     result["max_latency"] = max(result["max_latency"], int(lat.max()))
             once = [i for i, r in enumerate(net.roles) if ".once" in r and r.endswith(".edge")]
             result["repeated"] += int((sim.counts[:, once] > 1).sum())
+            if operand_oneshot:
+                # Check first-pulse acceptance as well as repeat suppression in
+                # both the operand and sum XORs, one of two rails per bit.
+                for kind in ("x", "s"):
+                    for bit in range(width):
+                        edges = [net.roles.index(f"add.fa{bit}.{kind}.once{r}.edge") for r in (0, 1)]
+                        result["missing"] += int((sim.counts[:, edges].sum(axis=1) == 0).sum())
             if not tx:
                 for node in range(size):
                     sim.add_events(node, [duration], [reset[0]], [drive.ignite])
                 sim.run(recovery)
+                if operand_oneshot:
+                    members = [m for latch in gates.latches for m in latch.members]
+                    result["survivors"] += int((sim.last[:, members] >= duration + recovery - 300).sum())
     return result
 
 
@@ -349,7 +385,7 @@ def test_add_sub_large_survey(width, trials, noisy):
     (False, "generic", False), (False, "generic", True),
     (True, "generic", True), (True, "specialized", True),
 ])
-def test_pipeline_combinations_rearm(zero, datapath, noisy):
+def test_pipeline_combinations_rearm(zero, datapath, noisy, *, operand=False, ignition=False):
     from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
     from test_experimental_autapse import _NoisyRefSim
     spec = [{"name": "add", "op": "ADD", "a": "input", "b": ("const", "one")},
@@ -357,7 +393,8 @@ def test_pipeline_combinations_rearm(zero, datapath, noisy):
             {"name": "out", "op": "XOR", "a": "sub", "b": ("const", "one")}]
     pl = build_pipeline(P, 2, spec, consts={"one": 1, "three": 3},
                         rate_robust=True, experimental_autapse=True, zero_once=zero,
-                        datapath=datapath, ordered_xor_oneshot=True)
+                        datapath=datapath, ordered_xor_oneshot=True,
+                        operand_xor_oneshot=operand, master_ignition=ignition)
     sim = _NoisyRefSim(pl.net, copies=2) if noisy else RefSim(pl.net.topology(), P, n_nodes=2)
     outputs, _, stats = run_pipeline_batched(pl, P, [[0, 1, 3]] * 2,
                                              max_ms=9000, sim=sim, progress=0)

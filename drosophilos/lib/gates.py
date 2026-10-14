@@ -22,6 +22,18 @@ from .netlist import Drive, Netlist
 ORDERED_XOR_ONESHOT_VERSION = 1
 # Wide F arrays omit the zero-addend prefix of each row. Independent of sum v1.
 ORDERED_XOR_ONESHOT_MUL_VERSION = 1
+# Experimental extension: consume the delayed operand at each ordered FA's x XOR.
+OPERAND_XOR_ONESHOT_VERSION = 1
+
+
+def validate_operand_xor_record(record: dict) -> None:
+    """Never silently select a different experimental operand circuit on replay."""
+    if "operand_xor_oneshot" in record and type(record["operand_xor_oneshot"]) is not bool:
+        raise ValueError("unsupported campaign build option operand_xor_oneshot: expected a bool")
+    if record.get("operand_xor_oneshot", False) and (
+            type(record.get("operand_xor_oneshot_version")) is not int or
+            record["operand_xor_oneshot_version"] != OPERAND_XOR_ONESHOT_VERSION):
+        raise ValueError("unsupported operand-XOR one-shot circuit version")
 
 
 @dataclass(frozen=True)
@@ -60,9 +72,11 @@ class Gates:
     """Collects every internal latch and gate neuron so a reset domain can claim them."""
 
     def __init__(self, net: Netlist, drive: Drive, *, ordered_xor_oneshot: bool = False,
+                 operand_xor_oneshot: bool = False,
                  ordered_xor_oneshot_mul_version: int = ORDERED_XOR_ONESHOT_MUL_VERSION):
         self.net, self.drive = net, drive
         self.ordered_xor_oneshot = ordered_xor_oneshot
+        self.operand_xor_oneshot = operand_xor_oneshot
         if (type(ordered_xor_oneshot_mul_version) is not int or
                 ordered_xor_oneshot_mul_version not in (0, ORDERED_XOR_ONESHOT_MUL_VERSION)):
             raise ValueError("unsupported ordered_xor_oneshot_mul_version")
@@ -113,8 +127,8 @@ class Gates:
     def xor2_ordered(self, name: str, EARLY: Rail2, LATE: Rail2, *, oneshot: bool = False) -> Rail2:
         """Ordered XOR; optionally consume each LATE rail once until stage reset.
 
-        The ripple adder opts in only for sums. Operand XORs and carry generation
-        retain their timing. Returned spent latches belong to this reset domain.
+        The ripple adder opts in separately for sums and operand XORs. Returned
+        spent latches belong to this reset domain; carry generation is unchanged.
         """
         if oneshot:
             taps = []
@@ -165,7 +179,8 @@ class Gates:
         relays (driver delayed carry-in, veto x), sum = x xor carry-in (ordered).
         Returns (sums, carries, x, delayed carry-ins)."""
         n = len(Ad)
-        x = [self.xor2_ordered(f"{name}.fa{i}.x", bx[i], Ad[i]) for i in range(n)]
+        x = [self.xor2_ordered(f"{name}.fa{i}.x", bx[i], Ad[i],
+                              oneshot=self.operand_xor_oneshot) for i in range(n)]
         sums, carries, cds = [], [], []
         for i in range(n):
             c1, c0 = self.latch(f"{name}.fa{i}.c1"), self.latch(f"{name}.fa{i}.c0")
