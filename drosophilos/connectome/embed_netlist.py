@@ -83,6 +83,8 @@ class Placement:
     objective: float = 0.0  # carried - isolation_weight * sum over hosts of (log1p(in_ext) + 0.25 * log1p(out_ext)) - cap * unplaced
     ffpair_drivers: dict = field(default_factory=dict)  # flip-flop hosts: {"hosts": placed members, "with_driver": those with an excitatory input >= the loop threshold}
     proxy_readout: dict = field(default_factory=dict)  # flip-flop proxies: {"proxies": designed, "placed": on a host, "edges": designed edges out of a proxy, "carried": of those carried}
+    allowed_hosts: int | None = None  # size of the caller's host pool; None means unrestricted
+    region: str | None = None
 
     def summary(self, net: Netlist) -> dict:
         ex = self.exposure
@@ -92,6 +94,7 @@ class Placement:
                 "missing_by_class": self.missing_by_class,
                 "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy,
                 "isolation_weight": self.isolation_weight, "objective": round(self.objective, 3),
+                "allowed_hosts": self.allowed_hosts, "region": self.region,
                 "external_in_edges": ex.get("in_edges", 0), "external_out_edges": ex.get("out_edges", 0),
                 "external_in_synapses": ex.get("in_total", 0), "external_out_synapses": ex.get("out_total", 0),
                 "external_in_mean": ex.get("in_mean", 0.0), "external_out_mean": ex.get("out_mean", 0.0),
@@ -191,6 +194,7 @@ class _Anatomy:
     def __init__(self, m: MCNS, policy: Policy):
         self.m, self.n = m, m.n
         self.C, self.CT = _count_matrix(m)
+        self.diagonal = self.C.diagonal()  # self-edge scoring shares this whole-brain view
         nt = m.neurons["nt"].to_numpy()
         self.exc = np.isin(nt, policy.excitatory_nt)
         self.inh = np.isin(nt, policy.inhibitory_nt)
@@ -555,8 +559,9 @@ class _Search:
     def __init__(self, D: _Design, A: _Anatomy, rng: np.random.Generator, hub_first: bool, cand_cap: int,
                  chain_budget: int, max_backtracks: int, backtrack_depth: int, deadline: float,
                  mac_max: int = 0, order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0,
-                 isolation_weight: float = 0.0):
+                 isolation_weight: float = 0.0, allowed_hosts: np.ndarray | None = None):
         self.D, self.A, self.rng = D, A, rng
+        self.allowed_hosts = allowed_hosts
         self.iso_w = isolation_weight
         self.iso_pen = isolation_penalty(A, isolation_weight)  # per real neuron; every ranking subtracts it
         self.pen_unplaced = penalty_cap(A, isolation_weight)  # a node left out is charged the noisiest neuron's penalty
@@ -588,6 +593,8 @@ class _Search:
         fan: dict = {}
         for d in range(n):
             mask = (A.exc if D.sign[d] == 1 else A.inh if D.sign[d] == -1 else np.ones(A.n, bool)).copy()
+            if self.allowed_hosts is not None:
+                mask &= self.allowed_hosts
             reqs = sorted(int(D.req[e]) for e in D.hard_out[d])
             for r in set(reqs):
                 mask &= A.outdeg(r) >= sum(1 for x in reqs if x >= r)
@@ -675,7 +682,10 @@ class _Search:
 
     # ---- assignment and forward checking --------------------------------------------
     def _free(self, arr: np.ndarray) -> np.ndarray:
-        return arr[~self.used[arr]]
+        free = ~self.used[arr]
+        if self.allowed_hosts is not None:
+            free &= self.allowed_hosts[arr]
+        return arr[free]
 
     def assign(self, cand: dict, soft: bool = False) -> list:
         """Assign a motif's nodes; forward-check every unplaced hard neighbour, then propagate
@@ -956,7 +966,7 @@ class _Search:
         cover = np.zeros(A.n, np.float64)
         dense = np.zeros(A.n, np.int32)
         for e in D.self_out[h]:
-            cover += (A.C.diagonal() >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)
+            cover += (A.diagonal >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)
         for e in D.soft_out[h] + D.hard_out[h]:
             x, r = int(D.dst[e]), int(D.req[e])
             Ar, _ = A.A(r)
@@ -1210,7 +1220,7 @@ class _Search:
         D, A = self.D, self.A
         votes: list = []
         for e in D.self_out[d]:
-            votes.append(np.flatnonzero((A.C.diagonal() >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)))
+            votes.append(np.flatnonzero((A.diagonal >= D.req[e]) & (A.exc if D.esign[e] > 0 else A.inh)))
         for e in D.hard_out[d] + D.soft_out[d]:
             x = int(D.dst[e])
             if self.real[x] >= 0:
@@ -1223,6 +1233,8 @@ class _Search:
             return None
         cnt = np.bincount(np.concatenate(votes), minlength=A.n)
         sign_mask = A.exc if D.sign[d] == 1 else A.inh if D.sign[d] == -1 else np.ones(A.n, bool)
+        if self.allowed_hosts is not None:
+            sign_mask = sign_mask & self.allowed_hosts
         cnt = np.where(sign_mask & ~self.used, cnt, 0)
         if cnt.max() == 0:
             return None
@@ -1498,7 +1510,8 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
                   max_backtracks: int = 8, backtrack_depth: int = 3, repair_rounds: int = 6, seed: int = 0,
                   strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=(),
                   order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0,
-                  isolation_weight: float = 0.0, ff_driver: bool = True) -> Placement:
+                  isolation_weight: float = 0.0, ff_driver: bool = True,
+                  allowed_hosts=None, region: str | None = None) -> Placement:
     """Motif-level placement with backtracking and forward checking (module docstring), then
     a large-neighbourhood repair. Runs up to `restarts` descents, cycling `strategies`, within
     `time_limit_s`; returns the placement that carries the most designed edges.
@@ -1523,8 +1536,25 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
     members each have an excitatory input >= the loop threshold (the driver the designed bias
     stands in for; anatomically unnecessary since the bias is a parameter edit, but the pool
     bench/h1_inhpairs.py counted); False draws from every mutual inhibitory pair. Either way
-    Placement.ffpair_drivers reports how many chosen hosts have such a driver."""
+    Placement.ffpair_drivers reports how many chosen hosts have such a driver.
+    `allowed_hosts`: a boolean mask of length m.n or an array of neuron indices. Only these
+    neurons may host the circuit; anatomy, parasitic accounting and exposure remain whole-brain.
+    None preserves the unrestricted search. `region` names the pool in Placement.summary."""
     t0 = time.time()
+    host_mask = None
+    if allowed_hosts is not None:
+        pool = np.asarray(allowed_hosts)
+        if pool.ndim != 1:
+            raise ValueError("allowed_hosts must be a one-dimensional mask or index array")
+        if pool.dtype == np.bool_:
+            if pool.size != m.n:
+                raise ValueError("allowed_hosts boolean mask must have length m.n")
+            host_mask = pool.copy()
+        else:
+            if pool.size and (not np.issubdtype(pool.dtype, np.integer) or (pool < 0).any() or (pool >= m.n).any()):
+                raise ValueError("allowed_hosts indices must be integers in [0, m.n)")
+            host_mask = np.zeros(m.n, bool)
+            host_mask[pool.astype(np.int64)] = True
     A = _Anatomy(m, policy)
     D = _Design(net, policy, hub_deg, hard_hubs, ff_driver=ff_driver)
     if verbose:
@@ -1544,7 +1574,8 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
         run_deadline = min(deadline, time.time() + per_run) if k < restarts - 1 else deadline
         S = _Search(D, A, rng, hub_first=(strategy == "hub_first"), cand_cap=cand_cap, chain_budget=chain_budget,
                     max_backtracks=max_backtracks, backtrack_depth=backtrack_depth, deadline=run_deadline,
-                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w, isolation_weight=isolation_weight)
+                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w, isolation_weight=isolation_weight,
+                    allowed_hosts=host_mask)
         t1 = time.time()
         S.run()
         S.relaxed()
@@ -1552,6 +1583,8 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
         before = pre.carried
         gained = S.improve(rounds=repair_rounds)
         pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy, isolation_weight)
+        pl.allowed_hosts = int(host_mask.sum()) if host_mask is not None else None
+        pl.region = region
         pl.order_note = f"backtracks {S.backtracks}; {before} carried before repair, +{gained} repaired; descent {time.time() - t1:.1f} s"
         if verbose:
             print(f"[place] restart {k} ({strategy}): carried {before} -> {pl.carried}/{net.nnz} placed {len(pl.mapping)}/{net.n} "

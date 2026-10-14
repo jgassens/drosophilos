@@ -140,6 +140,78 @@ def test_autapses_preserve_motifs_and_never_constrain_host_choice():
     assert len(b.missing) == 3
 
 
+def test_carriable_autapse_on_decoy_cannot_override_hard_edges():
+    net, drive, ids = latch_relay_netlist()
+    policy = Policy(k_max=4)
+    m, idx = synthetic_mcns(policy, drive)
+    # P has a carriable excitatory autapse, but only E fits the relay's hard edges.
+    q = round(.2 * drive.loop)
+    net.synapse(ids["edge"], ids["edge"], q, 0)
+    m = MCNS(m.neurons, np.append(m.pre, idx["P"]).astype(np.int32),
+             np.append(m.post, idx["P"]).astype(np.int32),
+             np.append(m.count, policy.req_count(q)).astype(np.int32), min_syn=1)
+    pl = place_netlist(net, m, policy, restarts=1, time_limit_s=20)
+    assert pl.mapping[ids["edge"]] == idx["E"]
+    assert pl.carried == 6 and not pl.unplaced
+    assert pl.missing == [(ids["edge"], ids["edge"], q, "autapse (no host self-edge)")]
+
+
+@pytest.mark.parametrize("isolation_weight", [0.0, 1.0])
+def test_allowed_hosts_none_and_all_true_preserve_placement(isolation_weight):
+    net, drive, _ = latch_relay_netlist()
+    policy = Policy(k_max=4)
+    m, _ = synthetic_mcns(policy, drive, twin_latch=True)
+    kwargs = dict(policy=policy, restarts=2, time_limit_s=20, seed=7, isolation_weight=isolation_weight)
+    baseline = place_netlist(net, m, **kwargs)
+    unrestricted = place_netlist(net, m, allowed_hosts=None, **kwargs)
+    all_hosts = place_netlist(net, m, allowed_hosts=np.ones(m.n, bool), **kwargs)
+    for pl in (unrestricted, all_hosts):
+        assert pl.mapping == baseline.mapping
+        assert pl.carried == baseline.carried and pl.missing == baseline.missing
+        assert pl.exposure == baseline.exposure and pl.objective == baseline.objective
+        assert pl.motifs_search == baseline.motifs_search and pl.strategy == baseline.strategy
+
+
+@pytest.mark.parametrize("indices", [False, True])
+@pytest.mark.parametrize("exclude_inhibitor", [False, True])
+@pytest.mark.parametrize("hub_deg", [1, 20])
+def test_allowed_hosts_restrict_all_search_paths_and_keep_whole_brain_exposure(indices, exclude_inhibitor, hub_deg):
+    net, drive, _ = latch_relay_netlist()
+    policy = Policy(k_max=4)
+    m, idx = synthetic_mcns(policy, drive)
+    mask = np.zeros(m.n, bool)
+    mask[[idx[k] for k in ("S", "E", "U", "V")]] = True
+    mask[idx["I"]] = not exclude_inhibitor
+    pl = place_netlist(net, m, policy, allowed_hosts=np.flatnonzero(mask) if indices else mask,
+                       region="planted", restarts=2, time_limit_s=20, isolation_weight=1, hub_deg=hub_deg)
+    assert pl.mapping and all(mask[r] for r in pl.mapping.values())
+    assert pl.summary(net)["allowed_hosts"] == int(mask.sum())
+    assert pl.summary(net)["region"] == "planted"
+    hosts = set(pl.mapping.values())
+    incoming = [int(c) for s, d, c in zip(m.pre, m.post, m.count) if d in hosts and s not in hosts]
+    outgoing = [int(c) for s, d, c in zip(m.pre, m.post, m.count) if s in hosts and d not in hosts]
+    assert incoming and outgoing  # real exposure exists beyond the permitted pool
+    assert pl.exposure["in_total"] == sum(incoming)
+    assert pl.exposure["out_total"] == sum(outgoing)
+    assert pl.exposure["in_edges"] == len(incoming) and pl.exposure["out_edges"] == len(outgoing)
+
+
+@pytest.mark.parametrize("pool", [np.array([], dtype=int), np.zeros(89, bool)])
+def test_empty_allowed_hosts_leaves_every_neuron_unplaced(pool):
+    net, drive, _ = latch_relay_netlist()
+    m, _ = synthetic_mcns(Policy(), drive)
+    pl = place_netlist(net, m, allowed_hosts=pool, restarts=1, time_limit_s=20)
+    assert pl.mapping == {} and pl.unplaced == list(range(net.n))
+
+
+@pytest.mark.parametrize("pool", [np.array([True]), np.array([[0]]), np.array([-1]), np.array([10000]), np.array([1.5])])
+def test_invalid_allowed_hosts(pool):
+    net, drive, _ = latch_relay_netlist()
+    m, _ = synthetic_mcns(Policy(), drive)
+    with pytest.raises(ValueError, match="allowed_hosts"):
+        place_netlist(net, m, allowed_hosts=pool)
+
+
 def test_self_only_neuron_scores_hosts_without_a_hard_sign_constraint():
     _, drive, _, policy, m, idx, _ = synthetic_autapses()
     net = Netlist(Params())
