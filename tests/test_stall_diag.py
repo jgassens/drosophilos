@@ -15,6 +15,142 @@ from drosophilos.sim.model import Params
 
 
 PARAMS = Params()
+F16 = dict(rate_robust=True, experimental_autapse=True, ordered_xor_oneshot=True,
+           f_width16_experimental=True)
+
+
+@pytest.fixture(scope="module")
+def perspective_f16():
+    from drosophilos.bench.kernel_campaign import block
+
+    return block("perspective", PARAMS, **F16)[:2]
+
+
+def test_perspective_f16_record_rebuilds_the_juno_topology(perspective_f16):
+    ks, pl = perspective_f16
+    assert (pl.net.n, pl.net.nnz) == (123_323, 249_940)
+    record = dict(block="perspective", **pl.build_options, neurons=pl.net.n, edges=pl.net.nnz)
+    _params, rebuilt_ks, rebuilt = build_tick_pipeline(record)
+    assert rebuilt_ks == ks
+    assert rebuilt.build_options == pl.build_options
+    assert rebuilt.net.roles == pl.net.roles
+    np.testing.assert_array_equal(rebuilt.net.topology().quanta, pl.net.topology().quanta)
+    assert len([cell for cell in rebuilt.cells if cell.op == "MULP_ROW"]) == 16
+
+
+@pytest.mark.parametrize("key,value", [
+    ("f_width16_experimental", False), ("f_width16_experimental", 1),
+    ("ordered_xor_oneshot_version", 999), ("experimental_autapse_version", 999),
+    ("ordered_xor_oneshot_mul_version", 999),
+])
+def test_perspective_f16_record_refuses_mismatched_options(perspective_f16, key, value):
+    _ks, pl = perspective_f16
+    record = dict(block="perspective", **pl.build_options, neurons=pl.net.n, edges=pl.net.nnz)
+    record[key] = value
+    with pytest.raises(ValueError):
+        build_tick_pipeline(record)
+
+
+@pytest.mark.parametrize("name", ["render", "fanout", "mul8"])
+def test_other_kernel_campaign_blocks_rebuild_exact_options(name):
+    from drosophilos.bench.kernel_campaign import block
+
+    ks, default, _tokens, _ref = block(name, PARAMS)
+    # block() exposes only flags, while records contain every effective build option.
+    pl = build_pipeline(PARAMS, ks.width, ks.cells, consts=ks.consts, mems=ks.mems,
+                        outputs=ks.outputs, idle_hops=21, request_clear_pulses=5,
+                        kernel_kill_pulses=5)
+    record = dict(block=name, **pl.build_options, neurons=pl.net.n, edges=pl.net.nnz,
+                  kill_train=[5, pl.build_options["kill_strength"]])
+    rebuilt = build_tick_pipeline(record)[2]
+    assert rebuilt.build_options == pl.build_options != default.build_options
+    assert rebuilt.net.roles == pl.net.roles
+    np.testing.assert_array_equal(rebuilt.net.topology().quanta, pl.net.topology().quanta)
+    if name == "mul8":
+        f_pl = block(name, PARAMS, rate_robust=True, experimental_autapse=True,
+                     ordered_xor_oneshot=True)[1]
+        f_record = dict(block=name, **f_pl.build_options)
+        assert build_tick_pipeline(f_record)[2].build_options == f_pl.build_options
+        f_record["ordered_xor_oneshot_mul_version"] = 999
+        with pytest.raises(ValueError, match="ordered_xor_oneshot_mul_version"):
+            build_tick_pipeline(f_record)
+
+
+def test_f16_mulp_cpu_dump_names_blocked_phase_and_carried_operand_bits(tmp_path, monkeypatch):
+    from drosophilos.bench import kernel_campaign
+    from drosophilos.bench.fault_diag import analyze_faults
+    from drosophilos.bench.stall_diag import main, write_compact_dump
+    from drosophilos.compiler.kernel import KernelSpec
+    from drosophilos.sim.ref64 import RefSim
+
+    # Two real MULP_ROW cells retain the perspective packing and reset/handshake
+    # circuits while keeping the 25k-step single-copy simulation small.
+    ks = KernelSpec([
+        dict(name="mul.r0", op="MULP_ROW", a="input", b=("const", "one"), row=0, prev=None),
+        dict(name="mul", op="MULP_ROW", a="mul.r0", row=1, prev="mul.r0"),
+    ], {"one": 1}, {}, "input", 16)
+    ks.outputs = ["mul"]
+    real_block = kernel_campaign.block
+
+    def small_block(name, params, **options):
+        if name != "perspective_like":
+            return real_block(name, params, **options)
+        pl = build_pipeline(params, ks.width, ks.cells, consts=ks.consts,
+                            outputs=ks.outputs, **options)
+        return ks, pl, [0], [[0]]
+
+    monkeypatch.setattr(kernel_campaign, "block", small_block)
+    _ks, pl, _tokens, _ref = small_block("perspective_like", PARAMS, **F16)
+    previous, cell = pl.cells
+    bit = 2 * pl.n + 3 + 7  # carried B7, not a low result bit
+    silenced = np.zeros(pl.net.n, dtype=bool)
+    silenced[list(cell.stage.valid[bit].members)] = True
+    sim = RefSim(pl.net.topology(), PARAMS, silenced=silenced)
+    load_pipeline_image(sim, pl)
+    # Seed a valid preceding row word, then start its reader. The deliberately
+    # silenced B7 valid latch prevents completion even though its rail is lit.
+    word = [pair[0].u for pair in previous.master.rails]
+    sim.add_events(0, [0] * len(word), word, [pl.drive.ignite] * len(word))
+    sim.add_events(0, [1000], [cell.start], [pl.drive.ignite])
+    sim.run(25_000)
+    trace = sim.trace.events
+    assert len(trace) and np.any(trace["neuron"] == cell.start)
+    dump_path = tmp_path / "copy75.npz"
+    write_compact_dump(dump_path, trace["step"], trace["neuron"], pl.net.roles,
+                       capture_ids=range(pl.net.n), window={"start_step": 0, "end_step": 24_999})
+    record = dict(block="perspective_like", **pl.build_options, neurons=pl.net.n, edges=pl.net.nnz,
+                  copies=100, tokens=16, output_cells=ks.outputs,
+                  per_node=[[0, 0, 16]] * 100, per_node_refusals=[0] * 100)
+    campaign_path = tmp_path / "campaign.json"
+    campaign_path.write_text(json.dumps(record))
+    out_path = tmp_path / "stall.md"
+    report = main([str(dump_path), "--campaign", str(campaign_path), "--node", "75",
+                   "--out", str(out_path)])
+    assert report["classification"] == "datapath"
+    assert report["anomaly"]["cell"] == "mul"
+    assert report["blocked_phase"] == "stage completion"
+    assert report["steps_since_progress"] >= report["stall_threshold_steps"]
+    assert report["counts"]["unfinished"] == report["counts"]["requested_outputs"] == 16
+    view = report["datapath"]
+    assert view["operation"] == "MULP_ROW" and view["row"] == 1
+    assert view["width"] == 16 and view["word_width"] == len(view["bits"]) == 51
+    assert [b["label"] for b in view["bits"]] == (
+        [f"R{i}" for i in range(16)] + ["C", "Z", "V"] +
+        [f"A{i}" for i in range(16)] + [f"B{i}" for i in range(16)])
+    assert bit in view["valid_bits_silent"]
+    assert view["signals"][cell.stage.rails[bit][0].u]["count"] > 0
+    assert not view["unavailable_ids"]
+    assert [operand["port"] for operand in view["operands"]] == ["acc", "A", "B"]
+    for operand, offset in zip(view["operands"], (0, 19, 35)):
+        assert len(operand["bits"]) == 16
+        last_bit = operand["bits"][15]
+        assert last_bit["word_bit"] == offset + 15
+        assert last_bit["rails"][0] == list(previous.master.rails[offset + 15][0].members)
+    text = out_path.read_text()
+    assert "MULP_ROW, row 1" in text and "42 (B7)" in text
+    assert "First blocked phase: **stage completion**" in text
+    assert pl.net.roles[cell.stage.valid[bit].u] in text
+    assert analyze_faults(dump_path, campaign_path, node=75)["build_options"] == pl.build_options
 
 
 @pytest.mark.parametrize("compact", [False, True])

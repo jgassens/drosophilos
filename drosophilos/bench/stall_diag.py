@@ -1,6 +1,6 @@
 """Localize a resident-kernel stall from one campaign copy's spike dump.
 
-The dump is read-only.  The tool rebuilds the tick kernel, verifies every recorded
+The dump is read-only.  The tool rebuilds the recorded kernel, verifies every recorded
 ``neuron -> role`` mapping against that netlist, and reconstructs request-rail intervals
 and the request -> go -> START -> ACT^d -> stage -> commit -> DONE path.  It accepts both
 the compact seed-107 format (``uniq``/``role_of``) and the role-filtered replay format
@@ -133,16 +133,20 @@ def _proves_current_rate_circuit(campaign: dict[str, Any], pl) -> bool:
 
 
 def build_tick_pipeline(campaign: dict[str, Any]):
-    """Rebuild kernel_campaign tick or Stage D, including its output selection."""
+    """Rebuild any kernel_campaign block or Stage D, including its output selection.
+
+    The historical function name and tick defaults are retained for old captures.
+    """
     # Stage D records store compiled options separately from top-level metadata.
     # Keep the historical top-level precedence for kernel_campaign records.
     if campaign.get("stage") == "D":
         campaign = {**campaign, **campaign.get("build_options", {})}
-    if campaign.get("block", "tick") != "tick":
-        raise ValueError(f"stall_diag currently diagnoses the tick kernel, not {campaign.get('block')!r}")
+    if ("f_width16_experimental" in campaign and
+            type(campaign["f_width16_experimental"]) is not bool):
+        raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     from ..lib.kernel import TRUE_GUARD_VERSION
     from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
-    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION
+    from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION, ORDERED_XOR_ONESHOT_MUL_VERSION
 
     if campaign.get("ordered_xor_oneshot", False) and campaign.get("ordered_xor_oneshot_version") != ORDERED_XOR_ONESHOT_VERSION:
         raise ValueError("unsupported ordered-XOR one-shot circuit version")
@@ -164,7 +168,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         program = Path(campaign.get("program", PROGRAM))
         k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
         options = dict(campaign.get("build_options", {}))
-        for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version", "ordered_xor_oneshot_version"):
+        for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version",
+                         "ordered_xor_oneshot_version", "ordered_xor_oneshot_mul_version"):
             options.pop(metadata, None)
         datapath = options.pop("datapath", campaign.get("datapath", "generic"))
         rate_robust = options.pop("rate_robust", campaign.get("rate_robust", False))
@@ -187,6 +192,41 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
+    elif campaign.get("block", "tick") != "tick":
+        # Use the campaign's own compiler/spec selection (including pipelined MULP),
+        # then apply recorded timing/drive options beyond block()'s CLI flag set.
+        from .kernel_campaign import block
+
+        params = Params()
+        flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
+                 "verified_register_reset", "experimental_register_reset", "experimental_autapse",
+                 "ordered_xor_oneshot", "f_width16_experimental")
+        ks, pl, _tokens, _reference = block(
+            campaign["block"], params, datapath=campaign.get("datapath", "generic"),
+            **{key: campaign.get(key, False) for key in flags},
+        )
+        options = {key: campaign.get(key, value) for key, value in pl.build_options.items()
+                   if not key.endswith("_version")}
+        if "kill_train" in campaign:
+            pulses, strength = campaign["kill_train"]
+            options["kernel_kill_pulses"] = campaign.get("kernel_kill_pulses", pulses)
+            options["request_clear_pulses"] = campaign.get("request_clear_pulses", pulses)
+            options["kill_strength"] = campaign.get("kill_strength", strength)
+        if any(value != pl.build_options.get(key) for key, value in options.items()):
+            strength = options.pop("kill_strength")
+            pl = build_pipeline(params, ks.width, ks.cells, consts=ks.consts, mems=ks.mems,
+                                outputs=ks.outputs,
+                                drive=replace(Drive.from_params(params), kill_strength=float(strength)),
+                                **options)
+        # Refuse metadata/option drift rather than silently reading a different netlist.
+        for key, value in pl.build_options.items():
+            if key in campaign and key != "rate_robust_version":
+                recorded = campaign[key]
+                if type(recorded) is not type(value) or recorded != value:
+                    raise ValueError(f"unsupported campaign build option {key}: "
+                                     f"recorded {recorded!r}, current {value!r}")
+        if "edges" in campaign and int(campaign["edges"]) != pl.net.nnz:
+            raise AssertionError(f"campaign has {campaign['edges']} edges; rebuilt kernel has {pl.net.nnz}")
     else:
         source = _repo_root() / "examples" / "tick2.c"
         prog = compile_c(source.read_text())
@@ -228,9 +268,17 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             experimental_register_reset=campaign.get("experimental_register_reset", False),
             experimental_autapse=campaign.get("experimental_autapse", False),
             ordered_xor_oneshot=campaign.get("ordered_xor_oneshot", False),
+            f_width16_experimental=campaign.get("f_width16_experimental", False),
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )
+    for key in ("f_width16_experimental", "ordered_xor_oneshot_mul_version"):
+        if key in campaign:
+            current = (pl.build_options.get(key, False) if key == "f_width16_experimental"
+                       else ORDERED_XOR_ONESHOT_MUL_VERSION)
+            if type(campaign[key]) is not type(current) or campaign[key] != current:
+                raise ValueError(f"unsupported campaign build option {key}: "
+                                 f"recorded {campaign[key]!r}, current {current!r}")
     recorded_rate_version = campaign.get("rate_robust_version")
     if (campaign.get("rate_robust", False) and
             recorded_rate_version != RATE_ROBUST_VERSION and
@@ -244,7 +292,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         )
     expected_n = campaign.get("neurons")
     if expected_n is not None and int(expected_n) != pl.net.n:
-        raise AssertionError(f"campaign has {expected_n} neurons; rebuilt tick kernel has {pl.net.n}")
+        raise AssertionError(f"campaign has {expected_n} neurons; rebuilt kernel has {pl.net.n}")
     return params, ks, pl
 
 
@@ -761,7 +809,11 @@ def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
         valid_prefix = net.roles[stage.valid[bit].u].removesuffix(".L.u") + "."
         valid_probes = [n for n in ids if net.roles[n].startswith(valid_prefix)]
         wanted.update(ids)
-        label = f"R{bit}" if bit < pl.n else {pl.n: "C", pl.n + 1: "Z", pl.n + 2: "V"}.get(bit, f"b{bit}")
+        if cell.op == "MULP_ROW" and bit >= pl.n + 3:
+            label = (f"A{bit - pl.n - 3}" if bit < 2 * pl.n + 3
+                     else f"B{bit - 2 * pl.n - 3}")
+        else:
+            label = f"R{bit}" if bit < pl.n else {pl.n: "C", pl.n + 1: "Z", pl.n + 2: "V"}.get(bit, f"b{bit}")
         bits.append({"bit": bit, "label": label, "valid": stage.valid[bit].u,
                      "rails": members, "drivers": drivers, "fault": stage.fault[bit],
                      "valid_probes": valid_probes, "cone_ids": ids})
@@ -769,7 +821,13 @@ def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
 
     operands = []
     by_name = {c.name: c for c in pl.cells}
-    for port, source in (("A", cell.a), ("B", cell.b), ("condition", cell.c)):
+    operand_specs = [("A", cell.a, 0), ("B", cell.b, 0), ("condition", cell.c, 0)]
+    if cell.op == "MULP_ROW" and cell.row > 0:
+        # Later rows sample acc, A and B from the preceding row's packed master,
+        # not from the original input registers (which may already hold a new token).
+        operand_specs = [("acc", cell.prev, 0), ("A", cell.prev, pl.n + 3),
+                         ("B", cell.prev, 2 * pl.n + 3)]
+    for port, source, offset in operand_specs:
         if source is None:
             continue
         if isinstance(source, tuple) and source[0] == "const":
@@ -781,9 +839,9 @@ def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
             word = pl.inputs[stream][0].master.rails if stream is not None else by_name[key].master.rails
         operand_bits = []
         for bit in ([pl.n + 1] if port == "condition" else range(pl.n)):
-            rails = [list(rail.members) for rail in word[bit]]
+            rails = [list(rail.members) for rail in word[offset + bit]]
             wanted.update(x for pair in rails for x in pair)
-            operand_bits.append({"bit": bit, "rails": rails})
+            operand_bits.append({"bit": bit, "word_bit": offset + bit, "rails": rails})
         operands.append({"port": port, "source": source, "bits": operand_bits})
 
     def outgoing(source, inhibitory_only=False):
@@ -850,7 +908,9 @@ def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
     edges = [{"source": net.src[e], "target": net.dst[e], "quanta": net.quanta[e],
               "delay_steps": net.delay[e]} for e in sorted(edge_ids)]
     return {
-        "cell": cell_name, "operation": cell.op, "start": start, "end": end, "actd": actd,
+        "cell": cell_name, "operation": cell.op, "row": cell.row,
+        "width": pl.n, "word_width": len(stage.rails),
+        "start": start, "end": end, "actd": actd,
         "gap_steps": gap, "controls": controls, "bits": bits, "operands": operands,
         "signals": signals, "edges": edges,
         "reset_targets": sorted({net.dst[e] for e in reset_edges}),
@@ -921,6 +981,16 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
         stop = _first_after(starts, anomaly["start"] + 1)
         datapath = datapath_view(pl, dump, cell_name, anomaly["start"], stop)
 
+    blocked_phase = {"stuck_request": "request / repair / clear", "dark_request": "request",
+                     "blocked_go": "go / START", "datapath": "stage completion",
+                     "consumer_holds": "commit", "completion": "DONE",
+                     "producer": "input READY"}.get(anomaly["kind"])
+    last_progress = None
+    if blocked_phase is not None:
+        last_progress = anomaly["time"]
+        if datapath is not None:
+            last_progress = datapath["actd"] if datapath["actd"] is not None else anomaly["start"]
+
     refusals = 0
     refusal_roles = []
     for neuron, role in enumerate(pl.net.roles):
@@ -932,6 +1002,7 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
 
     return {
         "dump": str(dump_path), "campaign": str(campaign_path), "node": node,
+        "block": campaign.get("block", "tick"), "build_options": dict(pl.build_options),
         "dump_format": dump.format_name, "spikes": len(dump.step), "distinct_neurons": len(dump.present_ids),
         "capture_window": dump.window,
         "role_id_drift": dump.role_id_drift,
@@ -941,6 +1012,8 @@ def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) ->
         "output_cells": list(ks.outputs), "counts": _campaign_counts(campaign, node),
         "detected_refusals": refusals, "refusal_roles": refusal_roles,
         "classification": anomaly["kind"], "anomaly": anomaly, "candidates": candidates,
+        "blocked_phase": blocked_phase, "last_progress_step": last_progress,
+        "steps_since_progress": dump.end - last_progress if last_progress is not None else None,
         "first_blocked_cell": cell_name if anomaly["kind"] in
         ("stuck_request", "blocked_go", "dark_request") else None,
         "waiting_producer": anomaly.get("waiting_producer"),
@@ -995,7 +1068,10 @@ def render_datapath(view: dict[str, Any]) -> str:
 
     lines = [
         "## Bit-level datapath evidence", "",
-        f"`{view['cell']}` ({view['operation']}), steps {view['start']:,}–{view['end']:,}, inclusive. "
+        f"`{view['cell']}` ({view['operation']}"
+        + (f", row {view['row']}, {view['width']}-bit operands / {view['word_width']}-bit packed word"
+           if view.get('operation') == 'MULP_ROW' else "")
+        + f"), steps {view['start']:,}–{view['end']:,}, inclusive. "
         "Valid latches are OR indicators: they establish neither the bit value nor exclusive "
         "dual-rail validity. A fault-gate spike does not by itself prove a double rail. "
         "Unavailable means omitted from the capture, not silent.", "",
@@ -1052,7 +1128,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     anomaly = report["anomaly"]
     roles = report["roles"]
     lines = [
-        f"# Tick stall diagnostic: copy {report['node']}",
+        f"# {report.get('block', 'tick').capitalize()} stall diagnostic: copy {report['node']}",
         "",
         "## Classification",
         "",
@@ -1139,6 +1215,11 @@ def render_markdown(report: dict[str, Any]) -> str:
             "The captured roles do not establish a request, datapath, consumer-hold, completion, "
             "or producer anomaly beyond the workload-derived stall threshold."
         )
+
+    if report.get("blocked_phase") is not None:
+        lines += ["", f"First blocked phase: **{report['blocked_phase']}**. Last observed progress "
+                  f"at step **{_n(report['last_progress_step'])}**; "
+                  f"**{_n(report['steps_since_progress'])} steps** elapsed through capture end."]
 
     lines += [
         "",
