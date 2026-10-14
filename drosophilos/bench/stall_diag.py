@@ -936,6 +936,97 @@ def datapath_view(pl, dump: SpikeDump, cell_name: str, start: int,
     }
 
 
+def arrival_alignment(emissions, delay_steps: int, spikes) -> list[dict[str, int | None]]:
+    """Bracket nominal synaptic arrivals with a target's recorded spikes.
+
+    Same-step spikes have age zero; this does not infer within-step event ordering,
+    membrane voltage, or whether inhibition killed a latch. Inputs must be sorted.
+    """
+    emissions = np.asarray(emissions, dtype=np.int64)
+    spikes = np.asarray(spikes, dtype=np.int64)
+    if delay_steps < 0 or any(v.ndim != 1 or np.any(np.diff(v) < 0)
+                              for v in (emissions, spikes)):
+        raise ValueError("need sorted one-dimensional steps and a nonnegative delay")
+    result = []
+    for emission in emissions:
+        arrival = int(emission) + delay_steps
+        index = int(np.searchsorted(spikes, arrival, side="right"))
+        previous = int(spikes[index - 1]) if index else None
+        result.append({"emission_step": int(emission), "arrival_step": arrival,
+                       "last_spike_step": previous,
+                       "age_steps": arrival - previous if previous is not None else None,
+                       "next_spike_step": int(spikes[index]) if index < len(spikes) else None})
+    return result
+
+
+def completion_view(pl, dump: SpikeDump, cell_name: str, start: int,
+                    stop: int | None = None) -> dict[str, Any]:
+    """Inspect a commit's COPY/master/completion path without inferring latch state.
+
+    The window is [start, stop), defaulting to capture end. Every cell-local probe
+    includes capture availability, pre-window counts and bounded spike samples. In
+    particular, a single rail-u spike must not be mistaken for established storage,
+    and an unavailable partner must not be called silent. Full traces remain in the
+    dump; use ``arrival_alignment`` on extracted events for reset-phase inspection.
+    """
+    cell = next(c for c in pl.cells if c.name == cell_name)
+    end = min(dump.end, stop - 1) if stop is not None else dump.end
+    capture_start = (int(dump.window["start_step"]) if dump.window else
+                     int(dump.step[0]) if len(dump.step) else 0)
+    if start < capture_start or start > end:
+        raise ValueError("completion window must start inside the capture")
+    net = pl.net
+    wanted = np.asarray(sorted({cell.commit_pulse} | {
+        i for i, role in enumerate(net.roles) if role.startswith(cell_name + ".")}), dtype=np.int64)
+    events = _extract_steps(dump, wanted, net.n)
+    signals = {}
+    for neuron in wanted.tolist():
+        values = events.get(neuron, np.empty(0, dtype=np.int64))
+        lo, hi = np.searchsorted(values, [start, end + 1])
+        selected = values[lo:hi]
+        isi = np.diff(selected)
+        available = _observed(dump, net.roles, neuron) or neuron in dump.current_to_dump
+        signals[neuron] = {
+            "role": net.roles[neuron], "available": available,
+            "count": len(selected), "count_before_start": int(lo),
+            "last_before_start": int(values[lo - 1]) if lo else None,
+            "first_step": int(selected[0]) if len(selected) else None,
+            "last_step": int(selected[-1]) if len(selected) else None,
+            "sample_steps": selected[:16].tolist(), "samples_truncated": len(selected) > 16,
+            "median_isi": float(np.median(isi)) if len(isi) else None,
+            "max_isi": int(isi.max()) if len(isi) else None,
+        }
+
+    bits = []
+    for bit, pair in enumerate(cell.master.rails):
+        label = (f"A{bit - pl.n - 3}" if bit < 2 * pl.n + 3 else f"B{bit - 2 * pl.n - 3}") if (
+            cell.op == "MULP_ROW" and bit >= pl.n + 3) else (
+            f"R{bit}" if bit < pl.n else
+            {pl.n: "C", pl.n + 1: "Z", pl.n + 2: "V"}.get(bit, f"b{bit}"))
+        bits.append({"bit": bit, "label": label,
+                     "master_rails": [list(rail.members) for rail in pair],
+                     "stage_rails": [list(rail.members) for rail in cell.stage.rails[bit]],
+                     "valid": list(cell.master.valid[bit].members),
+                     "copy_arms": list(cell.reg.copy_gates[2 * bit:2 * bit + 2])})
+    reset = cell.master.reset_inh
+    reset_edges = [{"target": dst, "quanta": q, "delay_steps": delay}
+                   for src, dst, q, delay in zip(net.src, net.dst, net.quanta, net.delay)
+                   if src == reset and q < 0]
+    pulses = events.get(reset, np.empty(0, dtype=np.int64))
+    pulses = pulses[np.searchsorted(pulses, start):np.searchsorted(pulses, end + 1)]
+    return {
+        "cell": cell_name, "start": start, "end": end, "bits": bits, "signals": signals,
+        "controls": {"commit": cell.commit_pulse, "master_reset": cell.master.reset_trigger,
+                     "master_reset_inh": reset, "master_ready": cell.master.ready,
+                     "copy": list(cell.reg.copy.members),
+                     "completion": list(cell.master.completion.members),
+                     "done": cell.reg.done_relay, "stage_reset": cell.stage.reset_trigger},
+        "reset_emissions": pulses.tolist(),
+        "reset_edges": reset_edges,
+        "unavailable_ids": [i for i, signal in signals.items() if not signal["available"]],
+    }
+
+
 def analyze_dump(dump_path: str | Path, campaign_path: str | Path, node: int) -> dict[str, Any]:
     """Return structured evidence used by the Markdown renderer and regression test."""
     campaign_path = Path(campaign_path)
