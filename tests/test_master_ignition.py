@@ -1,11 +1,12 @@
-"""Master recovery qualification; each slow parameter is a bounded laptop run.
+"""Master recovery candidate: separate opt-in cluster jobs and laptop smokes.
 
 RefSim and MixProbe retain the existing simulator, real four-tap reset, real
 READY chain and required-rail COPY arms. They do not prescribe storage spikes.
 """
 
 from dataclasses import replace
-from itertools import product
+import os
+from time import perf_counter, process_time
 
 import numpy as np
 import pytest
@@ -13,8 +14,8 @@ import pytest
 from drosophilos.lib.netlist import Drive, Netlist
 from drosophilos.protocol.celement import add_veto_relay
 from drosophilos.protocol.latch import (
-    MASTER_IGNITION_VERSION, add_experimental_autapses, add_latch, add_ready,
-    add_reset,
+    MASTER_IGNITION_PARTNER_DELAY_STEPS, MASTER_IGNITION_VERSION,
+    add_experimental_autapses, add_latch, add_ready, add_reset,
 )
 from drosophilos.protocol.rate import rate_tap
 from drosophilos.sim.model import Params, Topology
@@ -26,6 +27,13 @@ P = Params()
 D = replace(Drive.from_params(P), rate_robust=True)
 CASES = ("nominal", "weak_loop", "fast3sigma", "slow3sigma", "high_threshold", "negative_bias", "mix_b",
          "independent3sigma", "copy75")
+INITIALS = (pytest.param("empty", id="first-load"), pytest.param("reload", id="reload"))
+CLEAR_CASES = ("request28", "master74", "master17", "master24", "stage18",
+               "fast3sigma", "slow3sigma", "mix_b")
+CLUSTER = pytest.mark.skipif(os.environ.get("DROSO_IGNITION_CLUSTER") != "1",
+                             reason="ignition cluster evidence requires DROSO_IGNITION_CLUSTER=1")
+SMOKE = pytest.mark.skipif(os.environ.get("DROSO_IGNITION_SMOKE") != "1",
+                           reason="ignition laptop smoke requires DROSO_IGNITION_SMOKE=1")
 
 
 @pytest.mark.parametrize("block", ["tick", "render", "perspective"])
@@ -40,7 +48,7 @@ def test_configuration_f_cost_and_only_master_ignition_changes(block):
     assert old.net.n == new.net.n
     assert old.net.roles == new.net.roles and old.net.bias == new.net.bias
     registers = [reg for reg, _ in new.inputs.values()] + [c.reg for c in new.cells]
-    expected = Counter((arm, latch.v, D.ignite, 18)
+    expected = Counter((arm, latch.v, D.ignite, MASTER_IGNITION_PARTNER_DELAY_STEPS)
                        for reg in registers for arm, latch in
                        zip(reg.copy_gates, [l for pair in reg.master.rails for l in pair]))
     def edges(net):
@@ -62,7 +70,8 @@ def test_copy75_partner_handoff_at_reconstructed_draws_with_ignition():
                  bias=[-0.7152384644970224])
     sim.V[:] = P.E_L - .7152384644970224
     sim.add_events(0, [249, 293, 337, 384, 457], [0] * 5, [-2707] * 5)
-    sim.add_events(0, [1182, 1226], [0, 0], [round(D.ignite * np.exp(-.12)), 3281])
+    sim.add_events(0, [1182 + MASTER_IGNITION_PARTNER_DELAY_STEPS - 18, 1226],
+                   [0, 0], [round(D.ignite * np.exp(-.12)), 3281])
     sim.run(3200)
     assert len(sim.trace.events) >= 1
 
@@ -82,7 +91,8 @@ def test_copy75_complete_loop_at_reconstructed_draws(repair):
         sim.add_events(0, [249, 293, 337, 384, 457], [member] * 5, [reset] * 5)
     sim.add_events(0, [1182], [latch.u], [4661])
     if repair:
-        sim.add_events(0, [1182], [latch.v], [round(D.ignite * np.exp(-.12))])
+        sim.add_events(0, [1182 + MASTER_IGNITION_PARTNER_DELAY_STEPS - 18],
+                       [latch.v], [round(D.ignite * np.exp(-.12))])
     sim.run(5800)
     ev = sim.trace.events
     if repair:
@@ -93,7 +103,7 @@ def test_copy75_complete_loop_at_reconstructed_draws(repair):
         assert ev["step"].tolist() == [1210]
 
 
-def _fixture(*, repair=True, partner_delay=18):
+def _fixture(*, repair=True, partner_delay=MASTER_IGNITION_PARTNER_DELAY_STEPS):
     net = Netlist(P)
     master = [add_latch(net, D, f"M.b0r{r}") for r in (0, 1)]
     stage = [add_latch(net, D, f"Q.b0r{r}") for r in (0, 1)]
@@ -113,7 +123,7 @@ def _fixture(*, repair=True, partner_delay=18):
     return net, master, stage, fault, copy, trigger, ready, arms, readers
 
 
-def test_copy_timing_is_preserved_and_nominal_partner_establishes_earlier():
+def test_copy_timing_is_preserved_and_partner_ignition_is_staggered():
     times = []
     for repair in (False, True):
         net, master, stage, fault, copy, trigger, ready, arms, readers = _fixture(repair=repair)
@@ -124,10 +134,12 @@ def test_copy_timing_is_preserved_and_nominal_partner_establishes_earlier():
         times.append([int(ev["step"][ev["neuron"] == m][0])
                       for m in [ready, arms[1], *master[1].members]])
     assert times[0][:3] == times[1][:3] == [1872, 2009, 2056]
-    assert times[0][3] - times[1][3] == 60  # 6 ms, not an added recovery delay
+    assert times[1][2] < times[1][3] < times[0][3]
+    print("READY, COPY, u, v steps (off/on)", times, flush=True)
 
 
-def ignition_survey(case, initial, copies=40_000, seed=17531, *, stray=True, partner_delay=18):
+def ignition_survey(case, initial, copies, seed=17531, *, stray=True,
+                    partner_delay=MASTER_IGNITION_PARTNER_DELAY_STEPS):
     """Empty reset -> first COPY or live old rail -> reset -> opposite COPY.
 
     A second ordinary reset proves extinction of the newly established orbit.
@@ -185,7 +197,9 @@ def ignition_survey(case, initial, copies=40_000, seed=17531, *, stray=True, par
         if case == "independent3sigma":
             # All 4,096 signs of loop, feedback, reset, threshold, bias and
             # both COPY ignition weights. Repeat the complete grid 10 times.
-            signs = 2 * (((np.arange(lo, lo+count)[:, None] % 4096) >> np.arange(12)) & 1) - 1
+            # Coprime stride covers the complete grid; small smokes also vary
+            # upper axes instead of testing only the first adjacent corners.
+            signs = 2 * ((((17 * np.arange(lo, lo+count)[:, None]) % 4096) >> np.arange(12)) & 1) - 1
             for latch in master:
                 for e, (s, d, weight) in enumerate(zip(topo.src, topo.dst, topo.quanta)):
                     if s in latch.members and d in latch.members:
@@ -241,26 +255,34 @@ def ignition_survey(case, initial, copies=40_000, seed=17531, *, stray=True, par
     return totals
 
 
-@pytest.mark.parametrize("case", CASES[:6])
-@pytest.mark.parametrize("initial", ["empty", "reload"])
+@SMOKE
+@pytest.mark.parametrize("case", CASES)
+@pytest.mark.parametrize("initial", INITIALS)
 def test_master_ignition_corner_smoke(case, initial):
-    result = ignition_survey(case, initial, copies=16)
-    assert result == dict(copies=16, missing=0, double_rails=0, survivors=0,
-                         not_live_before_clear=0, old_survivors=0, multiple_copy=0)
+    run_ignition_survey(case, initial, smoke=True)
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("case,initial", product(CASES, ("empty", "reload")))
-def test_master_ignition_40000(case, initial):
-    count = 40_960 if case == "independent3sigma" else 40_000
+@CLUSTER
+@pytest.mark.parametrize("case", CASES)
+@pytest.mark.parametrize("initial", INITIALS)
+def test_master_ignition_cluster_survey(case, initial):
+    run_ignition_survey(case, initial)
+
+
+def run_ignition_survey(case, initial, *, smoke=False):
+    wall, cpu = perf_counter(), process_time()
+    count = 256 if smoke else (40_960 if case == "independent3sigma" else 40_000)
     result = ignition_survey(case, initial, copies=count)
-    print(case, initial, result, flush=True)
+    print("ignition", MASTER_IGNITION_VERSION, case, initial, "smoke" if smoke else "cluster",
+          result, f"wall_s={perf_counter()-wall:.3f}", f"cpu_s={process_time()-cpu:.3f}", flush=True)
     assert result == dict(copies=count, missing=0, double_rails=0, survivors=0,
-                         not_live_before_clear=0, old_survivors=0, multiple_copy=0)
+                         not_live_before_clear=0, old_survivors=0, multiple_copy=0), result
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("initial", ["empty", "reload"])
+@CLUSTER
+@pytest.mark.parametrize("initial", INITIALS)
 def test_all_independent_corners_establish_without_strays(initial):
     result = ignition_survey("independent3sigma", initial, copies=4096, stray=False)
     print("deterministic independent corners", initial, result, flush=True)
@@ -269,16 +291,29 @@ def test_all_independent_corners_establish_without_strays(initial):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("case", ["request28", "master74", "master17", "master24", "stage18",
-                                  "fast3sigma", "slow3sigma", "mix_b"])
-def test_dual_ignition_clear_guarantees_40000(case):
-    result = dual_clear_survey(case)
-    print(case, result, flush=True)
-    assert result == dict(copies=40_000, survivors=0, not_live_before_clear=0, reader_survivors=0)
+@CLUSTER
+@pytest.mark.parametrize("case", CLEAR_CASES)
+def test_master_ignition_clear_cluster_survey(case):
+    run_clear_survey(case)
 
 
-def dual_clear_survey(case, copies=40_000, seed=108):
-    """The eight earlier 40k clear scenarios, with dual-member ignition.
+@SMOKE
+@pytest.mark.parametrize("case", CLEAR_CASES)
+def test_master_ignition_clear_smoke(case):
+    run_clear_survey(case, smoke=True)
+
+
+def run_clear_survey(case, *, smoke=False):
+    wall, cpu = perf_counter(), process_time()
+    count = 256 if smoke else 40_000
+    result = delayed_clear_survey(case, copies=count)
+    print("ignition clear", MASTER_IGNITION_VERSION, case, "smoke" if smoke else "cluster",
+          result, f"wall_s={perf_counter()-wall:.3f}", f"cpu_s={process_time()-cpu:.3f}", flush=True)
+    assert result == dict(copies=count, survivors=0, not_live_before_clear=0, reader_survivors=0), result
+
+
+def delayed_clear_survey(case, copies, seed=108):
+    """The eight earlier clear scenarios, with staggered member ignition.
 
     Keep their real controllers and reconstructed old edges. Sample added
     autapses/readouts independently as before; changing the initial orbit is
@@ -302,8 +337,8 @@ def dual_clear_survey(case, copies=40_000, seed=108):
                        quanta=weights, V_th=thresholds, bias=biases)
         clears = rng.integers(3000, 4500, count)
         for b, clear in enumerate(clears):
-            for member in latch.members:
-                sim.add_events(b, [10, 11, 14, 23], [member] * 4, [D.ignite] * 4)
+            for member, offset in zip(latch.members, (0, MASTER_IGNITION_PARTNER_DELAY_STEPS - 18)):
+                sim.add_events(b, [s + offset for s in (10, 11, 14, 23)], [member] * 4, [D.ignite] * 4)
             sim.add_events(b, [2520, int(clear)], [latch.v if b % 2 else latch.u, trigger],
                            [300, D.relay_in])
         sim.run(6200)
@@ -318,6 +353,18 @@ def dual_clear_survey(case, copies=40_000, seed=108):
             steps, nodes = sim.spikes(reader)
             totals["reader_survivors"] += len(np.unique(nodes[steps > clears[nodes]+1500]))
     return totals
+
+
+@SMOKE
+def test_simultaneous_ignition_fast_clear_counterexample():
+    # Fixed small adverse control: the same draws/strays/clear phases must
+    # expose the rejected circuit, and the staggered candidate must clear.
+    old = ignition_survey("fast3sigma", "empty", copies=256, partner_delay=18)
+    new = ignition_survey("fast3sigma", "empty", copies=256)
+    print("simultaneous / staggered fast clear", old, new, flush=True)
+    assert old["survivors"] == 2, old
+    assert new == dict(copies=256, missing=0, double_rails=0, survivors=0,
+                       not_live_before_clear=0, old_survivors=0, multiple_copy=0), new
 
 
 @pytest.mark.parametrize("stage_value,fault_on", [(None, False), (0, False), (1, False), (1, True), ("both", False)])
@@ -381,6 +428,7 @@ def test_rejected_delay_candidate_copies_an_uncommitted_next_word(candidate):
 
 
 @pytest.mark.slow
+@CLUSTER
 def test_master_ignition_two_cell_kernel_computes_and_reloads():
     from drosophilos.lib.kernel import build_pipeline, run_pipeline
     pl = build_pipeline(P, 2, [dict(name="sum", op="ADD", a="input", b=("const", "one")),

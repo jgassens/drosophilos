@@ -386,3 +386,145 @@ pipeline overlap and completion timing determine output latency. No full GPU
 campaign or end-to-end throughput comparison was run here. Finite surveys do
 not prove indefinite holding or safety under unbounded Gaussian tails, remove
 F's separate rate-floor limitation, or diagnose the other seven freezes.
+
+## 2026-10-14 continuation: staggered partner ignition, version 2 (unqualified)
+
+**Version 1 above is rejected.** Although simultaneous ignition passed both
+40,000-trial copy-75 scenarios, nominal first-load/reload, the independent
+4,096-corner grids, master-74 clearing and the two-cell kernel, its fast-corner
+first-load survey produced **127 reset survivors in 40,000 trials**. Igniting
+u and v together can establish a fast storage orbit that survives the later
+ordinary clear. Successful establishment alone was insufficient. Those results
+belong to the rejected simultaneous circuit and do not qualify its replacement.
+
+The opt-in remains `master_ignition=True` / `--master-ignition`, now recorded as
+`master_ignition_version=2`. The selected, qualified COPY arm retains its
+original `drive.ignite` connection to u at delay 18 and adds one connection to
+v at **delay 78**: the partner input arrives **60 steps / 6.0 ms later**.
+This staggers the direct member inputs while supplying enough charge for the
+reset-depressed copy-75 partner to fire. The partner assist follows the same
+selected-rail and fault qualification as the original u input. There is no
+new enable, retry, completion shortcut or change to READY/rail-selection
+timing. The storage loop, autapses, reset weights and readers are unchanged.
+The nominal timing regression retains READY=1,872, COPY=2,009 and u=2,056;
+the assisted partner fires after u, before the unaided partner's step 2,116.
+The simultaneous v1 timing measurements above are historical.
+
+Version checks in campaign rebuild, Stage D recheck and stall diagnostics now
+reject enabled v1 records, missing versions and mistyped versions. The option
+is still off by default; disabled topology and build-option records retain
+their frozen fingerprints. The structural comparison checks every existing
+edge, neuron role and bias against off and permits only the delay-78 partner
+edges. Costs remain **0 neurons and 302 / 104 / 1,854 synapses** for tick2 /
+render / perspective F16, with no added controller delay.
+
+### Cluster jobs and laptop smoke policy
+
+All long ignition cases in `tests/test_master_ignition.py` are marked `slow`
+and skipped unless `DROSO_IGNITION_CLUSTER=1`. Each parameter is an independent
+pytest case so a scheduler can run it as one job. No 40,000-trial survey was
+run on this laptop during this continuation. The load surveys each check
+establishment, live old-data extinction on reload, opposite-rail darkness,
+exactly one COPY pulse, and **clear-after-load survivors** in both members
+and the readouts. They use real COPY arms, the original READY chain and
+ordinary reset controllers, with random reset/clear phases and strays on all
+fixture neurons. Copy-75 keeps its reconstructed draws and independently
+samples the added partner weight. The independent grid uses a coprime stride
+of 17 so a small smoke also varies the upper parameter axes; a complete
+4,096-case pass still visits every sign combination once.
+
+For **each ID** in the following table, run this command in a separate cluster
+job, substituting that ID for `CASE_ID` (keep the brackets quoted):
+
+```sh
+DROSO_IGNITION_CLUSTER=1 uv run pytest -q -s -m slow -p no:warnings \
+  'tests/test_master_ignition.py::test_master_ignition_cluster_survey[CASE_ID]'
+```
+
+| First-load case ID | Reload case ID | Trials per case |
+|---|---|---:|
+| `first-load-nominal` | `reload-nominal` | 40,000 |
+| `first-load-fast3sigma` | `reload-fast3sigma` | 40,000 |
+| `first-load-slow3sigma` | `reload-slow3sigma` | 40,000 |
+| `first-load-weak_loop` | `reload-weak_loop` | 40,000 |
+| `first-load-high_threshold` | `reload-high_threshold` | 40,000 |
+| `first-load-negative_bias` | `reload-negative_bias` | 40,000 |
+| `first-load-mix_b` | `reload-mix_b` | 40,000 |
+| `first-load-copy75` | `reload-copy75` | 40,000 |
+| `first-load-independent3sigma` | `reload-independent3sigma` | 40,960 |
+
+The separate clear stress cases retain the captured/controller fixtures,
+reader mirrors, four close initial pulses, the 300-q kick and randomized clear
+phases. Their partner inputs are shifted by 60 steps too. They check that
+both members were live before clear and that neither storage nor readers
+survives. Run each of these IDs as a separate job with the next command:
+`request28`, `master74`, `master17`, `master24`, `stage18`, `fast3sigma`,
+`slow3sigma`, `mix_b` (40,000 trials each).
+
+```sh
+DROSO_IGNITION_CLUSTER=1 uv run pytest -q -s -m slow -p no:warnings \
+  'tests/test_master_ignition.py::test_master_ignition_clear_cluster_survey[CASE_ID]'
+```
+
+The two deterministic, stray-free grid jobs have IDs `first-load` and `reload`,
+4,096 trials each:
+
+```sh
+DROSO_IGNITION_CLUSTER=1 uv run pytest -q -s -m slow -p no:warnings \
+  'tests/test_master_ignition.py::test_all_independent_corners_establish_without_strays[first-load]'
+DROSO_IGNITION_CLUSTER=1 uv run pytest -q -s -m slow -p no:warnings \
+  'tests/test_master_ignition.py::test_all_independent_corners_establish_without_strays[reload]'
+```
+
+The end-to-end two-cell check is also cluster-only, and expects outputs
+`[0, 3, 1]` with no faults/timeouts/bad outputs:
+
+```sh
+DROSO_IGNITION_CLUSTER=1 uv run pytest -q -s -m slow -p no:warnings \
+  tests/test_master_ignition.py::test_master_ignition_two_cell_kernel_computes_and_reloads
+```
+
+Laptop smoke uses **256 trials per scenario**, enabled only with
+`DROSO_IGNITION_SMOKE=1`. The 18 load cases and eight separate clear cases have
+the same parameter IDs as their cluster counterparts. Each case prints its
+counts and wall/CPU time with `-s`. A fixed adverse-control smoke compares the
+rejected delay-18 partner edge against delay 78 on the same 256 fast-corner
+first-load trials (seed 17,531): **2 simultaneous survivors versus 0 staggered
+survivors**. This is a bounded regression demonstrating the removed failure
+mechanism, not a qualification claim.
+
+```sh
+DROSO_IGNITION_SMOKE=1 uv run pytest tests/test_master_ignition.py \
+  -q -s -m 'not slow' -p no:warnings
+```
+
+Local smoke results: **27 cases passed**. All 18 load/reload scenarios
+(4,608 trials) returned zero missing establishment, double rails, old survivors,
+clear-after-load survivors, non-live pre-clear observations and repeated/missing
+COPY arms. All eight clear stress scenarios (2,048 trials), including
+`master74`, returned zero storage/reader survivors and zero non-live pre-clear
+observations. The adverse-control case additionally passed the expected
+2-versus-0 survivor comparison on 256 trials per design. The isolated smoke
+command was:
+
+```sh
+DROSO_IGNITION_SMOKE=1 uv run pytest tests/test_master_ignition.py \
+  -q -s -m 'not slow' -k 'smoke or counterexample' -p no:warnings
+```
+
+For this isolated checkout, commands used a writable `UV_CACHE_DIR` under the
+task temp directory, the existing shared `UV_PROJECT_ENVIRONMENT` with
+`UV_NO_SYNC=1`, and `PYTHONPATH="$PWD"`. A separate run with the cluster flag
+unset skipped **all 29 slow cases**, confirming the default laptop guard.
+
+The required foreground regression **passed**, with the smoke flag enabled so
+the new 256-trial cases ran too. This includes the unchanged frozen default
+netlist hashes and the enabled-record reconstruction/version checks:
+
+```sh
+DROSO_IGNITION_SMOKE=1 uv run pytest tests/test_build_options.py tests/test_master_ignition.py tests/test_config_f_kernels.py tests/test_stall_diag.py -q -m 'not slow' -p no:warnings
+```
+
+**Qualification remains pending.** The v2 cluster cases, deterministic full
+grids, two-cell kernel and a full GPU campaign have not been run in this
+continuation. The earlier v1 passes cannot substitute for these v2 checks.

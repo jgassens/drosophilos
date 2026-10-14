@@ -342,8 +342,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     four compact 1.75-loop taps / eight delayed READY links candidate. It is
     explicitly experimental, not an alias for either rejected robust option.
     Producer and machine resets retain their original policy; off is unchanged.
-    `master_ignition=True` drives both members of a selected master rail from
-    its existing qualified one-shot COPY arm, avoiding a weak first hand-off
+    `master_ignition=True` assists the partner of a selected master rail 60 steps
+    after the original u ignition, from its existing qualified one-shot COPY
+    arm, avoiding simultaneous ignition's fast orbit and a weak first hand-off
     during reset recovery. It preserves READY timing, reset charge, storage
     and readers. Requires rate readers, experimental autapses, selected-rail
     COPY and ordinary four-tap resets;

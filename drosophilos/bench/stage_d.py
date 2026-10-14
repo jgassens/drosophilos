@@ -684,7 +684,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--master-ignition", action="store_true",
-                    help="ignite both selected master members from qualified COPY; requires rate readers and experimental autapses")
+                    help="EXPERIMENTAL: stagger selected master partner ignition from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
                     help="EXPERIMENTAL: allow width 16 for the kernel campaign; requires all three configuration F flags")
     ap.add_argument("--zero-once", action="store_true",

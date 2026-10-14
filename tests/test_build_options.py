@@ -52,7 +52,7 @@ CURRENT_PIPELINE_OPTIONS = {
 
 
 @pytest.mark.parametrize("entry", ["campaign", "diagnostic", "recheck"])
-@pytest.mark.parametrize("version", [None, 0, 2, True, "1"])
+@pytest.mark.parametrize("version", [None, 0, 1, 3, True, "2"])
 def test_master_ignition_replay_rejects_missing_or_changed_version(entry, version):
     from drosophilos.bench.stage_d import recheck_record
     record = dict(block="tick", rate_robust=True, experimental_autapse=True,
@@ -74,7 +74,7 @@ def test_master_ignition_option_records_rebuilds_and_defaults_off(datapath):
     _, pl, _, _ = kernel_campaign.block("tick", PARAMS, datapath=datapath, rate_robust=True,
                                        experimental_autapse=True, master_ignition=True)
     assert pl.build_options["master_ignition"] is True
-    assert pl.build_options["master_ignition_version"] == 1
+    assert pl.build_options["master_ignition_version"] == 2
     record = dict(block="tick", **pl.build_options)
     _, _, rebuilt = build_tick_pipeline(record)
     assert _pipeline_fingerprint(pl) == _pipeline_fingerprint(rebuilt)

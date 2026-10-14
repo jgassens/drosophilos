@@ -32,7 +32,9 @@ import numpy as np
 
 from ..protocol.celement import add_and_latched, add_delay_chain, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, wire_fault_path
-from ..protocol.latch import Latch, add_edge_relay, add_latch, connect_trigger
+from ..protocol.latch import (
+    MASTER_IGNITION_PARTNER_DELAY_STEPS, Latch, add_edge_relay, add_latch, connect_trigger,
+)
 from ..protocol.token import decode_at, rails_for
 from ..sim.model import Params
 from ..sim.ref64 import RefSim
@@ -112,9 +114,10 @@ def add_staged_commit(net: Netlist, drive: Drive, name: str, S: Register, P: Reg
             if master_ignition:
                 if not copy_requires_rail:
                     raise ValueError("master_ignition requires selected-rail COPY")
-                # The same qualified one-shot drives the partner. No new COPY
-                # enable, retry, or rail-selection path; reset timing is intact.
-                net.synapse(arm, M.rails[i][r].v, drive.ignite)
+                # Stagger the partner assist to avoid simultaneous ignition's
+                # fast orbit. Qualification and READY retain their timing.
+                net.synapse(arm, M.rails[i][r].v, drive.ignite,
+                            MASTER_IGNITION_PARTNER_DELAY_STEPS)
     # commit done = W_M's first spike, through an edge relay as a single pulse: W_M then holds
     # for as long as M is valid, and a train into the stage's edge-detected reset trigger would
     # hold that trigger down and block the F / TIMEOUT discards
