@@ -1,6 +1,6 @@
 """Read-only fault-gate diagnostic for a role-filtered kernel spike dump.
 
-A kernel_campaign or Stage D record is used to rebuild the exact tick pipeline.  Every captured neuron is
+A kernel_campaign or Stage D record is used to rebuild the exact recorded pipeline.  Every captured neuron is
 checked against that netlist by :func:`stall_diag.load_dump`; the analysis then reports each
 stage fault-gate rise, the surrounding cell transaction, and the stage valid latches at the
 fault step.  Spike selection and grouping are vectorized -- no Python loop visits individual
