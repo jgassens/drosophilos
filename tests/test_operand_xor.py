@@ -518,8 +518,12 @@ def run_survivor_replay(case):
     # Control first, using precisely the v2 static draws/controller/timing.
     off = operand_survey(scenario, 40_000, enabled=False, reference_enabled=True, **kwargs)
     assert off["survivors"] == off_count, off
+    assert off["max_latency"] <= 200, off
+    assert all(d["reset_count"] == 3 * (d["tx"] + 1)
+               for d in off["survivor_details"]), off
     legacy = operand_survey(scenario, 40_000, gates_type=OperandV2Gates, **kwargs)
     assert legacy["survivors"] == v2_count, legacy
+    assert legacy["max_latency"] <= 200, legacy
     assert all(legacy[k] == 0 for k in FAILURES if k != "survivors"), legacy
     assert {(d["copy"], d["tx"], d["role"], d["reset_count"])
             for d in legacy["survivor_details"]} == {
@@ -527,6 +531,7 @@ def run_survivor_replay(case):
         for tx in txs for member in ("u", "v")}
     fixed = operand_survey(scenario, 40_000, rearm=scenario == "copy85", **kwargs)
     assert all(fixed[k] == 0 for k in FAILURES), fixed
+    assert fixed["max_latency"] <= 200, fixed
     print("frozen survivor", case, "F sum-only", off, "v2", legacy,
           "v3", fixed, flush=True)
 

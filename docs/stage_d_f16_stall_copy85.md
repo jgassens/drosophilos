@@ -774,14 +774,15 @@ weights with an actual sum-only F kernel stage.
 
 Four configured taps do not guarantee four emitted spikes: the original
 controller emits **three** on these endpoint draws, with cumulative counts
-3/6/9/12 over four transactions. Carry copy 406 and sum copies 3725/4082
-remain active after those clears with the operand option off. V2 changes
-ignition timing and which sum rail is active, so copy 1098 and copy85
-11001/16939 survive only in v2 on these particular draws. Their ordinary
-sum storage and clear wiring are still shared with F. Increasing only the
-storage clear weights suppresses the survivors while retaining the controller
-and its draws. Prescribing an extra inhibitor spike would not reproduce the
-kernel's wiring and is not the remedy.
+3/6/9/12 over four transactions. The ordinary-F weakness is demonstrated on
+**3 of the 8 survivor copies**: carry copy 406 and sum copies 3725/4082 remain
+active after those clears with the operand option off. V2 changes ignition
+timing and which sum rail is active, so the other copies (1098 and copy85
+11001/16939) survive only in v2 on these particular draws. Their ordinary sum
+storage and clear wiring are still shared with F. Increasing only the storage
+clear weights suppresses the survivors while retaining the controller and its
+draws. Prescribing an extra inhibitor spike would not reproduce the kernel's
+wiring and is not the remedy.
 
 This finding matters for ordinary F builds too. **The default F circuit keeps
 this known weakness** to preserve byte-identical defaults; these small controls
@@ -830,6 +831,10 @@ reloads the opposite EARLY polarity and clears again after the same recovery
 interval. All eight frozen replays passed locally; the v3 copies total
 **24 transactions**, including the four reloads. The eight new parameters
 bring the cluster list to **26**, gated by `DROSO_OPXOR_CLUSTER=1`.
+
+At the measured **2000-step recovery** after the 1.5-loop clears, post-clear
+establishment latency was identical for v2 and v3: **102–154 steps**. Recovery
+shorter than 2000 steps after the 1.5-loop clears is unmeasured.
 
 Long cluster surveys remain unrun locally. **V3 is unqualified.** Stronger
 clears must still be evaluated for recovery and reload margin in the full
