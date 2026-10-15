@@ -63,13 +63,15 @@ diagnostic rebuilding reproduces the private topology, and rebuilding/recheck
 reject a changed private version. Regression tests exercise both. Historical
 records still rebuild unchanged, as covered by the existing autapse tests.
 
-Replay records for `dale_private` must include `dale_feedback_version`; records
-without it are refused. A `dale_biased` record must likewise include
-`dale_biased_version`; a missing or unsupported version is refused. This
-applies to every replay path. `kernel_campaign` CLI and `rebuild_record`,
-`stall_diag`, `h1_fullgraph` mapping metadata, and `h_stage_place` forward and
-version-check `dale_biased_version`. The plumbing regression tests cover these
-paths. Historical autapse records remain unchanged.
+At `stall_diag`'s top-level `CAMPAIGN` level, a `dale_private` record without
+`dale_feedback_version` defaults to v1; an explicitly supplied unsupported
+version is refused. A `dale_biased` record must include
+`dale_biased_version`; a missing or unsupported version is refused.
+`h1_fullgraph` mapping metadata requires the version for either non-default
+feedback policy. `kernel_campaign` CLI and `rebuild_record`, `stall_diag`,
+`h1_fullgraph` mapping metadata, and `h_stage_place` forward and version-check
+`dale_biased_version`. The plumbing regression tests cover these paths.
+Historical autapse records remain unchanged.
 
 No shared variant was added. A group inhibitor would let one active latch
 inhibit other stored bits, violating the private circuit's independence; it

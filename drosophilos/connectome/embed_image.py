@@ -302,7 +302,8 @@ def image_manifest(net: Netlist, m: MCNS, img: Image, policy: Policy, params: Pa
 MAPPING_META_KEYS = (
     "builder", "width", "ordered", "watchdog_hops", "storage", "rate_robust",
     "experimental_autapse", "ordered_xor_oneshot", "k_max", "isolation_weight",
-    "region", "restarts", "seed",
+    "region", "restarts", "seed", "latch_feedback", "dale_feedback_version",
+    "dale_biased_version",
 )
 
 
