@@ -638,3 +638,17 @@ Totals (2 passes x 8 outputs per copy, 100 copies per seed, mix B):
 Freeze diagnoses (docs/stage_d_f16_stall.md, docs/stage_d_f16_stall_copy85.md, docs/stage_d_f16_stall_copy57.md): F seed 110 copy 75 master partner ignition failure (fixed by master_ignition); copies 85 and 57 operand-XOR double rail (fixed by operand_xor_oneshot); copies 43 and 51 stalled at the same datapath phase (stall_diag only, mechanism not traced).
 
 Limits: 2 passes per copy (calibration-length runs, not 1,000-pass campaigns); 11 of 12 both-repairs seeds ran fp32 on RTX 3090 (seed 115 fp64 H200); changing build options redraws every copy's noise, so comparisons are rate-based, not paired; both options are opt-in and experimental; the builder still requires f_width16_experimental for width 16.
+
+### 20-pass campaigns (2026-10-15)
+
+`render2.c` perspective campaigns, configuration F + `master_ignition` v2 + `operand_xor_oneshot` v3 + `f_width16_experimental`, 126,523 neurons, built at commit `d715599`; mix B, 100 copies per noisy seed, 20 passes × 8 outputs = 160 outputs per copy:
+
+| Seed | Device | Juno/G2 job | Outputs ok | Wrong | Missing | Faults | Timeouts | Refusals/retries | Neural s | Wall s |
+|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|
+| nominal (1 copy, no noise) | H200 fp64 | Juno 457682 | 160/160 | 0 | 0 | 0 | 0 | 0/0 | 274.1 | 578 |
+| 115 | H200 fp64 | Juno 457681 | 16,000/16,000 | 0 | 0 | 0 | 0 | 0/0 | 276.0 | 8,626 |
+| 110 | RTX 3090 fp32 | G2 4019502 | 16,000/16,000 | 0 | 0 | 0 | 0 | 0/0 | 275.4 | 22,782 |
+| 113 | RTX 3090 fp32 | G2 4019503 | 16,000/16,000 | 0 | 0 | 0 | 0 | 0/0 | 276.0 | 22,869 |
+| 114 | RTX 3090 fp32 | G2 4019504 | 16,000/16,000 | 0 | 0 | 0 | 0 | 0/0 | 275.8 | 22,850 |
+
+Totals: 400 noisy copies × 20 passes, 64,000/64,000 outputs correct, 0 frozen copies. One-sided 95% upper bound per output `1-0.05^(1/64000) = 4.68e-5`; per copy (20-pass) `1-0.05^(1/400) = 0.746%`. Limits: 20 passes, not 1,000; three of four seeds ran fp32.
