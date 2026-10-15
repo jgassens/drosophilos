@@ -593,3 +593,48 @@ survey/grid cases, plus the two-cell kernel test. This completes v2's bounded
 RefSim qualification. It has not yet run in a full kernel campaign; the next
 step is a 100-copy 16-bit perspective campaign with it enabled. The
 copy-85/57 operand-XOR freeze class is not covered by this option.
+
+## 16-bit kernel campaigns with the repairs
+
+2026-10-15. `render2.c` perspective calibration campaigns, 2 passes × 8 outputs per copy, 100 copies per seed, mix B:
+
+| Build | Record | Seed | Device | Copies | Frozen copies (outputs done/16) | Wrong | Faults | Timeouts | Refusals/retries |
+|---|---|---|---|---:|---|---:|---:|---:|---|
+| F | perspective_f16_cal_s110_9206797.json | 110 | H200 fp64 | 100 | 75 (0), 85 (6) | 0 | 0 | 0 | 0/0 |
+| F | perspective_f16_cal_s113_fp32_3090_655fda2.json | 113 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F | perspective_f16_cal_s114_fp32_3090_655fda2.json | 114 | RTX 3090 fp32 | 100 | 43 (1), 51 (3), 57 (0) | 0 | 0 | 0 | 0/0 |
+| F | perspective_f16_cal_s116_fp32_3090_6f9a702.json | 116 | RTX 3090 fp32 | 100 | 7 (0) | 0 | 0 | 0 | 0/0 |
+| F | perspective_f16_cal_s117_fp32_3090_6f9a702.json | 117 | RTX 3090 fp32 | 100 | 6 (0), 20 (3) | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s110_cbb4cc1.json | 110 | H200 fp64 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s113_fp32_3090_cbb4cc1.json | 113 | RTX 3090 fp32 | 100 | 22 (6) | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s114_fp32_3090_cbb4cc1.json | 114 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s116_fp32_3090_cbb4cc1.json | 116 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s117_fp32_3090_cbb4cc1.json | 117 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s118_fp32_3090_cbb4cc1.json | 118 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s119_fp32_3090_cbb4cc1.json | 119 | RTX 3090 fp32 | 100 | 73 (2) | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s120_fp32_3090_cbb4cc1.json | 120 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition | perspective_f16ign_cal_s121_fp32_3090_cbb4cc1.json | 121 | RTX 3090 fp32 | 100 | 36 (14), 44 (0), 74 (4) | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s110_fp32_3090_cd28765.json | 110 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s113_fp32_3090_cd28765.json | 113 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s114_fp32_3090_cd28765.json | 114 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s115_h200_cd28765.json | 115 | H200 fp64 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s116_fp32_3090_cd28765.json | 116 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s117_fp32_3090_cd28765.json | 117 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s118_fp32_3090_cd28765.json | 118 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s119_fp32_3090_cd28765.json | 119 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s120_fp32_3090_cd28765.json | 120 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s121_fp32_3090_cd28765.json | 121 | RTX 3090 fp32 | 100 | none | 0 | 0 | 1 | 1/1 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s122_fp32_3090_cd28765.json | 122 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| F + master_ignition + operand_xor_oneshot v3 | perspective_f16both_cal_s123_fp32_3090_cd28765.json | 123 | RTX 3090 fp32 | 100 | none | 0 | 0 | 0 | 0/0 |
+| default (no F) | perspective_off16_cal_s114_fp32_3090_d6be225.json | 114 | RTX 3090 fp32 | 100 | 96 (5) | 0 | 1 | 0 | 0/0 |
+| default (no F) | perspective_off16_cal_s117_fp32_3090_d6be225.json | 117 | RTX 3090 fp32 | 100 | 69 (0) | 0 | 0 | 0 | 0/0 |
+
+Totals (2 passes x 8 outputs per copy, 100 copies per seed, mix B):
+- F (rate_robust + experimental_autapse + ordered_xor_oneshot + f_width16_experimental), 123,323 neurons / 249,940 synapses: 8 frozen / 500 copies (1.6%), 0 wrong, 0 faults, 0 timeouts.
+- F + master_ignition v2 (123,323 neurons / 251,794 synapses): 5 frozen / 900 (0.56%), 0 wrong/faults/timeouts.
+- F + master_ignition v2 + operand_xor_oneshot v3 (126,523 neurons / 260,114 synapses): 0 frozen / 1,200 copies; all 19,200 outputs correct; 0 wrong, 0 faults; one watchdog timeout in seed 121 copy 99 that the host resent (1 refusal, 1 retry) and the copy then completed correctly. One-sided 95% upper bound on the per-copy freeze rate 1-0.05^(1/1200) = 0.2493%. One-sided Fisher exact vs F 8/500: p = 5.38e-5; vs F+master_ignition 5/900: p = 0.0144.
+- default build without F (112,677 neurons): 2 frozen / 200 plus 1 fault.
+
+Freeze diagnoses (docs/stage_d_f16_stall.md, docs/stage_d_f16_stall_copy85.md, docs/stage_d_f16_stall_copy57.md): F seed 110 copy 75 master partner ignition failure (fixed by master_ignition); copies 85 and 57 operand-XOR double rail (fixed by operand_xor_oneshot); copies 43 and 51 stalled at the same datapath phase (stall_diag only, mechanism not traced).
+
+Limits: 2 passes per copy (calibration-length runs, not 1,000-pass campaigns); 11 of 12 both-repairs seeds ran fp32 on RTX 3090 (seed 115 fp64 H200); changing build options redraws every copy's noise, so comparisons are rate-based, not paired; both options are opt-in and experimental; the builder still requires f_width16_experimental for width 16.
