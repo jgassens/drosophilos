@@ -36,7 +36,7 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
           ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-          master_ignition: bool = False):
+          master_ignition: bool = False, operand_xor_oneshot: bool = False):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -76,7 +76,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         verified_register_reset=verified_register_reset,
                         experimental_register_reset=experimental_register_reset,
                         experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
-                        f_width16_experimental=f_width16_experimental, master_ignition=master_ignition)
+                        f_width16_experimental=f_width16_experimental, master_ignition=master_ignition,
+                        operand_xor_oneshot=operand_xor_oneshot)
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -90,8 +91,10 @@ def rebuild_record(record: dict):
     """
     flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
              "verified_register_reset", "experimental_register_reset", "experimental_autapse",
-             "ordered_xor_oneshot", "f_width16_experimental", "master_ignition")
+             "ordered_xor_oneshot", "f_width16_experimental", "master_ignition", "operand_xor_oneshot")
     from ..protocol.latch import MASTER_IGNITION_VERSION
+    from ..lib.gates import validate_operand_xor_record
+    validate_operand_xor_record(record)
     if "master_ignition" in record and type(record["master_ignition"]) is not bool:
         raise ValueError("unsupported campaign build option master_ignition: expected a bool")
     if record.get("master_ignition", False) and (
@@ -134,6 +137,8 @@ def parser() -> argparse.ArgumentParser:
                     help=("consume sum-XOR carry once per stage reset; requires --rate-robust "
                           "and --experimental-autapse (default timing, widths 1..8; "
                           "wider kernel qualification: docs/stable_latch.md)"))
+    ap.add_argument("--operand-xor-oneshot", action="store_true",
+                    help="UNQUALIFIED v3: share operand/sum transaction pulses with carry branches and strengthen operand/carry/sum clears; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--master-ignition", action="store_true",
@@ -170,7 +175,8 @@ def main(argv=None):
                               verified_register_reset=a.verified_register_reset,
                               experimental_register_reset=a.experimental_register_reset,
                               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
-                              f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition)
+                              f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition,
+                              operand_xor_oneshot=a.operand_xor_oneshot)
     if a.repeats != 1:
         tokens = tokens * a.repeats
         ref = kernel_outputs(ks, tokens)

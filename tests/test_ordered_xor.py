@@ -19,16 +19,21 @@ P = Params()
 class SurveySim(RefSim):
     """Use the reference step unchanged; retain counts/first times instead of huge traces."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, spike_probes=(), **kwargs):
         super().__init__(*args, **kwargs)
         self.counts = np.zeros((self.B, self.n), dtype=int)
         self.first = np.full((self.B, self.n), -1, dtype=int)
         self.last = np.full((self.B, self.n), -1, dtype=int)
+        self.probe_spikes = {key: [] for key in spike_probes}
 
     def step(self):
         super().step()
         if self._spk_node:
             b, n = self._spk_node[-1], self._spk_neuron[-1]
+            if self.probe_spikes:
+                for key in zip(b, n):
+                    if key in self.probe_spikes:
+                        self.probe_spikes[key].append(self.step_index - 1)
             self.counts[b, n] += 1
             self.last[b, n] = self.step_index - 1
             new = self.first[b, n] < 0
@@ -252,9 +257,9 @@ def test_transaction_memory_holds_across_long_gaps_and_resets(autapse):
     assert failures == 0 if autapse else failures > 0
 
 
-def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, recovery=2000):
+def arithmetic_fixture(width, autapse=True, oneshot=True, operand_oneshot=False, gates_type=Gates):
     net, drive = Netlist(P), Drive.from_params(P)
-    gates = Gates(net, drive, ordered_xor_oneshot=oneshot)
+    gates = gates_type(net, drive, ordered_xor_oneshot=oneshot, operand_xor_oneshot=operand_oneshot)
     def word(name, n):
         return [Rail2(gates.latch(f"{name}{i}r0"), gates.latch(f"{name}{i}r1")) for i in range(n)]
     a, b = word("A", width), word("B", width)
@@ -266,29 +271,99 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
     ad = [gates.delayed(f"a{i}", x, 17) for i, x in enumerate(a)]
     sums, carries, _, _ = gates.ripple_adder_ordered("add", ad, bx, sub)
     reset = add_reset(net, drive, "clear", gates.latches, gates.gates)
+    gates.finalize_operand_reset(reset[1])
     if autapse:
         add_experimental_autapses(net, drive)
+    return net, drive, gates, a, b, sub, sums, carries, reset
+
+
+def replay_maps(net, reference):
+    """Keep original role/edge perturbations and strays across a rewired circuit.
+
+    For a shared one-shot driver, transfer the old driver's draw to the same
+    receiving edge. All other edges match by source, destination and delay.
+    No changed-topology RNG reseeding can hide the original failing draw.
+    """
+    topo, old = net.topology(), reference.topology()
+    roles = {r: i for i, r in enumerate(reference.roles)}
+    nodes = np.array([roles[r] for r in net.roles])
+    keys = {(reference.roles[s], reference.roles[d], int(delay)): e
+            for e, (s, d, delay) in enumerate(zip(old.src, old.dst, old.delay))}
+    edges = []
+    for s, d, delay, q in zip(topo.src, topo.dst, topo.delay, topo.quanta):
+        key = (net.roles[s], net.roles[d], int(delay))
+        if key not in keys:
+            matches = [e for e, (od, oq, dt) in enumerate(zip(old.dst, old.quanta, old.delay))
+                       if reference.roles[od] == net.roles[d] and oq > 0 and q > 0 and dt == delay]
+            assert len(matches) == 1, key
+            edges.append(matches[0])
+        else:
+            edges.append(keys[key])
+    assert len(set(nodes)) == reference.n == net.n
+    assert len(set(edges)) == old.nnz == topo.nnz
+    return nodes, np.array(edges), np.argsort(nodes)
+
+
+def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, recovery=2000,
+                      *, operand_oneshot=False, replay_copies=None, gates_type=Gates,
+                      reference_type=None):
+    net, drive, gates, a, b, sub, sums, carries, reset = arithmetic_fixture(
+        width, autapse, oneshot, operand_oneshot, gates_type)
     topo = net.topology()
+    replay_nodes = replay_edges = old_to_new = None
+    if reference_type is not None:
+        reference = arithmetic_fixture(width, autapse, oneshot, operand_oneshot, reference_type)[0]
+        replay_nodes, replay_edges, old_to_new = replay_maps(net, reference)
+        assert (net.n, net.nnz) == (reference.n, reference.nnz)
     rng = np.random.default_rng(718)
-    result = dict(trials=2 * trials, wrong=0, double=0, missing=0, repeated=0,
+    result = dict(trials=2 * (trials if replay_copies is None else len(replay_copies)),
+                  wrong=0, double=0, missing=0, repeated=0, survivors=0,
                   min_latency=10000, max_latency=0)
+    if operand_oneshot:
+        result["failure_details"] = []
+    if replay_copies is not None:
+        result["replay_details"] = []
     for start in range(0, trials, 64):
+        if replay_copies is not None and start > max(replay_copies):
+            break
         size = min(64, trials - start)
+        selected = (np.arange(size) if replay_copies is None else
+                    np.array([c - start for c in replay_copies if start <= c < start + size], int))
         kwargs = {}
         if noisy:
-            kwargs = dict(quanta=np.rint(topo.quanta * np.exp(rng.normal(0, .04, (size, topo.nnz)))),
-                          V_th=P.V_th + rng.normal(0, .2, (size, topo.n)),
-                          bias=np.asarray(net.bias) + rng.normal(0, .2, (size, topo.n)))
-        sim = SurveySim(topo, P, n_nodes=size, **kwargs)
+            w = rng.normal(0, .04, (size, topo.nnz))
+            th, bias = (rng.normal(0, .2, (size, topo.n)) for _ in range(2))
+            if reference_type is not None:
+                w, th, bias = w[:, replay_edges], th[:, replay_nodes], bias[:, replay_nodes]
+            kwargs = dict(quanta=np.rint(topo.quanta * np.exp(w)),
+                          V_th=P.V_th + th, bias=np.asarray(net.bias) + bias)
+        probes = ([(int(node), i) for node in selected for i, r in enumerate(net.roles)
+                   if r.startswith("add.fa") and r.endswith(
+                       (".p0.edge", ".p0.edge_inh", ".p0.veto", ".cinr0.d4", ".s.once0.edge"))]
+                  if replay_copies is not None else [])
+        sim = SurveySim(topo, P, n_nodes=size, spike_probes=probes, **kwargs)
         if width == 4 and not noisy:
             ids = np.arange(start, start + size)
             av, bv, sv = ids % 16, ids // 16 % 16, ids // 256 % 2
         else:
             av, bv = rng.integers(0, 1 << width, (2, size))
             sv = rng.integers(0, 2, size)
+        if operand_oneshot and width == 4 and trials >= 512:
+            ids = np.arange(start, start + size)
+            av, bv, sv = ids // 32 % 16, ids // 2 % 16, ids % 2
+        elif operand_oneshot:
+            # Long carry/borrow, zero, overflow and alternating rails, for both
+            # fixed ADD and SUB images. Every copy reloads swapped operands.
+            mask = (1 << width) - 1
+            directed = [(mask, 1), (0, 1), (0, 0), (mask >> 1, 1),
+                        (mask // 3, 2 * (mask // 3)), (mask, mask)]
+            for k in range(min(size, max(0, 2 * len(directed) - start))):
+                index = start + k
+                av[k], bv[k] = directed[index // 2]
+                sv[k] = index % 2
         # Two different words through the same physical state, including the
         # complete delayed-input drain and inhibitory recovery after reset.
-        duration = 3000 if width <= 4 else 5000
+        duration = 3000 if width <= 4 else 5000 if width <= 8 else 8000
         for tx, origin in enumerate((0, duration + recovery)):
             if tx:
                 av, bv = bv, av
@@ -307,26 +382,71 @@ def arithmetic_survey(width, trials, noisy=False, autapse=True, oneshot=True, re
                 if noisy:
                     count = rng.binomial(sim.B * sim.n, .0005)
                     flat = rng.choice(sim.B * sim.n, count, replace=False)
-                    sim._events[sim.step_index].append((flat // sim.n, flat % sim.n, np.full(count, 150)))
-                sim.step()
+                    if len(selected):
+                        neurons = flat % sim.n if old_to_new is None else old_to_new[flat % sim.n]
+                        sim._events[sim.step_index].append((flat // sim.n, neurons, np.full(count, 150)))
+                if len(selected):
+                    sim.step()
+                else:
+                    # Consume precisely the original batch's RNG stream without
+                    # simulating its neurons. Copy IDs alone are not RNG seeds.
+                    sim.step_index += 1
+            if not len(selected):
+                if not tx:
+                    sim.step_index += recovery
+                continue
             raw = av + np.where(sv, ((1 << width) - 1) ^ bv, bv) + sv
+            if replay_copies is not None:
+                for node in selected:
+                    result["replay_details"].append(dict(copy=start + int(node), tx=tx,
+                        a=int(av[node]), b=int(bv[node]), sub=int(sv[node]),
+                        probes={r: (int(sim.counts[node, i]), int(sim.first[node, i]))
+                                for i, r in enumerate(net.roles) if r.startswith("add.fa")},
+                        spikes={net.roles[i]: [s for s in steps if s >= origin]
+                                for (b, i), steps in sim.probe_spikes.items() if b == node},
+                        receivers={r: (float(sim.V_th[node, i]), float(sim.bias[node, i]))
+                                   for i, r in enumerate(net.roles) if r.endswith(".p0.edge")},
+                        weights={(net.roles[s], net.roles[d], int(dt)):
+                                 int(topo.quanta[e] if sim.quanta is None else sim.quanta[node, e])
+                                 for e, (s, d, dt) in enumerate(zip(topo.src, topo.dst, topo.delay))
+                                 if net.roles[d].endswith(".p0.edge")}))
             for bit, rail in enumerate(sums + [carries[-1]]):
-                seen = sim.counts[:, rail.taps] > 0
-                expected = (raw >> bit) & 1
+                seen = sim.counts[selected][:, rail.taps] > 0
+                expected = (raw[selected] >> bit) & 1
                 result["double"] += int(seen.all(axis=1).sum())
                 result["missing"] += int((~seen.any(axis=1)).sum())
-                result["wrong"] += int(seen[np.arange(size), 1 - expected].sum())
-                times = sim.first[np.arange(size), np.asarray(rail.taps)[expected]]
+                result["wrong"] += int(seen[np.arange(len(selected)), 1 - expected].sum())
+                if operand_oneshot:
+                    for node in selected[np.flatnonzero(seen[np.arange(len(selected)), 1 - expected])]:
+                        if len(result["failure_details"]) >= 8:
+                            break
+                        probes = {r: (int(sim.counts[node, i]), int(sim.first[node, i]))
+                                  for i, r in enumerate(net.roles)
+                                  if any(r.startswith(f"add.fa{j}.")
+                                         for j in range(max(0, bit - 2), min(width, bit + 1)))}
+                        result["failure_details"].append(dict(copy=start + int(node), tx=tx, bit=bit,
+                            a=int(av[node]), b=int(bv[node]), sub=int(sv[node]), probes=probes))
+                times = sim.first[selected, np.asarray(rail.taps)[expected]]
                 lat = times[times >= 0] - origin - 200
                 if len(lat):
                     result["min_latency"] = min(result["min_latency"], int(lat.min()))
                     result["max_latency"] = max(result["max_latency"], int(lat.max()))
             once = [i for i, r in enumerate(net.roles) if ".once" in r and r.endswith(".edge")]
-            result["repeated"] += int((sim.counts[:, once] > 1).sum())
+            result["repeated"] += int((sim.counts[selected][:, once] > 1).sum())
+            if operand_oneshot:
+                # Check first-pulse acceptance as well as repeat suppression in
+                # both the operand and sum XORs, one of two rails per bit.
+                for kind in ("x", "s"):
+                    for bit in range(width):
+                        edges = [net.roles.index(f"add.fa{bit}.{kind}.once{r}.edge") for r in (0, 1)]
+                        result["missing"] += int((sim.counts[selected][:, edges].sum(axis=1) == 0).sum())
             if not tx:
                 for node in range(size):
                     sim.add_events(node, [duration], [reset[0]], [drive.ignite])
                 sim.run(recovery)
+                if operand_oneshot:
+                    members = [m for latch in gates.latches for m in latch.members]
+                    result["survivors"] += int((sim.last[selected][:, members] >= duration + recovery - 300).sum())
     return result
 
 
@@ -349,7 +469,7 @@ def test_add_sub_large_survey(width, trials, noisy):
     (False, "generic", False), (False, "generic", True),
     (True, "generic", True), (True, "specialized", True),
 ])
-def test_pipeline_combinations_rearm(zero, datapath, noisy):
+def test_pipeline_combinations_rearm(zero, datapath, noisy, *, operand=False, ignition=False):
     from drosophilos.lib.kernel import build_pipeline, run_pipeline_batched
     from test_experimental_autapse import _NoisyRefSim
     spec = [{"name": "add", "op": "ADD", "a": "input", "b": ("const", "one")},
@@ -357,7 +477,8 @@ def test_pipeline_combinations_rearm(zero, datapath, noisy):
             {"name": "out", "op": "XOR", "a": "sub", "b": ("const", "one")}]
     pl = build_pipeline(P, 2, spec, consts={"one": 1, "three": 3},
                         rate_robust=True, experimental_autapse=True, zero_once=zero,
-                        datapath=datapath, ordered_xor_oneshot=True)
+                        datapath=datapath, ordered_xor_oneshot=True,
+                        operand_xor_oneshot=operand, master_ignition=ignition)
     sim = _NoisyRefSim(pl.net, copies=2) if noisy else RefSim(pl.net.topology(), P, n_nodes=2)
     outputs, _, stats = run_pipeline_batched(pl, P, [[0, 1, 3]] * 2,
                                              max_ms=9000, sim=sim, progress=0)

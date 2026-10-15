@@ -61,7 +61,7 @@ from ..sim.ref64 import RefSim
 from .adder import extend_reset
 from .control import add_kill_pair, add_kill_train, add_request_clear
 from .alu import N_UNITS, OPS as ALU_OPS, add_alu_logic, alu_reference, wire_alu, wire_outputs
-from .gates import ORDERED_XOR_ONESHOT_MUL_VERSION, ORDERED_XOR_ONESHOT_VERSION, Gates, Rail2
+from .gates import OPERAND_XOR_ONESHOT_VERSION, ORDERED_XOR_ONESHOT_MUL_VERSION, ORDERED_XOR_ONESHOT_VERSION, Gates, Rail2
 from .netlist import Drive, Netlist
 from ..protocol.rate import RATE_ROBUST_VERSION, condition_rate_gate
 from .ram import Memory, add_memory, add_read_port, add_write_port, address_vetoes
@@ -292,7 +292,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
                    experimental_register_reset: bool = False, experimental_autapse: bool = False,
                    ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-                   master_ignition: bool = False) -> Pipeline:
+                   master_ignition: bool = False, operand_xor_oneshot: bool = False) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -362,8 +362,18 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     experimental_register_reset may otherwise be combined subject to their
     existing restrictions; the control machine is unchanged.
     `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
-    stage resets its spent latch. Operand XORs and carry-generation timing are
-    unchanged. Only the default timing/reset policy and widths 1..8 are supported.
+    stage resets its spent latch. Carry-generation timing is unchanged.
+    `operand_xor_oneshot=True` (experimental v3, default off) shares transaction
+    pulses across each ordered adder's operand XOR and generate/kill branches,
+    and across its sum XOR and carry propagation. Operand, carry and sum
+    output/spent storage receives 1.5-loop clears; controller timing is unchanged.
+    V1 failed correctness/clear surveys and v2 left carry/sum reset survivors;
+    neither version can be silently replayed as v3. Ordinary sum-only F also
+    admits reset survivors and retains its original circuit with this option off.
+    Requires complete configuration F and its timing restrictions;
+    master_ignition and experimental F16 may be combined. SUB's B-complement
+    XORs and standalone logic are unchanged. This option is not qualified.
+    Only the default timing/reset policy and widths 1..8 are supported.
     Wider shapes use the same v1 circuits and ordinary reset domains, including
     multiplier-row spent latches and RAM COPY/word latches. This bounded RefSim
     qualification is not a game-kernel campaign exit (docs/stable_latch.md).
@@ -376,6 +386,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     Requires rate_robust
     and experimental_autapse: without latch feedback the corner reset/re-arm
     survey fails. zero_once may be combined with it."""
+    if type(operand_xor_oneshot) is not bool:
+        raise ValueError("operand_xor_oneshot requires a bool")
+    if operand_xor_oneshot and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
+        raise ValueError("operand_xor_oneshot requires complete configuration F: rate_robust=True, "
+                         "experimental_autapse=True and ordered_xor_oneshot=True")
     if master_ignition and (
             params != Params() or not (rate_robust and experimental_autapse and copy_requires_rail) or
             experimental_register_reset or request_clear_pulses not in (None, 4) or kernel_kill_pulses != 4 or
@@ -731,7 +746,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             relight_in = add_delay_chain(net, drive, f"{c.name}.actd2", act_d, repair_hops)
             for src, pr in c.reqs.items():
                 add_veto_relay(net, drive, f"{c.name}.relight.{src}", relight_in, [pr[1].u, pr[0].u], pr[0])
-        G = Gates(net, drive, ordered_xor_oneshot=ordered_xor_oneshot)
+        G = Gates(net, drive, ordered_xor_oneshot=ordered_xor_oneshot,
+                  operand_xor_oneshot=operand_xor_oneshot)
         Sc = c.stage
         name = c.name
         if c.op == "MULP_ROW":
@@ -790,6 +806,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
             wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)  # acc' -> bits 0..n-1, C, Z, V
             wire_outputs(net, drive, Ad + Bd, Sc, list(range(n + 3, 3 * n + 3)))  # A, B carried along (delayed tokens)
             extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+            G.finalize_operand_reset(Sc.reset_inh)
             built.add(c.name)
             continue
         if c.op == "STORE":  # RAM write of b at address a; the data also passes to the cell's master
@@ -923,6 +940,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                 R, C, V = add_alu_logic_tokens(G, name, A_tok, B_tok, U, SUB, act_d, mul=(c.op == "MUL"))
         wire_alu(net, drive, R, C, V, Sc, zero_once=zero_once)
         extend_reset(net, drive, Sc, G.latches + [c.act], G.gates)
+        G.finalize_operand_reset(Sc.reset_inh)
         built.add(c.name)
 
     # ---- several STORE cells into one RAM: the ports' marks keep them off each other's writes
@@ -1047,6 +1065,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         pl.build_options["f_width16_experimental"] = True
     if master_ignition:
         pl.build_options.update(master_ignition=True, master_ignition_version=MASTER_IGNITION_VERSION)
+    if operand_xor_oneshot:
+        pl.build_options.update(operand_xor_oneshot=True, operand_xor_oneshot_version=OPERAND_XOR_ONESHOT_VERSION)
     if drive.rate_robust:
         pl.build_options["rate_robust_version"] = RATE_ROBUST_VERSION
     if ordered_xor_oneshot:
