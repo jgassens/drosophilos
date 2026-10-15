@@ -1,5 +1,23 @@
 # Verified-reset slow-test failures
 
+## Status and caveats
+
+- Verified reset version 1 is the **REJECTED** direct-experiment prototype
+  (`docs/stage_d_completion_stall.md`; `docs/stable_latch.md:35–41`). These two
+  slow tests asserted guarantees it never had.
+- Version 2 is an opt-in correction for this prototype only. No default,
+  recorded campaign, Stage D build, or public kernel flag uses it. A coordinator
+  check of the 77 Stage D records found 66 with
+  `verified_register_reset=False` and 11 that predate the flag (default off),
+  so no Stage D result used verified reset.
+- Version 2's immediate local feedback is an inhibitory SELF-edge (4.4 x loop,
+  zero delay) on neurons whose other outputs are excitatory. This violates
+  Dale's law (one neuron, one transmitter sign), just as configuration F's
+  latch autapse does (`docs/stage_h/autapse_census.md`,
+  `docs/stage_h/dale_feedback.md`). It could not be carried on real wiring
+  without a separate inhibitory interneuron.
+- Full-size cluster results: pending (G2 jobs 4020997, 4020998)
+
 ## Scope and historical evidence
 
 The introducing commit is `c8e94c604efdccbf2ee2468f71317a8dc2499d0e`
