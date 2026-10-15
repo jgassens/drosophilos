@@ -17,6 +17,13 @@ EXPERIMENTAL_AUTAPSE_VERSION = 1
 EXPERIMENTAL_AUTAPSE_GAIN = 0.2
 EXPERIMENTAL_AUTAPSE_DELAY_STEPS = 0
 
+# Experimental private inhibitory relay circuit. Bump on any circuit retuning.
+DALE_FEEDBACK_VERSION = 1
+DALE_FEEDBACK_GAIN = 0.2
+DALE_FEEDBACK_DRIVE_GAIN = 1.0
+DALE_FEEDBACK_INPUT_DELAY_STEPS = 0
+DALE_FEEDBACK_DELAY_STEPS = 0
+
 # Version 1 (rejected): simultaneous u/v ignition admits fast reset survivors.
 # Version 2: keep u at delay 18, assist v 60 steps later from the SAME COPY arm.
 MASTER_IGNITION_VERSION = 2
@@ -74,6 +81,53 @@ def add_experimental_autapses(net: Netlist, drive: Drive) -> None:
                             EXPERIMENTAL_AUTAPSE_DELAY_STEPS)
     finally:
         net.inhibition_mirrors = mirrors
+
+
+def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private") -> None:
+    """Finalize excitatory storage with private inhibitory feedback neurons.
+
+    Like autapses, install last, after all readers and controllers. Each member
+    excites only its own relay; the relay inhibits only that member. Zero edge
+    delays still incur the relay's membrane integration and spike delivery time.
+    This changes latch feedback only, not other mixed-sign circuit elements.
+    """
+    if variant != "private":
+        raise ValueError(f"unsupported Dale latch feedback variant: {variant!r}")
+    edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
+    members = [m for (u, v), q in edges.items()
+               if q == drive.loop and edges.get((v, u)) == drive.loop
+               and net.roles[u].endswith(".u")
+               and net.roles[v] == net.roles[u].removesuffix(".u") + ".v"
+               for m in (u, v)]
+    roles = set(net.roles)
+    if any(net.roles[m] + ".fb" in roles or (m, m) in edges for m in members):
+        raise ValueError("latch feedback already installed")
+    mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
+    try:
+        for member in members:
+            inh = net.neuron(net.roles[member] + ".fb")
+            net.synapse(member, inh, round(drive.loop * DALE_FEEDBACK_DRIVE_GAIN),
+                        DALE_FEEDBACK_INPUT_DELAY_STEPS)
+            net.synapse(inh, member, -round(drive.loop * DALE_FEEDBACK_GAIN),
+                        DALE_FEEDBACK_DELAY_STEPS)
+    finally:
+        net.inhibition_mirrors = mirrors
+
+
+def validate_latch_feedback(latch_feedback: str, experimental_autapse: bool,
+                            dale_feedback_version: int = DALE_FEEDBACK_VERSION) -> None:
+    """Validate builder options, including version metadata forwarded on replay.
+
+    Missing policy means the historical autapse. Versions matter only when the
+    corresponding circuit is selected; old autapse records remain unchanged.
+    """
+    if latch_feedback not in ("autapse", "dale_private"):
+        raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
+    if latch_feedback != "autapse":
+        if not experimental_autapse:
+            raise ValueError("dale_private latch_feedback requires experimental_autapse=True")
+        if type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION:
+            raise ValueError("unsupported Dale-feedback circuit version")
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
