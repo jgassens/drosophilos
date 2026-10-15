@@ -157,8 +157,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             type(campaign["f_width16_experimental"]) is not bool):
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     from ..lib.kernel import TRUE_GUARD_VERSION
-    from ..protocol.latch import EXPERIMENTAL_AUTAPSE_VERSION
-    from ..protocol.latch import MASTER_IGNITION_VERSION
+    from ..protocol.latch import (DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION,
+                                  MASTER_IGNITION_VERSION, validate_latch_feedback)
     from ..lib.gates import ORDERED_XOR_ONESHOT_VERSION, ORDERED_XOR_ONESHOT_MUL_VERSION, validate_operand_xor_record
     validate_operand_xor_record(campaign)
 
@@ -178,6 +178,14 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         raise ValueError("unsupported experimental-autapse circuit: recorded "
                          f"experimental_autapse_version is {recorded_autapse_version!r}, "
                          f"while the current circuit is version {EXPERIMENTAL_AUTAPSE_VERSION}")
+
+    latch_feedback = campaign.get("latch_feedback", "autapse")
+    dale_feedback_version = campaign.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
+    try:
+        validate_latch_feedback(latch_feedback, campaign.get("experimental_autapse", False),
+                                dale_feedback_version)
+    except ValueError as exc:
+        raise ValueError(f"unsupported campaign latch_feedback: {exc}") from exc
 
     if campaign.get("true_guards", False) and campaign.get("true_guard_version") != TRUE_GUARD_VERSION:
         raise ValueError("unsupported true-guard circuit: rebuild this capture at its recorded commit; "
@@ -205,6 +213,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         experimental_register_reset = options.pop("experimental_register_reset", campaign.get("experimental_register_reset", False))
         experimental_autapse = options.pop("experimental_autapse", campaign.get("experimental_autapse", False))
         ordered_xor_oneshot = options.pop("ordered_xor_oneshot", campaign.get("ordered_xor_oneshot", False))
+        latch_feedback = options.pop("latch_feedback", latch_feedback)
+        dale_feedback_version = options.pop("dale_feedback_version", dale_feedback_version)
         operand_xor_oneshot = options.pop("operand_xor_oneshot", campaign.get("operand_xor_oneshot", False))
         master_ignition = options.pop("master_ignition", campaign.get("master_ignition", False))
         strength = options.pop("kill_strength", None)
@@ -216,7 +226,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                    verified_register_reset=verified_register_reset,
                    experimental_register_reset=experimental_register_reset,
                    experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
-                   master_ignition=master_ignition, operand_xor_oneshot=operand_xor_oneshot, **options)
+                   master_ignition=master_ignition, operand_xor_oneshot=operand_xor_oneshot,
+                   latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -232,6 +243,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         with _working_directory(_repo_root()):
             ks, pl, _tokens, _reference = block(
                 campaign["block"], params, datapath=campaign.get("datapath", "generic"),
+                latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
                 **{key: campaign.get(key, False) for key in flags},
             )
         options = {key: campaign.get(key, value) for key, value in pl.build_options.items()
@@ -300,6 +312,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             f_width16_experimental=campaign.get("f_width16_experimental", False),
             master_ignition=campaign.get("master_ignition", False),
             operand_xor_oneshot=campaign.get("operand_xor_oneshot", False),
+            latch_feedback=latch_feedback,
+            dale_feedback_version=dale_feedback_version,
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

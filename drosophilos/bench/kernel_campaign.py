@@ -21,6 +21,7 @@ from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
+from ..protocol.latch import DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 from .a2_campaigns import MIXES
 from .stall_diag import write_compact_dump
@@ -36,7 +37,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
           ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-          master_ignition: bool = False, operand_xor_oneshot: bool = False):
+          master_ignition: bool = False, operand_xor_oneshot: bool = False,
+          latch_feedback: str = "autapse", dale_feedback_version: int | None = None):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -77,7 +79,9 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         experimental_register_reset=experimental_register_reset,
                         experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
                         f_width16_experimental=f_width16_experimental, master_ignition=master_ignition,
-                        operand_xor_oneshot=operand_xor_oneshot)
+                        operand_xor_oneshot=operand_xor_oneshot, latch_feedback=latch_feedback,
+                        **({} if dale_feedback_version is None else
+                           {"dale_feedback_version": dale_feedback_version}))
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -92,7 +96,7 @@ def rebuild_record(record: dict):
     flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
              "verified_register_reset", "experimental_register_reset", "experimental_autapse",
              "ordered_xor_oneshot", "f_width16_experimental", "master_ignition", "operand_xor_oneshot")
-    from ..protocol.latch import MASTER_IGNITION_VERSION
+    from ..protocol.latch import MASTER_IGNITION_VERSION, validate_latch_feedback
     from ..lib.gates import validate_operand_xor_record
     validate_operand_xor_record(record)
     if "master_ignition" in record and type(record["master_ignition"]) is not bool:
@@ -103,7 +107,14 @@ def rebuild_record(record: dict):
         raise ValueError("unsupported master-ignition circuit version")
     if "f_width16_experimental" in record and type(record["f_width16_experimental"]) is not bool:
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
+    latch_feedback = record.get("latch_feedback", "autapse")
+    dale_feedback_version = record.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
+    try:
+        validate_latch_feedback(latch_feedback, record.get("experimental_autapse", False), dale_feedback_version)
+    except ValueError as exc:
+        raise ValueError(f"unsupported campaign latch_feedback: {exc}") from exc
     built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
+                  latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
                   **{key: record.get(key, False) for key in flags})
     pl = built[1]
     for key, value in pl.build_options.items():
@@ -141,6 +152,8 @@ def parser() -> argparse.ArgumentParser:
                     help="UNQUALIFIED v3: share operand/sum transaction pulses with carry branches and strengthen operand/carry/sum clears; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
+    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private"), default="autapse",
+                    help="experimental storage feedback policy; dale_private requires configuration F")
     ap.add_argument("--master-ignition", action="store_true",
                     help="EXPERIMENTAL: stagger selected master partner ignition from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
@@ -176,7 +189,7 @@ def main(argv=None):
                               experimental_register_reset=a.experimental_register_reset,
                               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
                               f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition,
-                              operand_xor_oneshot=a.operand_xor_oneshot)
+                              operand_xor_oneshot=a.operand_xor_oneshot, latch_feedback=a.latch_feedback)
     if a.repeats != 1:
         tokens = tokens * a.repeats
         ref = kernel_outputs(ks, tokens)
@@ -249,6 +262,8 @@ def main(argv=None):
            "outputs": [{o: [[int(s_), (None if v is None else int(v))] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
     rec.update(pl.build_options)
+    rec["latch_feedback"] = a.latch_feedback
+    rec["dale_feedback_version"] = pl.build_options.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
     if capture is not None:
         rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
     if a.out:

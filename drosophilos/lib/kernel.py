@@ -396,6 +396,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     if type(operand_xor_oneshot) is not bool:
         raise ValueError("operand_xor_oneshot requires a bool")
     validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version)
+    if latch_feedback == "dale_private" and (master_ignition or operand_xor_oneshot or f_width16_experimental):
+        raise ValueError("master_ignition, operand_xor_oneshot, and f_width16_experimental are not surveyed with dale_private")
     if operand_xor_oneshot and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
         raise ValueError("operand_xor_oneshot requires complete configuration F: rate_robust=True, "
                          "experimental_autapse=True and ordered_xor_oneshot=True")

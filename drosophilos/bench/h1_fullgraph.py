@@ -72,7 +72,15 @@ def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
             raise ValueError(f"--width {width_override} disagrees with mapping width {meta['width']}")
         if storage_override is not None and storage_override != meta["storage"]:
             raise ValueError(f"--storage {storage_override!r} disagrees with mapping storage {meta['storage']!r}")
-        return {key: meta[key] for key in ADDER_META_KEYS if key != "builder"}
+        options = {key: meta[key] for key in ADDER_META_KEYS if key != "builder"}
+        latch_feedback = meta.get("latch_feedback", "autapse")
+        if latch_feedback not in ("autapse", "dale_private"):
+            raise ValueError(f"unsupported mapping latch_feedback: {latch_feedback!r}")
+        if latch_feedback == "dale_private" and not options["experimental_autapse"]:
+            raise ValueError("unsupported mapping latch_feedback: dale_private requires experimental_autapse=True")
+        if latch_feedback != "autapse":
+            options["latch_feedback"] = latch_feedback
+        return options
 
     # Legacy files did not record a whole builder contract.  This exactly reproduces the old
     # invocation, while allowing h1_ffadder_mapping.json to select its flip-flop output store.
