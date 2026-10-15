@@ -50,6 +50,12 @@ def test_stage_h_mapping_meta_rebuilds_configuration_f_and_legacy_is_latch(tmp_p
         adder_build_kwargs(loaded, width_override=3)
 
 
+@pytest.mark.parametrize("latch_feedback", ["dale_private", "bogus"])
+def test_legacy_mapping_refuses_explicit_nondefault_latch_feedback(latch_feedback):
+    with pytest.raises(ValueError, match="legacy mapping.*latch_feedback"):
+        adder_build_kwargs({"latch_feedback": latch_feedback})
+
+
 def test_saved_docs_mappings_rebuild_their_exact_role_sets():
     """Legacy mappings still identify every role after their builder is reconstructed."""
     docs = Path(__file__).resolve().parents[1] / "docs"

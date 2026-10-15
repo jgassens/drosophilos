@@ -26,6 +26,7 @@ from ..connectome.embed_image import (adder_cases, build_image, h1_conditions, r
 from ..connectome.embed_netlist import Policy, _Anatomy, exposure_of, place_netlist
 from ..connectome.mcns import MCNS, load_mcns
 from ..lib.adder import build_adder_channel
+from ..protocol.latch import DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 
 REGIONS = {
@@ -56,12 +57,15 @@ def mapping_meta(region: str, isolation_weight: float, restarts: int, seed: int,
         raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
     if latch_feedback == "dale_private" and not config_f:
         raise ValueError("dale_private latch_feedback requires configuration F")
-    return {"builder": "build_adder_channel", "width": int(width), "ordered": True,
+    meta = {"builder": "build_adder_channel", "width": int(width), "ordered": True,
             "watchdog_hops": 100, "storage": "flipflop", "rate_robust": bool(config_f),
             "experimental_autapse": bool(config_f), "ordered_xor_oneshot": bool(config_f),
             "latch_feedback": str(latch_feedback),
             "k_max": K_MAX, "isolation_weight": float(isolation_weight), "region": str(region),
             "restarts": int(restarts), "seed": int(seed)}
+    if latch_feedback == "dale_private":
+        meta["dale_feedback_version"] = DALE_FEEDBACK_VERSION
+    return meta
 
 
 def stats(values) -> dict:

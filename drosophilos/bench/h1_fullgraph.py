@@ -42,6 +42,7 @@ from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelop
                                       tally, trace_since, underlying, power_on)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
+from ..protocol.latch import DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
@@ -79,11 +80,17 @@ def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
         if latch_feedback == "dale_private" and not options["experimental_autapse"]:
             raise ValueError("unsupported mapping latch_feedback: dale_private requires experimental_autapse=True")
         if latch_feedback != "autapse":
-            options["latch_feedback"] = latch_feedback
+            dale_feedback_version = meta.get("dale_feedback_version")
+            if type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION:
+                raise ValueError("unsupported mapping Dale-feedback circuit version")
+            options.update(latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version)
         return options
 
     # Legacy files did not record a whole builder contract.  This exactly reproduces the old
     # invocation, while allowing h1_ffadder_mapping.json to select its flip-flop output store.
+    latch_feedback = meta.get("latch_feedback", "autapse")
+    if latch_feedback != "autapse":
+        raise ValueError("legacy mapping cannot specify non-default latch_feedback")
     saved_storage = meta.get("storage", "latch")
     if storage_override is not None and storage_override != saved_storage:
         raise ValueError(f"--storage {storage_override!r} disagrees with mapping storage {saved_storage!r}")

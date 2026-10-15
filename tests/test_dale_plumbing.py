@@ -50,9 +50,21 @@ def test_h_stage_mapping_rebuilds_dale_private_adder():
     meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_private")
     options = adder_build_kwargs(meta)
     assert options["latch_feedback"] == "dale_private"
+    assert options["dale_feedback_version"] == meta["dale_feedback_version"]
     assert _adder_digest(build_adder_channel(Params(), **options)) == _adder_digest(
         build_adder_channel(Params(), width=4, ordered=True, watchdog_hops=100, storage="flipflop",
                             **F, latch_feedback="dale_private"))
+
+
+@pytest.mark.parametrize("version", [999, None])
+def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_feedback(version):
+    meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_private")
+    if version is None:
+        del meta["dale_feedback_version"]
+    else:
+        meta["dale_feedback_version"] = version
+    with pytest.raises(ValueError, match="Dale-feedback"):
+        adder_build_kwargs(meta)
 
 
 @pytest.mark.parametrize("option", ["master_ignition", "operand_xor_oneshot", "f_width16_experimental"])

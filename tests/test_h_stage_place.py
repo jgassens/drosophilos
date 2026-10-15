@@ -12,6 +12,7 @@ from test_embed_netlist import latch_relay_netlist, synthetic_mcns
 from drosophilos.bench.h_stage_place import (REGIONS, host_exposure, main, mapping_meta, region_mask,
                                            run_one, stats, summarize)
 from drosophilos.connectome.embed_netlist import Policy
+from drosophilos.protocol.latch import DALE_FEEDBACK_VERSION
 
 
 def test_region_masks_are_disjoint_and_cover_the_declared_superclasses():
@@ -50,6 +51,14 @@ def test_mapping_meta_contract_keys_and_exact_types(config_f):
     assert meta["k_max"] == 4.0 and meta["isolation_weight"] == 1.0
     assert meta["latch_feedback"] == "autapse"
     assert all(meta[k] is config_f for k in ("rate_robust", "experimental_autapse", "ordered_xor_oneshot"))
+
+
+def test_mapping_meta_records_dale_feedback_version_only_for_dale_private():
+    dale = mapping_meta("optic_lobe", 1, 4, 0, latch_feedback="dale_private")
+    autapse = mapping_meta("optic_lobe", 1, 4, 0, latch_feedback="autapse")
+    assert dale["dale_feedback_version"] == DALE_FEEDBACK_VERSION
+    assert type(dale["dale_feedback_version"]) is int
+    assert "dale_feedback_version" not in autapse
 
 
 def test_exposure_separates_nonhosts_from_outside_region():
