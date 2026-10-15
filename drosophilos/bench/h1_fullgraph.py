@@ -26,28 +26,33 @@ a cluster node. Do not run it on a laptop.
     python -m drosophilos.bench.h1_fullgraph --n-cases 50 --seed 0 --surround silent --out data/h1_fullgraph/silent.json
     python -m drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/all_w0_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/inputs-50.json
 
-Fault attribution (cluster only; run from the repository root). First submit the live,
-uncut all_w0 attribution runs, 50 additions in each surround:
+Fault attribution (cluster only; run from the repository root). The submit.sh options
+--cluster, --script, and --ref must precede sbatch options. First submit the live, uncut
+all_w0 attribution runs, 50 additions in each surround:
 
     for s in silent poisson; do
-      slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+      slurm/submit.sh --script juno-cpu --partition=normal --time=8:00:00 --cpus-per-task=4 --mem=64G -- drosophilos.bench.h1_fullgraph \\
         --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
         --surround "$s" --rate 2 --max-ms 1200 --attribute 20 \\
         --attribution-out "data/stage_h/fullgraph/all_w0_attr_${s}.npz" \\
         --out "data/stage_h/fullgraph/all_w0_attr_${s}.json"
     done
 
+For a G2 CPU run, use its cpu-preempt partition with GPU resources disabled:
+
+    slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none --cpus-per-task=4 --mem=64G --time=8:00:00 -- drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 --surround silent --rate 2 --max-ms 1200 --attribute 20 --attribution-out data/stage_h/fullgraph/all_w0_attr_silent.npz --out data/stage_h/fullgraph/all_w0_attr_silent.json
+
 After both jobs finish, submit attribution-ranked rungs AND synapse-ranked comparisons
 (the NPZ is the full aggregate score array; compact JSON is not a cut input):
 
     for s in silent poisson; do
       for f in 0.05 0.10 0.20 0.30; do
-        slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+        slurm/submit.sh --script juno-cpu --partition=normal --time=8:00:00 --cpus-per-task=4 --mem=64G -- drosophilos.bench.h1_fullgraph \\
           --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
           --surround "$s" --rate 2 --max-ms 1200 --cut-inputs-frac "$f" \\
           --cut-inputs-by attribution --attribution-in "data/stage_h/fullgraph/all_w0_attr_${s}.npz" \\
           --out "data/stage_h/fullgraph/all_w0_attr_cutin${f}_${s}_n50.json"
-        slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+        slurm/submit.sh --script juno-cpu --partition=normal --time=8:00:00 --cpus-per-task=4 --mem=64G -- drosophilos.bench.h1_fullgraph \\
           --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
           --surround "$s" --rate 2 --max-ms 1200 --cut-inputs-frac "$f" \\
           --out "data/stage_h/fullgraph/all_w0_syn_cutin${f}_${s}_n50.json"
