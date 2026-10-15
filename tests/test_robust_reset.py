@@ -55,8 +55,8 @@ def _candidate_pipeline(*args, strength=1.75, tail=8, **kwargs):
     return pl
 
 
-def _sparse_strays(sim, rng, steps):
-    """Independent Bernoulli(5 Hz * dt) arrivals, using geometric waiting times."""
+def _sparse_strays(sim, rng, steps, *, schedule=True):
+    """Bernoulli(5 Hz * dt) arrivals; schedule=False only consumes the same draws."""
     for node in range(sim.B):
         times, neurons = [], []
         for neuron in range(sim.n):
@@ -67,11 +67,13 @@ def _sparse_strays(sim, rng, steps):
                     break
                 times.append(t)
                 neurons.append(neuron)
-        sim.add_events(node, times, neurons, [150] * len(times))
+        if schedule:
+            sim.add_events(node, times, neurons, [150] * len(times))
 
 
 def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
-                 corner=True, noisy=True, progress=False, verified=False):
+                 corner=True, noisy=True, progress=False, verified=False,
+                 verification_version=1, trial_offset=0):
     """Two actual staged commits, loading the SAME Q rail at its observed READY.
 
     A one-bit word isolates the reset/reload contract from ALU rate-gate failure.
@@ -79,7 +81,12 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
     READY, COMMIT, grant, selected-rail arms and completion circuits execute.
     Advancing both READY chains tests a positive margin on Q load AND M COPY.
     It does not qualify a whole ALU or substitute for the extended-domain tests.
+
+    trial_offset skips complete 250-trial batches after consuming their random
+    draws, to reproduce a late survey window without simulating its prefix.
     """
+    if trial_offset < 0 or trial_offset % 250:
+        raise ValueError("trial_offset must be a nonnegative multiple of 250")
     drive = replace(DRIVE, rate_robust=rate)
     net = Netlist(PARAMS)
     Q = add_register(net, drive, "cell.Q", 1, with_completion=True)
@@ -89,7 +96,7 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
     M = reg.master
     if verified:
         from drosophilos.protocol.handshake import verify_register_resets
-        verify_register_resets(net, drive, [Q, M])
+        verify_register_resets(net, drive, [Q, M], version=verification_version)
     else:
         compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in (Q, M)],
                               strength=strength, ready_tail_links=tail)
@@ -111,8 +118,8 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
     trial_steps = 32000 if verified else 18000
     failures = ready_missing = faults = survivors = 0
     min_copy_after_ready = 10**9
-    for lo in range(0, n, 250):
-        count = min(250, n - lo)
+    for lo in range(0, n + trial_offset, 250):
+        count = min(250, n + trial_offset - lo)
         if corner:
             q = np.broadcast_to(topo.quanta, (count, topo.nnz)).copy()
             vth = np.full((count, topo.n), PARAMS.V_th)
@@ -131,7 +138,9 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
             bias = np.asarray(net.bias) + rng.normal(0, .2, (count, topo.n))
         sim = RefSim(topo, PARAMS, n_nodes=count, quanta=q, V_th=vth, bias=bias)
         if noisy:
-            _sparse_strays(sim, rng, trial_steps)
+            _sparse_strays(sim, rng, trial_steps, schedule=lo >= trial_offset)
+        if lo < trial_offset:
+            continue
         for b in range(count):
             sim.add_events(b, [10, 3000, 6000], [M.rails[0][0].u, Q.rails[0][0].u, reg.commit_in],
                            [DRIVE.ignite] * 3)
@@ -168,7 +177,7 @@ def _path_trials(n, *, rate=False, strength=1.75, tail=8, advance=0, seed=108,
         ready_missing += int(np.count_nonzero(~loaded))
         if progress:
             print(dict(rate=rate, corner=corner, strength=strength, tail=tail, advance=advance,
-                       trials=lo + count, failures=failures, ready_missing=ready_missing,
+                       trials=lo + count - trial_offset, failures=failures, ready_missing=ready_missing,
                        faults=faults, survivors=survivors), flush=True)
     return dict(trials=n, failures=failures, ready_missing=ready_missing, faults=faults,
                 survivors=survivors, copy_arrival_after_ready=int(min_copy_after_ready),
