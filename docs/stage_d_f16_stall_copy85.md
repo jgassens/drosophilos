@@ -836,9 +836,9 @@ At the measured **2000-step recovery** after the 1.5-loop clears, post-clear
 establishment latency was identical for v2 and v3: **102–154 steps**. Recovery
 shorter than 2000 steps after the 1.5-loop clears is unmeasured.
 
-Long cluster surveys remain unrun locally. **V3 is unqualified.** Stronger
-clears must still be evaluated for recovery and reload margin in the full
-cluster and kernel campaigns; no throughput or F16 claim follows.
+Long cluster surveys were unrun locally at the time of this note. The cluster
+results below subsequently complete v3's bounded RefSim qualification. The
+full kernel campaign remains pending; no throughput or F16 claim follows.
 
 ### V3 foreground validation
 
@@ -880,3 +880,51 @@ GPU/kernel campaign was run locally. `git diff --check` passes.
 Full cluster requalification, F16 kernel campaigns, tighter recovery margins,
 weight-dependent anatomical capacity and end-to-end performance remain to be
 evaluated before any qualification claim.
+
+### Operand-XOR v3: cluster qualification results
+
+On 2026-10-14, all **26** cases gated by
+`DROSO_OPXOR_CLUSTER=1` in
+`tests/test_operand_xor.py::test_operand_xor_cluster` ran at commit
+**0b519ef** on Juno and G2 CPU nodes. Every case passed, with wrong, double,
+missing, repeated and surviving members all **zero**. The printed trial counts,
+where present, and jobs are recorded below.
+
+| Case | Trials (when printed) | Result | Job |
+|---|---:|---|---|
+| `second-pulse` | 160,000 | passed; wrong/double/missing/repeated/survivors 0 | Juno 457354 |
+| `order-100ms` | 160,000 | passed; wrong/double/missing/repeated/survivors 0 | Juno 457355 |
+| `copy85` | 40,000 | passed; wrong/double/missing/repeated/survivors 0 | Juno 457356 |
+| `addsub8-mix-B` | 4,096 | passed; wrong/double/missing/repeated/survivors 0 | Juno 457357 |
+| `replay8-copy175` | — | passed | Juno 457358 |
+| `replay8-copy418` | — | passed | Juno 457359 |
+| `replay8-copy536` | — | passed | Juno 457360 |
+| `replay4-copy75` | — | passed | Juno 457361 |
+| `replay4-copy338` | — | passed | Juno 457362 |
+| `survivor-second-pulse-copy406` | — | passed | Juno 457363 |
+| `survivor-order-100ms-copy1098` | — | passed | Juno 457364 |
+| `survivor-copy85-copy3725` | — | passed | Juno 457365 |
+| `survivor-copy85-copy11001` | — | passed | Juno 457366 |
+| `order-15ms` | 160,000 | passed; wrong/double/missing/repeated/survivors 0 | G2 4018862 |
+| `mix-B` | 160,000 | passed; wrong/double/missing/repeated/survivors 0 | G2 4018863 |
+| `addsub4-mix-B` | 1,024 | passed; wrong/double/missing/repeated/survivors 0 | G2 4018864 |
+| `addsub16-nominal` | 4,096 | passed; wrong/double/missing/repeated/survivors 0 | G2 4018865 |
+| `replay8-copy391` | — | passed | G2 4018866 |
+| `replay8-copy497` | — | passed | G2 4018867 |
+| `replay8-copy699` | — | passed | G2 4018868 |
+| `replay4-copy140` | — | passed | G2 4018870 |
+| `replay85-clear2174` | — | passed | G2 4018871 |
+| `survivor-order-100ms-copy406` | — | passed | G2 4018872 |
+| `survivor-order-15ms-copy406` | — | passed | G2 4018873 |
+| `survivor-copy85-copy4082` | — | passed | G2 4018874 |
+| `survivor-copy85-copy16939` | — | passed | G2 4018875 |
+
+The eight survivor-replay cases were re-run at commit **9b60ebb** with the
+new post-clear latency **≤ 200** and off-control reset-count assertions; all
+passed: Juno jobs **457414–457417** and G2 jobs **4018922, 4018923, 4018925,
+4018926**.
+
+V3 passes its bounded RefSim qualification. It has not yet run in a full
+kernel campaign. Next is a **100-copy 16-bit perspective campaign** with
+`--operand-xor-oneshot` and `--master-ignition`. The ordinary-F carry/sum
+reset weakness remains in default F builds.
