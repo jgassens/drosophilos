@@ -715,6 +715,162 @@ noisy load jitter where enabled), are **108.2–239.7 ms** for four-bit mix B,
 **102.6–401.4 ms** for eight-bit mix B, and **105.1–704.2 ms** for nominal
 sixteen-bit arithmetic. These are not full-kernel latency measurements.
 
+## Operand-XOR v2 cluster results and v3 reset correction (2026-10-14)
+
+The v2 tip **87319ea** completed its 18 cluster cases on Juno/G2. Fourteen
+passed, including all nine frozen v1 arithmetic failures, the frozen v1
+operand-clear failure, `mix-B`, `addsub4-mix-B`, `addsub8-mix-B` and
+`addsub16-nominal`. Every case had **zero wrong, double and missing rails**.
+The four failures were exclusively surviving latch members after reset:
+
+| Case | Transactions | Surviving members | Log |
+|---|---:|---:|---|
+| `second-pulse` | 160,000 | 120 | `v2-slurm-457312.out` |
+| `order-100ms` | 160,000 | 106 | `v2-slurm-457313.out` |
+| `order-15ms` | 160,000 | 98 | `v2-slurm-4018753.out` |
+| `copy85` | 40,000 | 14 | `v2-slurm-457314.out` |
+
+These logs are in the original checkout's `data/stage_d/opxor_cluster/`.
+They name carry `add.fa0.c0`, sum output `add.fa0.s.y{0,1}`, and sum spent
+`add.fa0.s.once0.spent` storage, outside v2's strengthened operand members.
+This rejects v2's reset result; it is not qualification of v2 or F16.
+
+### Control first: ordinary F sum one-shot, operand option off
+
+Before changing the circuit, bounded RefSim controls ran all four scenarios
+with **operand protection off**, sum one-shots and experimental autapses on.
+These primitives have no rate-mode consumers requiring an F reader transform.
+RNG **8585**, the original **256-copy blocks**, endpoint draws and all timing
+jitter were retained. Option-off nodes use the v2 draw for the same role;
+rewired positive inputs use the original receiving-edge draw. Removed operand
+one-shot components still consume their original random draws. Preceding
+blocks consume all four transactions' jitter without neural simulation.
+Thus copies 406, 1098, 3725, 4082, 11001 and 16939 are the logged physical
+draws, not new seeds or shortened random prefixes.
+
+| Scenario | Small control: copies / transactions / survivors | Frozen copies | Frozen transactions | Option-off survivors | V2 survivors |
+|---|---|---|---:|---:|---:|
+| `second-pulse` | 8 / 32 / 0 | 406 | 4 | **8** | 8 |
+| `order-100ms` | 8 / 32 / 0 | 406, 1098 | 8 | **6** | 8 |
+| `order-15ms` | 8 / 32 / 0 | 406 | 4 | **8** | 8 |
+| `copy85` | 8 / 8 / 0 | 3725, 4082, 11001, 16939 | 4 | **4** | 8 |
+
+All controls had zero missing rails. The option-off `order-15ms` control also
+had 4 wrong/double rails in the small sample and 2 in frozen copy 406;
+`copy85` had 5 in the small sample and 4 across the frozen copies. These are
+unprotected operand responses, separate from the reset accounting. Repeated
+operand candidate ignition is expected with that option off. The first
+controls took **5.25 seconds**; checking v2 against the original survivor
+details brought the diagnostic to **7.34 seconds**.
+
+**This is a shared ordinary-F reset weakness, not a three-tap harness clear.**
+`build_pipeline` constructs each stage via `add_register`, which calls
+`add_reset` with its default **four configured taps**. `extend_reset` connects
+the arithmetic latch members to that stage's inhibitor at **0.75 loop**.
+The operand probe uses the same `add_reset`, three relay neurons plus the
+direct trigger tap, pulse weights and delays, and the same ordinary fan-out.
+A structural regression compares those controller edges and carry/sum clear
+weights with an actual sum-only F kernel stage.
+
+Four configured taps do not guarantee four emitted spikes: the original
+controller emits **three** on these endpoint draws, with cumulative counts
+3/6/9/12 over four transactions. Carry copy 406 and sum copies 3725/4082
+remain active after those clears with the operand option off. V2 changes
+ignition timing and which sum rail is active, so copy 1098 and copy85
+11001/16939 survive only in v2 on these particular draws. Their ordinary
+sum storage and clear wiring are still shared with F. Increasing only the
+storage clear weights suppresses the survivors while retaining the controller
+and its draws. Prescribing an extra inhibitor spike would not reproduce the
+kernel's wiring and is not the remedy.
+
+This finding matters for ordinary F builds too. **The default F circuit keeps
+this known weakness** to preserve byte-identical defaults; these small controls
+do not measure its frequency in a full kernel campaign.
+
+### V3: opt-in carry and sum reset protection
+
+`operand_xor_oneshot=True` now records **version 3**. It retains v2's consumed
+operand/sum pulses and extends its **1.5-loop** storage clear to the adder's
+carry rails, sum output rails and sum spent latches. Collection now covers the
+whole ripple adder instead of stopping after its operand XORs. Each bit changes
+**12 additional existing clear weights**, from 0.75 to 1.5 loop, alongside the
+8 operand-member weights already strengthened by v2. Registered reader mirrors
+receive the corresponding rounded gain. Source/hold inhibitors, controller
+timing, SUB B-complement XORs and other stage storage retain their policy.
+
+V3 adds **no nodes or edges over v2**, and does not alter the input image or
+feed-forward timing. Stronger clears can change post-reset phase and recovery.
+Versionless, v1, v2, boolean/string and unknown enabled
+operand records are rejected on replay. Absent/false flags keep the original
+netlist and records. Existing default/F frozen digests are not updated.
+
+Both review findings are covered: Stage D diagnostic reconstruction validates
+the nested operand flag/version before discarding version metadata, so a valid
+top-level version cannot mask a missing nested version. The mirror branch of
+`Gates.finalize_operand_reset` is tested with a real `Netlist` reader registered
+both before and after ordinary reset wiring, asserting the old and strengthened
+weights and their rounded gain.
+
+Eight explicit cluster regressions, also available as smoke parameters, cover
+every distinct copy in the four logs' capped `survivor_details`:
+
+- `survivor-second-pulse-copy406`
+- `survivor-order-100ms-copy406`
+- `survivor-order-100ms-copy1098`
+- `survivor-order-15ms-copy406`
+- `survivor-copy85-copy3725`
+- `survivor-copy85-copy4082`
+- `survivor-copy85-copy11001`
+- `survivor-copy85-copy16939`
+
+Each runs the option-off control first, reproduces the v2 survivor count,
+member roles, transaction and emitted reset counts, then requires zero
+wrong/double/missing/repeated/surviving state with v3. Copy85 additionally
+reloads the opposite EARLY polarity and clears again after the same recovery
+interval. All eight frozen replays passed locally; the v3 copies total
+**24 transactions**, including the four reloads. The eight new parameters
+bring the cluster list to **26**, gated by `DROSO_OPXOR_CLUSTER=1`.
+
+Long cluster surveys remain unrun locally. **V3 is unqualified.** Stronger
+clears must still be evaluated for recovery and reload margin in the full
+cluster and kernel campaigns; no throughput or F16 claim follows.
+
+### V3 foreground validation
+
+The required command passed with **exit 0**, including the unchanged frozen
+default/F digests, explicit-off comparisons, v3 replay/version rejection,
+nested Stage D operand validation, controller wiring comparison, both mirror
+registration orders and small real pipeline reset/rearm tests:
+
+```sh
+uv run pytest tests/test_build_options.py tests/test_ordered_xor.py \
+  tests/test_operand_xor.py tests/test_config_f_kernels.py tests/test_stall_diag.py \
+  -q -m 'not slow' -p no:warnings
+```
+
+The eight new frozen survivor parameters and two mirror tests passed in the
+targeted foreground smoke run. The eight original small scenario parameters
+also passed, **8 passed / 55 deselected in 13.83 seconds**, with zero
+wrong/double/missing/repeated rails or surviving latch members:
+
+```sh
+DROSO_OPXOR_SMOKE=1 uv run pytest tests/test_operand_xor.py \
+  -q -s -m 'not slow' -k 'survivor or mirror' -p no:warnings
+DROSO_OPXOR_SMOKE=1 uv run pytest tests/test_operand_xor.py \
+  -q -s -m 'not slow' \
+  -k 'test_operand_xor_smoke and not replay and not survivor' \
+  -p no:warnings -o addopts=''
+```
+
+The existing source-checkout environment was reused read-only with
+`UV_PROJECT_ENVIRONMENT` and `UV_NO_SYNC=1`; `PYTHONPATH` selected this worktree,
+and `UV_CACHE_DIR` pointed into writable task temp space. The required suite
+took **roughly 13 minutes**, exceeding the approximate ten-minute target,
+largely in existing full-program default digest builds. The additional
+option-off controls, survivor/mirror probes and original small scenarios
+together took **under a minute**. No full v1 replay sweep, cluster survey or
+GPU/kernel campaign was run locally. `git diff --check` passes.
+
 `git diff --check` passes. Only owned files are changed; no commit was made.
 Full cluster requalification, F16 kernel campaigns, tighter recovery margins,
 weight-dependent anatomical capacity and end-to-end performance remain to be

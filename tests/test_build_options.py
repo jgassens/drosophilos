@@ -51,8 +51,8 @@ CURRENT_PIPELINE_OPTIONS = {
 }
 
 
-@pytest.mark.parametrize("entry", ["campaign", "diagnostic", "recheck"])
-@pytest.mark.parametrize("version", [None, 0, 1, 3, True, "2"])
+@pytest.mark.parametrize("entry", ["campaign", "diagnostic", "diagnostic-stage-d", "recheck"])
+@pytest.mark.parametrize("version", [None, 0, 1, 2, 4, True, "3"])
 def test_operand_xor_replay_rejects_missing_or_changed_version(entry, version):
     from drosophilos.bench.stage_d import recheck_record
     record = dict(block="tick", rate_robust=True, experimental_autapse=True,
@@ -65,11 +65,16 @@ def test_operand_xor_replay_rejects_missing_or_changed_version(entry, version):
             kernel_campaign.rebuild_record(record)
         elif entry == "diagnostic":
             build_tick_pipeline(record)
+        elif entry == "diagnostic-stage-d":
+            # Duplicated top-level metadata must not supply a missing or
+            # obsolete nested version to the circuit actually being built.
+            build_tick_pipeline({"stage": "D", "operand_xor_oneshot": True,
+                                 "operand_xor_oneshot_version": 3, "build_options": record})
         else:
             recheck_record({"build_options": record})
 
 
-@pytest.mark.parametrize("entry", ["campaign", "diagnostic", "recheck", "builder"])
+@pytest.mark.parametrize("entry", ["campaign", "diagnostic", "diagnostic-stage-d", "recheck", "builder"])
 @pytest.mark.parametrize("value", [1, "true", None])
 def test_operand_xor_option_requires_boolean(entry, value):
     from drosophilos.bench.stage_d import recheck_record
@@ -81,6 +86,9 @@ def test_operand_xor_option_requires_boolean(entry, value):
             kernel_campaign.rebuild_record(record)
         elif entry == "diagnostic":
             build_tick_pipeline(record)
+        elif entry == "diagnostic-stage-d":
+            build_tick_pipeline({"stage": "D", "operand_xor_oneshot": False,
+                                 "build_options": record})
         else:
             recheck_record({"build_options": record})
 
@@ -108,7 +116,7 @@ def test_operand_xor_cost_defaults_replay_and_master_ignition(name, datapath):
     assert old.build_options == off.build_options
     assert "operand_xor_oneshot" not in old.build_options
     _, new, _, _ = kernel_campaign.block(name, PARAMS, operand_xor_oneshot=True, **flags)
-    assert new.build_options["operand_xor_oneshot_version"] == 2
+    assert new.build_options["operand_xor_oneshot_version"] == 3
     # One spent latch + edge/hold per LATE rail, including reset and autapses.
     bits = sum(role.endswith(".x.once0.edge") for role in new.net.roles)
     assert bits > 0

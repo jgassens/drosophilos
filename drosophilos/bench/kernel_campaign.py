@@ -138,7 +138,7 @@ def parser() -> argparse.ArgumentParser:
                           "and --experimental-autapse (default timing, widths 1..8; "
                           "wider kernel qualification: docs/stable_latch.md)"))
     ap.add_argument("--operand-xor-oneshot", action="store_true",
-                    help="UNQUALIFIED v2: share operand/sum transaction pulses with carry branches and strengthen operand clears; requires complete configuration F")
+                    help="UNQUALIFIED v3: share operand/sum transaction pulses with carry branches and strengthen operand/carry/sum clears; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
     ap.add_argument("--master-ignition", action="store_true",

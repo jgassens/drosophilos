@@ -24,8 +24,10 @@ ORDERED_XOR_ONESHOT_VERSION = 1
 ORDERED_XOR_ONESHOT_MUL_VERSION = 1
 # v1 delayed x alone, exposing unprotected carry relays. v2 shares the
 # transaction pulses across operand XOR, generate/kill and carry propagation,
-# with 1.5-loop clears for operand output/spent storage.
-OPERAND_XOR_ONESHOT_VERSION = 2
+# with 1.5-loop clears for operand output/spent storage. v3 extends those
+# clears to the adder's carry and sum output/spent storage: ordinary F clears
+# can leave these live even with four configured controller taps.
+OPERAND_XOR_ONESHOT_VERSION = 3
 
 
 def validate_operand_xor_record(record: dict) -> None:
@@ -89,10 +91,11 @@ class Gates:
         self._operand_reset_members: set[int] = set()
 
     def finalize_operand_reset(self, inhibitor: int) -> None:
-        """Give operand output/consumption storage 1.5-loop clear pulses.
+        """Give opt-in adder output/consumption storage 1.5-loop clear pulses.
 
-        Call after its ordinary reset fan-out is installed. V1's output latch
-        can survive a noisy controller's three emitted pulses at 0.75 loop.
+        Call after its ordinary reset fan-out is installed. Four configured
+        taps can emit only three noisy pulses; ordinary 0.75-loop clears can
+        leave operand, carry or sum storage live (also with sum-only F).
         Source/hold inhibitors must keep draining; they are not reset targets.
         """
         if not self.operand_xor_oneshot:
@@ -154,7 +157,7 @@ class Gates:
         """Ordered XOR; optionally consume each LATE rail once until stage reset.
 
         The ripple adder opts in separately for sums and operand XORs. Returned
-        spent latches belong to this reset domain. The operand-v2 adder shares
+        spent latches belong to this reset domain. The opt-in adder shares
         these pulses with its carry branches through _transaction_inputs.
         """
         if oneshot:
@@ -210,9 +213,6 @@ class Gates:
         latch_start = len(self.latches)
         x = [self.xor2_ordered(f"{name}.fa{i}.x", bx[i], Ad[i],
                               oneshot=self.operand_xor_oneshot) for i in range(n)]
-        if self.operand_xor_oneshot:
-            self._operand_reset_members.update(m for latch in self.latches[latch_start:]
-                                               for m in latch.members)
         sums, carries, cds = [], [], []
         for i in range(n):
             c1, c0 = self.latch(f"{name}.fa{i}.c1"), self.latch(f"{name}.fa{i}.c0")
@@ -244,6 +244,9 @@ class Gates:
                 cds.append(cd)
             sums.append(s_)
             carries.append(Rail2(c0, c1))
+        if self.operand_xor_oneshot:
+            self._operand_reset_members.update(m for latch in self.latches[latch_start:]
+                                               for m in latch.members)
         return sums, carries, x, cds
 
     def retime(self, name: str, X: list[Rail2], hops: int = 3, *, output_start: int = 0) -> list[Rail2]:

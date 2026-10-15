@@ -185,10 +185,14 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     if campaign.get("stage") == "D":
         from .stage_d import PROGRAM, build, load_kernel
 
+        options = dict(campaign.get("build_options", {}))
+        # Validate the exact nested operand policy used below, independently
+        # of duplicated top-level metadata. A top-level version must not make
+        # a versionless nested circuit replayable.
+        validate_operand_xor_record(options if "operand_xor_oneshot" in options else campaign)
         params = Params()
         program = Path(campaign.get("program", PROGRAM))
         k = load_kernel(str(program if program.is_absolute() else _repo_root() / program))
-        options = dict(campaign.get("build_options", {}))
         for metadata in ("true_guard_version", "rate_robust_version", "experimental_autapse_version",
                          "ordered_xor_oneshot_version", "ordered_xor_oneshot_mul_version", "master_ignition_version", "operand_xor_oneshot_version"):
             options.pop(metadata, None)

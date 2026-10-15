@@ -363,11 +363,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     existing restrictions; the control machine is unchanged.
     `ordered_xor_oneshot=True` consumes each sum XOR's late rail once until the
     stage resets its spent latch. Carry-generation timing is unchanged.
-    `operand_xor_oneshot=True` (experimental v2, default off) shares transaction
+    `operand_xor_oneshot=True` (experimental v3, default off) shares transaction
     pulses across each ordered adder's operand XOR and generate/kill branches,
-    and across its sum XOR and carry propagation. Operand XOR output/spent
-    storage receives 1.5-loop clears; controller timing is unchanged. V1 failed
-    cluster correctness and clear surveys and cannot be replayed as v2.
+    and across its sum XOR and carry propagation. Operand, carry and sum
+    output/spent storage receives 1.5-loop clears; controller timing is unchanged.
+    V1 failed correctness/clear surveys and v2 left carry/sum reset survivors;
+    neither version can be silently replayed as v3. Ordinary sum-only F also
+    admits reset survivors and retains its original circuit with this option off.
     Requires complete configuration F and its timing restrictions;
     master_ignition and experimental F16 may be combined. SUB's B-complement
     XORs and standalone logic are unchanged. This option is not qualified.

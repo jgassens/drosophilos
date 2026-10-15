@@ -34,6 +34,20 @@ REPLAY_CASES = {
     "replay4-copy338": (4, 338, 1, 4, 9, 10, 0),
 }
 SCENARIOS += (*REPLAY_CASES, "replay85-clear2174")
+# Every distinct copy in the v2 logs' capped survivor_details. Counts are
+# latch MEMBERS, over all four transactions (one for copy85).
+# scenario, copy, v2 survivors, sum-only F survivors, v2 role, surviving txs
+SURVIVOR_CASES = {
+    "survivor-second-pulse-copy406": ("second-pulse", 406, 8, 8, "c0", (0, 1, 2, 3)),
+    "survivor-order-100ms-copy406": ("order-100ms", 406, 2, 6, "c0", (1,)),
+    "survivor-order-100ms-copy1098": ("order-100ms", 1098, 6, 0, "s.once0.spent", (0, 1, 3)),
+    "survivor-order-15ms-copy406": ("order-15ms", 406, 8, 8, "c0", (0, 1, 2, 3)),
+    "survivor-copy85-copy3725": ("copy85", 3725, 2, 2, "s.y0", (0,)),
+    "survivor-copy85-copy4082": ("copy85", 4082, 2, 2, "s.y1", (0,)),
+    "survivor-copy85-copy11001": ("copy85", 11001, 2, 0, "s.y1", (0,)),
+    "survivor-copy85-copy16939": ("copy85", 16939, 2, 0, "s.y0", (0,)),
+}
+SCENARIOS += tuple(SURVIVOR_CASES)
 FAILURES = ("double", "missing", "wrong", "repeated", "ignition_repeat", "survivors")
 
 
@@ -48,6 +62,18 @@ class OperandV1Gates(Gates):
 
     def xor2_ordered(self, name, early, late, *, oneshot=False):
         return super().xor2_ordered(name, early, late, oneshot=oneshot or name.endswith(".x"))
+
+
+class OperandV2Gates(Gates):
+    """Frozen v2: shared carry pulses, but only operand storage is strengthened."""
+
+    def finalize_operand_reset(self, inhibitor):
+        members = self._operand_reset_members
+        self._operand_reset_members = {m for m in members if ".x." in self.net.roles[m]}
+        try:
+            super().finalize_operand_reset(inhibitor)
+        finally:
+            self._operand_reset_members = members
 
 
 def operand_fixture(enabled=True, gates_type=Gates):
@@ -113,12 +139,39 @@ def carry_escape_receiver(copy, *, first_only=False, background=True):
 
 
 def operand_survey(scenario, trials, *, enabled=True, replay_copies=None, gates_type=Gates,
-                   reference_type=None, rearm=False):
+                   reference_type=None, reference_enabled=None, rearm=False):
     net, drive, early, late, out, reset, g = operand_fixture(enabled, gates_type)
     topo = net.topology()
     replay_nodes = replay_edges = None
-    if reference_type is not None:
-        replay_nodes, replay_edges, _ = replay_maps(net, operand_fixture(enabled, reference_type)[0])
+    draw_topo = topo
+    if reference_type is not None or reference_enabled is not None:
+        reference = operand_fixture(enabled if reference_enabled is None else reference_enabled,
+                                    reference_type or Gates)[0]
+        draw_topo = reference.topology()
+        if reference_enabled is None or reference_enabled == enabled:
+            replay_nodes, replay_edges, _ = replay_maps(net, reference)
+        else:
+            # Option-off control: keep every surviving role/receiving-edge draw
+            # from the v2 log, including carry/sum storage and the controller.
+            assert not enabled and reference_enabled
+            roles = {r: i for i, r in enumerate(reference.roles)}
+            replay_nodes = np.array([roles[r] for r in net.roles])
+            keys = {(reference.roles[s], reference.roles[d], int(dt)): e
+                    for e, (s, d, dt) in enumerate(zip(draw_topo.src, draw_topo.dst, draw_topo.delay))}
+            edges = []
+            for s, d, dt, q in zip(topo.src, topo.dst, topo.delay, topo.quanta):
+                key = (net.roles[s], net.roles[d], int(dt))
+                if key in keys:
+                    edges.append(keys[key])
+                else:
+                    matches = [e for e, (rd, rq, rdt) in enumerate(
+                        zip(draw_topo.dst, draw_topo.quanta, draw_topo.delay))
+                        if reference.roles[rd] == net.roles[d] and rq > 0 and q > 0 and rdt == dt]
+                    assert len(matches) == 1, key
+                    edges.append(matches[0])
+            replay_edges = np.array(edges)
+            assert len(set(replay_nodes)) == net.n
+            assert len(set(replay_edges)) == topo.nnz
     rng = np.random.default_rng(8585)
     copies = trials if replay_copies is None else len(replay_copies)
     result = dict(copies=copies, trials=copies * (1 if scenario == "copy85" else 4),
@@ -130,23 +183,27 @@ def operand_survey(scenario, trials, *, enabled=True, replay_copies=None, gates_
             break
         size = min(256, trials - start)
         gaussian = scenario == "mix-B"
-        w = (rng.normal(0, .04, (size, topo.nnz)) if gaussian else
-             rng.choice([-.12, .12], (size, topo.nnz)))
-        th = (rng.normal(0, .2, (size, topo.n)) if gaussian else
-              rng.choice([-.6, .6], (size, topo.n)))
-        bias = (rng.normal(0, .2, (size, topo.n)) if gaussian else
-                rng.choice([-.6, .6], (size, topo.n)))
-        if reference_type is not None:
+        w = (rng.normal(0, .04, (size, draw_topo.nnz)) if gaussian else
+             rng.choice([-.12, .12], (size, draw_topo.nnz)))
+        th = (rng.normal(0, .2, (size, draw_topo.n)) if gaussian else
+              rng.choice([-.6, .6], (size, draw_topo.n)))
+        bias = (rng.normal(0, .2, (size, draw_topo.n)) if gaussian else
+                rng.choice([-.6, .6], (size, draw_topo.n)))
+        if replay_nodes is not None:
             w, th, bias = w[:, replay_edges], th[:, replay_nodes], bias[:, replay_nodes]
-        # Draw skipping is only used for the single-transaction captured case.
+        # Draw all transactions' jitter even in skipped blocks. Copy indices
+        # refer to the original 40,000-copy run, never to fresh RNG seeds.
+        if scenario == "copy85":
+            jitters = [rng.integers(-5, 6, (size, 1))]
+            jitters[0][0] = 0
+        else:
+            jitters = [rng.integers(0, 6, (size, 7)) for _ in range(4)]
         if replay_copies is not None:
-            assert scenario == "copy85"
-            jitter = rng.integers(-5, 6, (size, 1))
-            jitter[0] = 0
             selected = [c - start for c in replay_copies if start <= c < start + size]
             if not selected:
                 continue
-            w, th, bias, jitter = (x[selected] for x in (w, th, bias, jitter))
+            w, th, bias = (x[selected] for x in (w, th, bias))
+            jitters = [j[selected] for j in jitters]
             size = len(selected)
         sim = SurveySim(topo, P, n_nodes=size, quanta=np.rint(topo.quanta * np.exp(w)),
                         V_th=P.V_th + th, bias=np.asarray(net.bias) + bias)
@@ -163,10 +220,7 @@ def operand_survey(scenario, trials, *, enabled=True, replay_copies=None, gates_
                 ev = lv = 0
                 # Captured delayed acc6 emissions. Three real captured pulses
                 # suffice for the escape; added late pulses probe retention.
-                if replay_copies is None:
-                    jitter = rng.integers(-5, 6, (size, 1))
-                    jitter[0] = 0
-                lt = np.array([548, 589, 627, 1600, 1642, 2700])[None, :] + jitter
+                lt = np.array([548, 589, 627, 1600, 1642, 2700])[None, :] + jitters[tx]
                 wrong = net.roles.index("add.fa0.x.y1.a.edge")
                 sim.V_th[:, wrong] = -45.17450109365213
                 sim.bias[:, wrong] = .022141032716653797
@@ -189,7 +243,7 @@ def operand_survey(scenario, trials, *, enabled=True, replay_copies=None, gates_
                 # Minimum 15-ms EARLY lead, with independent pulse jitter, and
                 # a much earlier settled EARLY. Reversed EARLY/LATE arrival is
                 # outside the ordered primitive's contract, not qualified here.
-                lt = lt[None, :] + rng.integers(0, 6, (size, len(lt)))
+                lt = lt[None, :] + jitters[tx]
                 prescribe(sim, early.taps[ev], origin + np.arange(0, 4000, 60))
             if tx == 0:
                 sim.V[:] = P.E_L + sim.bias
@@ -270,12 +324,77 @@ def test_operand_spent_latches_are_in_stage_reset_domain():
     targets = {d for s, d, q in zip(net.src, net.dst, net.quanta) if s == reset[1] and q < 0}
     assert len(spent) == 4
     assert spent <= targets
-    protected = spent | {m for latch in g.latches if ".x.y" in net.roles[latch.u]
-                         for m in latch.members}
+    protected = {m for latch in g.latches for m in latch.members}
+    assert len(protected) == 20  # operand (8), carry (4), sum/spent (8)
     for s, d, q in zip(net.src, net.dst, net.quanta):
         if s == reset[1] and d in protected:
             assert q == -round(1.5 * g.drive.loop)
     assert not any(".bx" in r and ".once" in r for r in net.roles)
+
+
+def test_operand_probe_clear_matches_kernel_stage():
+    from drosophilos.lib.kernel import build_pipeline
+    pl = build_pipeline(P, 1, [dict(name="out", op="ADD", a="input", b=("const", "k"))],
+                        consts={"k": 0}, rate_robust=True, experimental_autapse=True,
+                        ordered_xor_oneshot=True)
+    net, drive, _, _, _, reset, _ = operand_fixture(False)
+    def controller_edges(net, trigger):
+        prefix = net.roles[trigger].removesuffix(".reset") + "."
+        nodes = {i for i, r in enumerate(net.roles)
+                 if r.startswith(prefix) and r.removeprefix(prefix).startswith("reset")}
+        return {(net.roles[s].removeprefix(prefix), net.roles[d].removeprefix(prefix), q, dt)
+                for s, d, q, dt in zip(net.src, net.dst, net.quanta, net.delay)
+                if s in nodes and d in nodes}
+    stage = pl.cells[0].stage
+    # The real stage controller comes from add_register -> add_reset (four
+    # configured taps); extend_reset claims its carry/sum latches at .75 loop.
+    assert controller_edges(net, reset[0]) == controller_edges(pl.net, stage.reset_trigger)
+    assert {r for s, r, q, dt in controller_edges(net, reset[0]) if "relay" in r} == {
+        "reset_relay1", "reset_relay2", "reset_relay3"}
+    for suffix in (".fa0.c0.u", ".fa0.s.y0.u", ".fa0.s.once0.spent.u"):
+        member, = [i for i, r in enumerate(pl.net.roles) if r.endswith(suffix)]
+        weights = [pl.net.quanta[e] for e in pl.net.incoming[member]
+                   if pl.net.src[e] == stage.reset_inh]
+        assert weights == [-round(.75 * drive.loop)]
+
+
+def test_operand_v3_changes_only_adder_storage_clear_weights():
+    old, _, _, _, _, reset, _ = operand_fixture(gates_type=OperandV2Gates)
+    new, drive, *_ = operand_fixture()
+    for field in ("roles", "src", "dst", "delay", "bias"):
+        assert getattr(old, field) == getattr(new, field)
+    changed = [(s, new.roles[d], q0, q1) for s, d, q0, q1 in
+               zip(new.src, new.dst, old.quanta, new.quanta) if q0 != q1]
+    assert len(changed) == 12
+    assert {role for s, role, q0, q1 in changed} == {
+        f"add.fa0.{part}.{member}" for part in
+        ("c0", "c1", "s.y0", "s.y1", "s.once0.spent", "s.once1.spent") for member in ("u", "v")}
+    assert all(s == reset[1] and q0 == -round(.75 * drive.loop) and
+               q1 == -round(1.5 * drive.loop) for s, role, q0, q1 in changed)
+
+
+@pytest.mark.parametrize("mirror_before_reset", [False, True])
+def test_operand_reset_strengthens_reader_mirror(mirror_before_reset):
+    net, drive = Netlist(P), Drive.from_params(P)
+    g = Gates(net, drive, ordered_xor_oneshot=True, operand_xor_oneshot=True)
+    inputs = [Rail2(Tap(net.neuron(f"input{k}r0")), Tap(net.neuron(f"input{k}r1")))
+              for k in range(3)]
+    g.ripple_adder_ordered("add", [inputs[0]], [inputs[1]], inputs[2])
+    member = net.roles.index("add.fa0.s.y0.u")
+    reader = net.neuron("sum.reader")
+    gain = 1.7
+    if mirror_before_reset:
+        net.mirror_inhibition(member, reader, gain)
+    reset = add_reset(net, drive, "reset", g.latches, g.gates)
+    if not mirror_before_reset:
+        net.mirror_inhibition(member, reader, gain)
+    def clear_weight(target):
+        return [net.quanta[e] for e in net.incoming[target] if net.src[e] == reset[1]]
+    ordinary = -round(.75 * drive.loop)
+    assert clear_weight(reader) == [round(ordinary * gain)]
+    g.finalize_operand_reset(reset[1])
+    assert clear_weight(member) == [-round(1.5 * drive.loop)]
+    assert clear_weight(reader) == [round(-round(1.5 * drive.loop) * gain)]
 
 
 def test_nominal_operand_latency():
@@ -338,7 +457,7 @@ def test_noisy16_carry_escape_frontier():
     fixed = arithmetic_survey(16, 12, True, operand_oneshot=True,
                               reference_type=OperandV1Gates)
     assert all(fixed[key] == 0 for key in FAILURES if key in fixed), fixed
-    print("noisy16 frozen v1 frontier: v1 one double/wrong, v2 zero failures in 24 transactions",
+    print("noisy16 frozen v1 frontier: v1 one double/wrong, current circuit zero failures in 24 transactions",
           flush=True)
 
 
@@ -390,11 +509,34 @@ def run_frozen_replay(scenario):
             k: v for k, v in fixed.items() if k != "replay_details"}
     print("frozen replay", scenario, "v1 wrong/double/survivors",
           [legacy[k] for k in ("wrong", "double", "survivors")],
-          "v2", {k: fixed[k] for k in FAILURES if k in fixed}, flush=True)
+          "current circuit", {k: fixed[k] for k in FAILURES if k in fixed}, flush=True)
+
+
+def run_survivor_replay(case):
+    scenario, copy, v2_count, off_count, role, txs = SURVIVOR_CASES[case]
+    kwargs = dict(replay_copies=[copy], reference_type=OperandV2Gates)
+    # Control first, using precisely the v2 static draws/controller/timing.
+    off = operand_survey(scenario, 40_000, enabled=False, reference_enabled=True, **kwargs)
+    assert off["survivors"] == off_count, off
+    legacy = operand_survey(scenario, 40_000, gates_type=OperandV2Gates, **kwargs)
+    assert legacy["survivors"] == v2_count, legacy
+    assert all(legacy[k] == 0 for k in FAILURES if k != "survivors"), legacy
+    assert {(d["copy"], d["tx"], d["role"], d["reset_count"])
+            for d in legacy["survivor_details"]} == {
+        (copy, tx, f"add.fa0.{role}.{member}", 3 * (tx + 1))
+        for tx in txs for member in ("u", "v")}
+    fixed = operand_survey(scenario, 40_000, rearm=scenario == "copy85", **kwargs)
+    assert all(fixed[k] == 0 for k in FAILURES), fixed
+    print("frozen survivor", case, "F sum-only", off, "v2", legacy,
+          "v3", fixed, flush=True)
 
 
 def run_scenario(scenario, *, smoke=False):
     wall, cpu = perf_counter(), process_time()
+    if scenario in SURVIVOR_CASES:
+        run_survivor_replay(scenario)
+        print(scenario, f"wall_s={perf_counter() - wall:.3f}", flush=True)
+        return
     if scenario.startswith("replay"):
         run_frozen_replay(scenario)
         print(scenario, f"wall_s={perf_counter() - wall:.3f}", flush=True)
