@@ -21,7 +21,7 @@ from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
 from ..lib.campaign import make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
-from ..protocol.latch import DALE_FEEDBACK_VERSION
+from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 from .a2_campaigns import MIXES
 from .stall_diag import write_compact_dump
@@ -38,7 +38,8 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
           ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
           master_ignition: bool = False, operand_xor_oneshot: bool = False,
-          latch_feedback: str = "autapse", dale_feedback_version: int | None = None):
+          latch_feedback: str = "autapse", dale_feedback_version: int | None = None,
+          dale_biased_version: int | None = None):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -81,7 +82,9 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         f_width16_experimental=f_width16_experimental, master_ignition=master_ignition,
                         operand_xor_oneshot=operand_xor_oneshot, latch_feedback=latch_feedback,
                         **({} if dale_feedback_version is None else
-                           {"dale_feedback_version": dale_feedback_version}))
+                           {"dale_feedback_version": dale_feedback_version}),
+                        **({} if dale_biased_version is None else
+                           {"dale_biased_version": dale_biased_version}))
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -109,12 +112,15 @@ def rebuild_record(record: dict):
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
     latch_feedback = record.get("latch_feedback", "autapse")
     dale_feedback_version = record.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
+    dale_biased_version = record.get("dale_biased_version")
     try:
-        validate_latch_feedback(latch_feedback, record.get("experimental_autapse", False), dale_feedback_version)
+        validate_latch_feedback(latch_feedback, record.get("experimental_autapse", False),
+                                dale_feedback_version, dale_biased_version)
     except ValueError as exc:
         raise ValueError(f"unsupported campaign latch_feedback: {exc}") from exc
     built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
                   latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
+                  dale_biased_version=dale_biased_version,
                   **{key: record.get(key, False) for key in flags})
     pl = built[1]
     for key, value in pl.build_options.items():
@@ -152,8 +158,11 @@ def parser() -> argparse.ArgumentParser:
                     help="UNQUALIFIED v3: share operand/sum transaction pulses with carry branches and strengthen operand/carry/sum clears; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
-    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private"), default="autapse",
-                    help="experimental storage feedback policy; dale_private requires configuration F")
+    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private", "dale_biased"), default="autapse",
+                    help=("dale_private and dale_biased are EXPERIMENTAL and NOT autapse replacements: "
+                          "dale_private fails the three-sigma corners and reload; dale_biased passes the "
+                          "512-corner and reload bar (0/0/0, 118/128) but FAILS the separate 44-step "
+                          "rate floor (corner minimum interval 33 steps)"))
     ap.add_argument("--master-ignition", action="store_true",
                     help="EXPERIMENTAL: stagger selected master partner ignition from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
@@ -263,7 +272,10 @@ def main(argv=None):
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
     rec.update(pl.build_options)
     rec["latch_feedback"] = a.latch_feedback
-    rec["dale_feedback_version"] = pl.build_options.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
+    if a.latch_feedback == "dale_biased":
+        rec["dale_biased_version"] = pl.build_options.get("dale_biased_version", DALE_BIASED_VERSION)
+    else:
+        rec["dale_feedback_version"] = pl.build_options.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
     if capture is not None:
         rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
     if a.out:

@@ -50,7 +50,7 @@ def test_stage_h_mapping_meta_rebuilds_configuration_f_and_legacy_is_latch(tmp_p
         adder_build_kwargs(loaded, width_override=3)
 
 
-@pytest.mark.parametrize("latch_feedback", ["dale_private", "bogus"])
+@pytest.mark.parametrize("latch_feedback", ["dale_private", "dale_biased", "bogus"])
 def test_legacy_mapping_refuses_explicit_nondefault_latch_feedback(latch_feedback):
     with pytest.raises(ValueError, match="legacy mapping.*latch_feedback"):
         adder_build_kwargs({"latch_feedback": latch_feedback})

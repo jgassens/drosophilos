@@ -15,9 +15,9 @@ from drosophilos.sim.model import Params
 F = dict(rate_robust=True, experimental_autapse=True, ordered_xor_oneshot=True)
 
 
-def _record():
+def _record(latch_feedback="dale_private"):
     _ks, pl, _tokens, _reference = kernel_campaign.block("tick", Params(), **F,
-                                                           latch_feedback="dale_private")
+                                                           latch_feedback=latch_feedback)
     return pl, {"block": "tick", **pl.build_options}
 
 
@@ -29,6 +29,12 @@ def _adder_digest(channel):
 
 def test_dale_private_campaign_replays_identically():
     pl, record = _record()
+    assert circuit_hash(kernel_campaign.rebuild_record(record)[1]) == circuit_hash(pl)
+    assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
+
+
+def test_dale_biased_campaign_replays_identically():
+    pl, record = _record("dale_biased")
     assert circuit_hash(kernel_campaign.rebuild_record(record)[1]) == circuit_hash(pl)
     assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
 
@@ -46,6 +52,19 @@ def test_dale_private_replay_refuses_unknown_policy_or_version(change):
         build_tick_pipeline(record)
 
 
+@pytest.mark.parametrize("version", [0, None])
+def test_dale_biased_replay_refuses_missing_or_wrong_version(version):
+    _pl, record = _record("dale_biased")
+    if version is None:
+        del record["dale_biased_version"]
+    else:
+        record["dale_biased_version"] = version
+    with pytest.raises(ValueError, match="latch_feedback|Dale-biased"):
+        kernel_campaign.rebuild_record(record)
+    with pytest.raises(ValueError, match="latch_feedback|Dale-biased"):
+        build_tick_pipeline(record)
+
+
 def test_h_stage_mapping_rebuilds_dale_private_adder():
     meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_private")
     options = adder_build_kwargs(meta)
@@ -56,6 +75,16 @@ def test_h_stage_mapping_rebuilds_dale_private_adder():
                             **F, latch_feedback="dale_private"))
 
 
+def test_h_stage_mapping_rebuilds_dale_biased_adder():
+    meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_biased")
+    options = adder_build_kwargs(meta)
+    assert options["latch_feedback"] == "dale_biased"
+    assert options["dale_biased_version"] == meta["dale_biased_version"]
+    assert _adder_digest(build_adder_channel(Params(), **options)) == _adder_digest(
+        build_adder_channel(Params(), width=4, ordered=True, watchdog_hops=100, storage="flipflop",
+                            **F, latch_feedback="dale_biased"))
+
+
 @pytest.mark.parametrize("version", [999, None])
 def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_feedback(version):
     meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_private")
@@ -64,6 +93,17 @@ def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_feedback(version):
     else:
         meta["dale_feedback_version"] = version
     with pytest.raises(ValueError, match="Dale-feedback"):
+        adder_build_kwargs(meta)
+
+
+@pytest.mark.parametrize("version", [999, None])
+def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_biased(version):
+    meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_biased")
+    if version is None:
+        del meta["dale_biased_version"]
+    else:
+        meta["dale_biased_version"] = version
+    with pytest.raises(ValueError, match="Dale-biased"):
         adder_build_kwargs(meta)
 
 

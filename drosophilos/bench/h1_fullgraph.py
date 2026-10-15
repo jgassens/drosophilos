@@ -42,7 +42,7 @@ from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelop
                                       tally, trace_since, underlying, power_on)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
-from ..protocol.latch import DALE_FEEDBACK_VERSION
+from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
@@ -75,15 +75,20 @@ def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
             raise ValueError(f"--storage {storage_override!r} disagrees with mapping storage {meta['storage']!r}")
         options = {key: meta[key] for key in ADDER_META_KEYS if key != "builder"}
         latch_feedback = meta.get("latch_feedback", "autapse")
-        if latch_feedback not in ("autapse", "dale_private"):
+        if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
             raise ValueError(f"unsupported mapping latch_feedback: {latch_feedback!r}")
-        if latch_feedback == "dale_private" and not options["experimental_autapse"]:
-            raise ValueError("unsupported mapping latch_feedback: dale_private requires experimental_autapse=True")
-        if latch_feedback != "autapse":
+        if latch_feedback != "autapse" and not options["experimental_autapse"]:
+            raise ValueError(f"unsupported mapping latch_feedback: {latch_feedback} requires experimental_autapse=True")
+        if latch_feedback == "dale_private":
             dale_feedback_version = meta.get("dale_feedback_version")
             if type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION:
                 raise ValueError("unsupported mapping Dale-feedback circuit version")
             options.update(latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version)
+        elif latch_feedback == "dale_biased":
+            dale_biased_version = meta.get("dale_biased_version")
+            if type(dale_biased_version) is not int or dale_biased_version != DALE_BIASED_VERSION:
+                raise ValueError("unsupported mapping Dale-biased circuit version")
+            options.update(latch_feedback=latch_feedback, dale_biased_version=dale_biased_version)
         return options
 
     # Legacy files did not record a whole builder contract.  This exactly reproduces the old
