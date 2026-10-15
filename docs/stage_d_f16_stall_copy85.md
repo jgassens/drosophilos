@@ -836,9 +836,11 @@ At the measured **2000-step recovery** after the 1.5-loop clears, post-clear
 establishment latency was identical for v2 and v3: **102–154 steps**. Recovery
 shorter than 2000 steps after the 1.5-loop clears is unmeasured.
 
-Long cluster surveys were unrun locally at the time of this note. The cluster
-results below subsequently complete v3's bounded RefSim qualification. The
-full kernel campaign remains pending; no throughput or F16 claim follows.
+Long cluster surveys remain unrun locally. **V3 is unqualified.** Stronger
+clears must still be evaluated for recovery and reload margin in the full
+cluster and kernel campaigns; no throughput or F16 claim follows.
+
+Update 2026-10-14: post-clear establishment latency at 2,000-step recovery is asserted (<= 200 steps; measured 102-154, identical for v2 and v3); recovery shorter than 2,000 steps after the 1.5-loop clears remains unmeasured; see the cluster results below.
 
 ### V3 foreground validation
 
