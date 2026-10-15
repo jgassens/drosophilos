@@ -25,6 +25,42 @@ a cluster node. Do not run it on a laptop.
 
     python -m drosophilos.bench.h1_fullgraph --n-cases 50 --seed 0 --surround silent --out data/h1_fullgraph/silent.json
     python -m drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/all_w0_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/inputs-50.json
+
+Fault attribution (cluster only; run from the repository root). First submit the live,
+uncut all_w0 attribution runs, 50 additions in each surround:
+
+    for s in silent poisson; do
+      slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+        --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
+        --surround "$s" --rate 2 --max-ms 1200 --attribute 20 \\
+        --attribution-out "data/stage_h/fullgraph/all_w0_attr_${s}.npz" \\
+        --out "data/stage_h/fullgraph/all_w0_attr_${s}.json"
+    done
+
+After both jobs finish, submit attribution-ranked rungs AND synapse-ranked comparisons
+(the NPZ is the full aggregate score array; compact JSON is not a cut input):
+
+    for s in silent poisson; do
+      for f in 0.05 0.10 0.20 0.30; do
+        slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+          --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
+          --surround "$s" --rate 2 --max-ms 1200 --cut-inputs-frac "$f" \\
+          --cut-inputs-by attribution --attribution-in "data/stage_h/fullgraph/all_w0_attr_${s}.npz" \\
+          --out "data/stage_h/fullgraph/all_w0_attr_cutin${f}_${s}_n50.json"
+        slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph \\
+          --mapping data/stage_h/place/all_w0_mapping.json --n-cases 50 --seed 0 \\
+          --surround "$s" --rate 2 --max-ms 1200 --cut-inputs-frac "$f" \\
+          --out "data/stage_h/fullgraph/all_w0_syn_cutin${f}_${s}_n50.json"
+      done
+    done
+
+Only failed additions are scored (valid expected decode plus READY is success). Failure
+time is the earliest consumer FAULT, watchdog TIMEOUT, wrong consumer rail tap, or tap
+earlier than its first isolated reference spike relative to load. Rail checks stop at
+ACCEPT/reset. Without such a spike, use terminal READY or the exclusive harness deadline
+as the stall detection time. Deliveries at source_step + embedded_delay in [time-W, time)
+contribute spikes * abs(embedded quanta). See h_fault_attr.failure_point for tie rules.
+These scores describe temporal association; testing the cut ladder measures shielding.
 """
 
 from __future__ import annotations
@@ -44,6 +80,7 @@ from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
+from .h_fault_attr import IncomingAttribution, failure_point
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
 BURST_N = 1000  # h0_run: rng.choice(exc_all, 1000)
@@ -140,7 +177,11 @@ def run(args) -> dict:
     pl = load_mapping(args.mapping, ch.net, m)
     img = build_image(ch.net, m, pl, Policy(), profile3=all_missing)  # condition A: every designed edge, parasitic zeroed
     fg = full_graph_topology(m, params, img, zero_outputs=args.outputs_zeroed, zero_inputs=args.inputs_zeroed,
-                             cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac)
+                             cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac,
+                             cut_inputs_by=getattr(args, "cut_inputs_by", "synapses"),
+                             attribution_in=getattr(args, "attribution_in", None))
+    attr_window = getattr(args, "attribute", None)
+    attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params) if attr_window is not None else None
     hosts = fg.index_map[img.real >= 0]
     pops = surround_populations(m, exclude=hosts)
     driven = {"silent": np.empty(0, np.int64), "poisson": pops["sensory"], "burst": pops["cholinergic"]}[args.surround]
@@ -202,6 +243,12 @@ def run(args) -> dict:
                    "wall_s": round(wall_iso, 2)},
                "identical_to_isolated": identical, "reached": re_full[0],
                "envelope": env, "top_recruited": recruited, "wall_s": round(wall, 2)}
+        if attribution is not None:
+            failure = failure_point(ch, rec, sim_full.trace, sim_iso.trace, ri, end)
+            row["attribution"] = attribution.observe(tr_full, failure, end_step=sim_full.step_index,
+                                                     fresh=not args.chained or k == 0)
+            if failure is not None:
+                row["attribution"]["ms_since_load"] = (failure["step"] - rec.load_step) * params.dt
         additions.append(row)
         recs.append(rec); reached.append(re_full[0]); spikes += st["total_spikes"]
         print(f"[h1fg] {k + 1:3d}/{args.n_cases} {a:2d}+{b:2d}+{c} = {x:2d}: {outcome:9s} decoded {rec.decoded} "
@@ -227,6 +274,10 @@ def run(args) -> dict:
                         "burst_n": BURST_N, "burst_at_steps": BURST_AT, "excluded_hosts": pops["excluded_hosts"],
                         "sensory_neurons": int(len(pops["sensory"])), "cholinergic_neurons": int(len(pops["cholinergic"]))},
            "additions": additions, "summary": summary}
+    if attribution is not None:
+        out["attribution"] = attribution.report(getattr(args, "attribution_top", 50))
+        if getattr(args, "attribution_out", None) is not None:
+            attribution.save(args.attribution_out)
     print(f"[h1fg] summary ({args.surround}, outputs zeroed {args.outputs_zeroed}, inputs zeroed {args.inputs_zeroed}, "
           f"{'chained' if args.chained else 'fresh'}): {summary['outcomes']}; correct {summary['correct']}/{args.n_cases}, "
           f"identical to isolated {summary['identical_to_isolated']}/{args.n_cases}, accept ms {summary['accept_ms'][:5]}..., "
@@ -251,6 +302,17 @@ def parse(argv=None):
                     help="cut strongest fraction [0, 1] of anatomical edges into hosts")
     ap.add_argument("--cut-outputs-frac", type=float, default=0.0,
                     help="cut strongest fraction [0, 1] of anatomical edges from hosts")
+    # Suppressed defaults preserve the legacy args JSON exactly when no new flags are used.
+    ap.add_argument("--attribute", type=float, default=argparse.SUPPRESS, metavar="WINDOW_MS",
+                    help="attribute failed additions to incoming deliveries in the preceding window")
+    ap.add_argument("--attribution-top", type=int, default=argparse.SUPPRESS, metavar="N",
+                    help="edges in compact attribution JSON (default: 50)")
+    ap.add_argument("--attribution-out", type=Path, default=argparse.SUPPRESS,
+                    help="write full aggregate per-edge scores to compressed NPZ, without spike traces")
+    ap.add_argument("--cut-inputs-by", choices=("synapses", "attribution"), default=argparse.SUPPRESS,
+                    help="rank incoming cuts by synapses (default) or attribution score")
+    ap.add_argument("--attribution-in", type=Path, default=argparse.SUPPRESS,
+                    help="full score NPZ from --attribution-out, for --cut-inputs-by attribution")
     ap.add_argument("--chained", action="store_true", help="all additions through one simulator (default: fresh per addition)")
     ap.add_argument("--max-ms", type=float, default=1200.0, help="neural time allowed per addition")
     ap.add_argument("--width", type=int, default=None, help="override legacy mapping width (default: 4; metadata mappings set it)")
@@ -258,7 +320,16 @@ def parse(argv=None):
                     help="confirm a mapping's output-store choice (legacy flip-flop mappings record this)")
     ap.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     ap.add_argument("--out", type=Path, default=None)
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    if hasattr(args, "attribute") and (not np.isfinite(args.attribute) or args.attribute <= 0):
+        ap.error("--attribute must be finite and positive")
+    if (hasattr(args, "attribution_out") or hasattr(args, "attribution_top")) and not hasattr(args, "attribute"):
+        ap.error("--attribution-out/--attribution-top require --attribute")
+    if getattr(args, "attribution_top", 50) < 0:
+        ap.error("--attribution-top must be nonnegative")
+    if (getattr(args, "cut_inputs_by", "synapses") == "attribution") != hasattr(args, "attribution_in"):
+        ap.error("--cut-inputs-by attribution requires --attribution-in (and vice versa)")
+    return args
 
 
 if __name__ == "__main__":

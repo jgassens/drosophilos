@@ -418,6 +418,92 @@ def test_full_graph_cut_uses_exact_decimal_ceil():
     assert fg.counts["outputs_cut_edges"] == 7
 
 
+def test_full_graph_attribution_cuts_scores_then_counts_then_post_pre(tmp_path):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    img = build_image(net, m, pl, policy)
+    base = m.topology(Params())
+    plain = full_graph_topology(m, Params(), img, base=base)
+    hosts = set(pl.mapping.values())
+    boundary = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre not in hosts and post in hosts]
+    assert len(boundary) > 10
+    counts = {j: abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in boundary}
+    scores = {j: i % 3 for i, j in enumerate(boundary)}
+    # A weak edge outranks every unscored strong edge. Equal scores include count AND pair ties.
+    scores[min(boundary, key=counts.get)] = 10
+    assert len({(scores[j], counts[j]) for j in boundary}) < len(boundary)
+    ranked = sorted(boundary, key=lambda j: (-scores[j], -counts[j], int(base.dst[j]), int(base.src[j])))
+    bodies = m.neurons["bodyId"].to_numpy()
+    path = tmp_path / "attr.npz"
+    shuffled = np.random.default_rng(0).permutation(boundary)
+    np.savez_compressed(path, pre_bodyId=bodies[base.src[shuffled]], post_bodyId=bodies[base.dst[shuffled]],
+                        score=[scores[j] for j in shuffled])
+    for fraction in (0, .05, .1, .2, .3, .7, 1):
+        fg = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                                 attribution_in=path, cut_inputs_frac=fraction)
+        n_cut = int(np.ceil(fraction * len(boundary)))
+        cut = ranked[:n_cut]
+        assert {j for j in boundary if fg.topology.quanta[j] == 0} == set(cut)
+        assert fg.counts["inputs_cut_edges"] == n_cut
+        assert fg.counts["inputs_cut_synapses"] == sum(counts[j] for j in cut)
+        assert fg.counts["inputs_remaining_synapses"] == sum(counts[j] for j in ranked[n_cut:])
+        assert fg.counts["inputs_weakest_cut_synapses"] == (min(counts[j] for j in cut) if cut else None)
+        if fraction == 0:
+            assert np.array_equal(fg.topology.quanta, plain.topology.quanta)
+        if fraction == 1:
+            zero = full_graph_topology(m, Params(), img, zero_inputs=True, base=base)
+            assert np.array_equal(fg.topology.quanta, zero.topology.quanta)
+            assert fg.counts["inputs_cut_synapses"] == zero.counts["inputs_cut_synapses"]
+    # Explicit legacy ranking has exactly the original topology arrays and count JSON.
+    legacy = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="synapses")
+    assert legacy.counts == plain.counts and "cut_inputs_by" not in plain.counts
+    for name in ("src", "dst", "quanta", "delay", "indptr"):
+        assert getattr(legacy.topology, name).tobytes() == getattr(plain.topology, name).tobytes()
+    # Empty scores mean zero throughout, reducing exactly to the old synapse ordering.
+    np.savez_compressed(path, pre_bodyId=np.empty(0, np.int64), post_bodyId=np.empty(0, np.int64),
+                        score=np.empty(0, np.int64))
+    zero_scores = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                                     attribution_in=path, cut_inputs_frac=.3)
+    synapses = full_graph_topology(m, Params(), img, base=base, cut_inputs_frac=.3)
+    assert zero_scores.topology.quanta.tobytes() == synapses.topology.quanta.tobytes()
+    # Adjacent integer scores above float64's exact range must not collapse into a tie.
+    weak = min(boundary, key=counts.get)
+    strong = max((j for j in boundary if j != weak), key=counts.get)
+    assert counts[weak] < counts[strong]
+    np.savez_compressed(path, pre_bodyId=bodies[base.src[[strong, weak]]],
+                        post_bodyId=bodies[base.dst[[strong, weak]]],
+                        score=np.array([2**53, 2**53 + 1], np.int64))
+    exact = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                               attribution_in=path, cut_inputs_frac=.0001)
+    assert exact.topology.quanta[weak] == 0 and exact.topology.quanta[strong] != 0
+
+
+@pytest.mark.parametrize("bad", ["negative", "nan", "duplicate", "foreign", "host_host"])
+def test_full_graph_rejects_invalid_attribution(tmp_path, bad):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    image = build_image(net, m, pl, policy)
+    hosts = set(pl.mapping.values())
+    j = next(i for i, (a, b) in enumerate(zip(m.pre, m.post)) if a not in hosts and b in hosts)
+    pre, post = int(m.pre[j]), int(m.post[j])
+    bodies = m.neurons["bodyId"].to_numpy()
+    pre_body, post_body, score = [bodies[pre]], [bodies[post]], [1.0]
+    if bad in ("negative", "nan"):
+        score = [-1 if bad == "negative" else np.nan]
+    elif bad == "duplicate":
+        pre_body *= 2; post_body *= 2; score *= 2
+    elif bad == "foreign":
+        pre_body = [999_999]
+    elif bad == "host_host":
+        pre_body = [bodies[min(hosts)]]
+    path = tmp_path / "bad.npz"
+    np.savez_compressed(path, pre_bodyId=pre_body, post_bodyId=post_body, score=score)
+    with pytest.raises(ValueError, match="attribution"):
+        full_graph_topology(m, Params(), image, cut_inputs_by="attribution", attribution_in=path, cut_inputs_frac=.1)
+
+
 def test_latch_ignites_and_holds_inside_the_synthetic_full_graph():
     """The planted latch + relay inside the synthetic connectome with the decoy neurons active: it
     ignites and holds when the parasitic edges are zeroed (the anatomy's weak stray edges into the
