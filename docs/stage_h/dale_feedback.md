@@ -249,3 +249,180 @@ add integration latency where the current self-edge suppresses an initial
 doublet before ordinary inhibitors arrive. The latch results do not establish
 that such a delayed path suppresses that doublet. That circuit is unchanged
 and would require its own timing/corner qualification.
+
+## Bounded fast-feedback round, 2026-10-15
+
+**Verdict: the numerical pass bar is met, but the timing goal is not achieved.**
+Three fixed constructions were measured, with no parameter grid or subsequent
+retuning. The score winner is exposed as `latch_feedback='dale_biased'`, version
+1. It has zero sampled corner failures and 118/128 noisy +700 reloads, exceeding
+the requested 114/128. Its inhibition is sparse and asynchronous, however, not
+one inhibitory arrival per member spike at autapse time. Calling this circuit
+`dale_fast` would misrepresent the result. None of the three constructions both
+reproduced autapse timing and passed the numerical bar. This round stops here;
+the new opt-in is an experimental holding/reload result, not a replacement for F.
+
+### Three constructions and the shared scoring fixture
+
+1. **Biased private relay (selected).** Each member drives its own inhibitory
+   neuron with `+round(.2*loop)` q, delay 0; the return is
+   `-round(.2*loop)` q, delay 0. The relay has a tonic bias of +5.6 mV,
+   leaving a nominal 1.4-mV resting gap. Even the opposing threshold/bias
+   three-sigma corners leave a positive .2-mV gap. Scaling input with the
+   reduced gap was intended to limit bursting. The fixed reset voltage and
+   refractory law do not scale with that gap: measured relay firing is instead
+   slower than member firing. Bias also does not initialize the membrane near
+   threshold; RefSim still starts at E_L. This is why the proposed same-step
+   pre-bias mechanism did not materialize in this construction.
+2. **Partner-driven relay.** The relay that inhibits `u` receives `+1*loop`
+   from `v`, and the relay that inhibits `v` receives it from `u`; both input
+   and return delays are zero, and return gain is .2. Anticipation sometimes
+   lands before the target spike, but the independent relay dynamics also
+   suppress weak handoffs. It performs much worse on both scores.
+3. **Inhibitory twin.** For each member, clone all its incoming netlist edges
+   and bias onto an inhibitory neuron, then give that neuron a -.2-loop
+   inhibitory self-edge and an identical return to the member, both delay 0.
+   Incoming ordinary reset edges are cloned too; feedback mirroring is bypassed.
+   The twin's own self-edge is Dale-consistent because all its outputs are
+   negative. Equal inputs and state can synchronize twin and member so the
+   twin delivers inhibition at the member's spike time. Host ignition events
+   into the member are not netlist edges and cannot be cloned by this transform;
+   startup differs. Independent membrane and edge variation breaks the nominal
+   match and causes corner and reload failures. This is retained only as a
+   test-local rejected construction.
+
+All new feedback sources have a single transmitter sign. The two rejected
+constructions remain in `tests/test_dale_fast.py`, not in the builder API.
+Existing mixed-sign control elements elsewhere in F are unchanged.
+
+The full-size command below reruns the **same** `corner_probe` and
+`noisy_reload_probe` from `tests/test_dale_feedback.py` for both baselines and
+all three candidates. Only feedback installation is dispatched differently;
+the old baseline fixtures, assertions and frozen digests are unchanged. Corners
+are the original 256 sign patterns, seed 109, each repeated with the two ignition
+regimes (512 cases), 300-q kick, 6,000 steps, and the original hold estimator.
+Reload is the original mix B, seed 108, 128 copies, four ignitions, kick,
+phase-dependent clear and 6,200 steps. Success requires **both members and the
+reader** to spike in the final 200 steps. All added neurons receive the same
+independent noise law, including strays; topology sizes change RNG assignment,
+as in the original comparison. No artificial inhibitory events or simulator
+changes are used.
+
+| Circuit | Corner non-ignitions / holding losses / terminal dark (512) | Corner minimum interval | +700 reload (128) | +1000 reload (128) | No-reload survivors (128) | Numerical pass bar |
+|---|---:|---:|---:|---:|---:|---|
+| Autapse control | 0 / 0 / 0 | 36 | 114 | 128 | 0 | Pass |
+| dale_private v1 control | 41 / 43 / 84 | 37 | 102 | 128 | 0 | Fail |
+| **dale_biased v1** | **0 / 0 / 0** | **33** | **118** | **128** | **0** | **Pass** |
+| Partner relay | 112 / 60 / 172 | 37 | 3 | 96 | 0 | Fail |
+| Inhibitory twin | 67 / 34 / 101 | 36 | 71 | 118 | 0 | Fail |
+
+The numerical bar is zero failures in all three corner columns and >=114/128
+at +700. These are bounded aggregate counts, not a significance claim. The
+selected circuit still fails the separate 44-step rate floor, more severely
+than the autapse; passing the requested score does not qualify rate readers or
+all configuration F workloads.
+
+### Measured timing, including the negative result
+
+Nominal measurements use the unchanged RefSim, ignition at step 10, 6,000
+steps, and inspect actual member and inhibitory spikes. Zero-delay deliveries
+affect membrane integration on the following step for all constructions.
+
+| Construction | First u spike | First inhibition delivery to u | Difference |
+|---|---:|---:|---:|
+| Autapse | 34 | 34 | 0 |
+| dale_private | 34 | 69 | +35 |
+| dale_biased | 34 | 177 | **+143** |
+| Partner relay | 34 | 134 | +100 |
+| Inhibitory twin | 34 | 140 | +106 |
+
+For the selected circuit, u starts `[34,114,175,235]` and its relay starts
+`[177,311,438,562]`. After step 2,000 the median member interval is **52**
+steps and relay interval **122** steps, about one inhibitory spike per 2.4 member
+spikes. This is neither same-step feedback nor a fixed phase relationship.
+The nominal dark-latch control, including its biased relays, remains silent.
+The twin does achieve same-step member/relay spikes after settling (58-step
+intervals on both), but its initial u spike is unmatched and its noisy/corner
+results reject it. No measured construction satisfies the full timing goal.
+
+### API, replay and preserved circuits
+
+The new production constants in `protocol/latch.py` are
+`DALE_BIASED_VERSION=1`, `DALE_BIASED_BIAS_MV=5.6`,
+`DALE_BIASED_DRIVE_GAIN=.2`, `DALE_BIASED_GAIN=.2`, and
+`DALE_BIASED_INPUT_DELAY_STEPS=DALE_BIASED_DELAY_STEPS=0`.
+`add_dale_latch_feedback(net, drive, variant='biased')` installs this circuit.
+The existing default `variant='private'` and all its v1 constants retain their
+original behavior, roles, insertion order, weights, delays and zero biases.
+Both builders accept `latch_feedback='dale_biased'` with
+`experimental_autapse=True` and its existing restrictions. The kernel rejects
+`master_ignition`, `operand_xor_oneshot`, and `f_width16_experimental` with
+either Dale policy, before building the netlist.
+
+New builds record `latch_feedback='dale_biased'` and `dale_biased_version=1`;
+the independent `dale_feedback_version` still belongs to private v1. An explicit
+biased version must be integer 1 (not bool); missing version means v1, and an
+irrelevant policy's version is ignored. Tests rebuild nested Stage D records,
+compare ordered netlist arrays **and biases**, and check rejection of changed,
+null, string and boolean versions in both diagnostic rebuild and record recheck.
+Use nested `build_options` for this variant. Legacy top-level campaign replay
+routes do not consistently forward its new version key; full support there
+requires edits outside the owned paths of this round.
+
+The four pre-existing frozen default/autapse digests remain unchanged and pass.
+Private v1 F digests were captured before this round's production edits and
+are now also frozen in `tests/test_dale_fast.py`:
+
+| Private v1 build | SHA256 |
+|---|---|
+| Two-cell 2-bit ADD → XOR kernel | `894d6d70ec86691e1c215a2f3826e9e4d1c6e003a860cc0c211a58067b8189c4` |
+| 4-bit ordered flip-flop adder, watchdog 100 | `133acfac07d2c027890b8b8024991fba615b4fdafb1fc98b05f7a24c1b6fe8f1` |
+
+### Isolated F adder and costs
+
+The exact requested builder is used with `latch_feedback='dale_biased'`:
+`build_adder_channel(Params(), 4, ordered=True, watchdog_hops=100,
+storage='flipflop', rate_robust=True, experimental_autapse=True,
+ordered_xor_oneshot=True, latch_feedback='dale_biased')`.
+All policies reran H1 `simulate_channel` in isolation using
+`adder_cases(4,8,seed=110)`, once fresh per addition and once chained. This is
+nominal arithmetic, not anatomical/noisy qualification.
+
+| Policy | Fresh correct / completed (8 attempted) | Chained correct / completed (8 attempted) | Wrong / faults / timeouts / no accept / missing completion (each mode) | Fresh / chained spikes |
+|---|---|---|---|---:|
+| Autapse | 8 / 8 | 8 / 8 | 0 / 0 / 0 / 0 / 0 | 141,855 / 141,955 |
+| dale_private | 8 / 8 | 8 / 8 | 0 / 0 / 0 / 0 / 0 | 176,162 / 177,139 |
+| dale_biased | 8 / 8 | 8 / 8 | 0 / 0 / 0 / 0 / 0 | 169,476 / 169,779 |
+
+Biased accept times in ms are `[412,377,377,354,413,370,354,370]` fresh and
+`[412,380,382,358,413,374,357,373]` chained. Relative to the autapse these are
+-2..0 ms fresh and -3..+1 ms chained. Spikes increase by 27,621 fresh and
+27,824 chained versus autapse, and decrease by 6,686 and 7,360 versus private.
+
+| Build | Autapse neurons / edges | dale_private neurons / edges | dale_biased neurons / edges | Biased extra vs autapse | Biased extra vs private |
+|---|---:|---:|---:|---:|---:|
+| 4-bit ordered F flip-flop adder, watchdog 100 | 740 / 1,518 | 880 / 1,658 | 880 / 1,658 | +140 / +140 | 0 / 0 |
+| Two-cell 2-bit ADD → XOR F kernel | 2,478 / 4,918 | 2,992 / 5,432 | 2,992 / 5,432 | +514 / +514 | 0 / 0 |
+
+There is one extra neuron and one extra edge per member versus autapse, plus
+one biased membrane parameter per relay. Private and biased have equal counts.
+
+### Reproduction for this round
+
+From the worktree, explicitly select its Python sources:
+
+```
+PYTHONPATH=$PWD uv run pytest -q -o addopts='' tests/test_dale_fast.py tests/test_dale_feedback.py
+PYTHONPATH=$PWD DROSO_DALE_FAST_SURVEY=1 uv run pytest -s -q -o addopts='' -m slow tests/test_dale_fast.py
+```
+
+The second command is the **full-size 512-corner / 128-copy reload comparison**
+for both baselines and all three candidates, behind the repository's slow marker
+and an environment flag. It was run; the first version of the screen took 11.2
+seconds on this laptop. The default new tests use only 32 corner cases, nominal
+timing, replay/topology checks and eight fresh/eight chained additions; existing
+private surveys remain unchanged. Local invocation also sets
+`UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv`,
+`UV_NO_SYNC=1`, and a writable `UV_CACHE_DIR` under the task's temporary directory.
+The original 2,000-copy / multi-seed slow survey was not rerun. No larger
+qualification or further tuning is claimed by this bounded round.
