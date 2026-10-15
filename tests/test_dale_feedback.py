@@ -154,12 +154,21 @@ def test_nominal_period_and_feedback_latency():
                 assert np.unique(settled - previous).tolist() == [settled_lag]
 
 
+def install_feedback(net, policy):
+    """Shared fixture dispatch, including bounded design-round transforms."""
+    if callable(policy):
+        policy(net, D)
+    elif policy == "autapse":
+        feedback.add_experimental_autapses(net, D)
+    else:
+        feedback.add_dale_latch_feedback(net, D, variant=policy.removeprefix("dale_"))
+
+
 def period_probe(policy, copies=128, steps=6000, seed=109):
     net = Netlist(P)
     latch = feedback.add_latch(net, D, "L")
     rate_tap(net, replace(D, rate_robust=True), latch.u)
-    (feedback.add_experimental_autapses if policy == "autapse" else
-     feedback.add_dale_latch_feedback)(net, D)
+    install_feedback(net, policy)
     sim = MixProbe(net, copies, seed, [*latch.members, *range(3, net.n)])
     sim.ignite([latch.u])
     sim.run(steps)
@@ -171,8 +180,7 @@ def corner_probe(policy, patterns=256):
     net = Netlist(P)
     latch = feedback.add_latch(net, D, "L")
     rate_tap(net, replace(D, rate_robust=True), latch.u)
-    (feedback.add_experimental_autapses if policy == "autapse" else
-     feedback.add_dale_latch_feedback)(net, D)
+    install_feedback(net, policy)
     topo = net.topology()
     rng = np.random.default_rng(109)
     signs = np.repeat(rng.choice([-1, 1], (patterns, topo.nnz + 2 * net.n)), 2, axis=0)
@@ -200,8 +208,14 @@ def test_sampled_three_sigma_corners():
     assert rows["dale_private"]["not_holding_at_end"] == 84
 
 
-def noisy_reload_probe(copies):
-    net, latch, source, _, _, *_ = stable.clear_fixture(stable.AUTAPSE, "mix_b", rate=True)
+def noisy_reload_probe(copies, policy=None):
+    # None preserves callers that already patch stable._modify.
+    if policy is None:
+        net, latch, source, _, _, *_ = stable.clear_fixture(stable.AUTAPSE, "mix_b", rate=True)
+    else:
+        from unittest.mock import patch
+        with patch.object(stable, "_modify", lambda net, latch, config: install_feedback(net, policy)):
+            net, latch, source, _, _, *_ = stable.clear_fixture(stable.AUTAPSE, "mix_b", rate=True)
     watch = [*latch.members, *net.rate_readouts.values()]
     rows = {}
     for offset in (None, 700, 1000):

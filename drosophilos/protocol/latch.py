@@ -24,6 +24,15 @@ DALE_FEEDBACK_DRIVE_GAIN = 1.0
 DALE_FEEDBACK_INPUT_DELAY_STEPS = 0
 DALE_FEEDBACK_DELAY_STEPS = 0
 
+# Bounded fast-feedback design round's score winner, NOT autapse-equivalent
+# timing: its biased relay skips member spikes. Private v1 above is unchanged.
+DALE_BIASED_VERSION = 1
+DALE_BIASED_BIAS_MV = 5.6
+DALE_BIASED_DRIVE_GAIN = 0.2
+DALE_BIASED_GAIN = 0.2
+DALE_BIASED_INPUT_DELAY_STEPS = 0
+DALE_BIASED_DELAY_STEPS = 0
+
 # Version 1 (rejected): simultaneous u/v ignition admits fast reset survivors.
 # Version 2: keep u at delay 18, assist v 60 steps later from the SAME COPY arm.
 MASTER_IGNITION_VERSION = 2
@@ -89,9 +98,11 @@ def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private"
     Like autapses, install last, after all readers and controllers. Each member
     excites only its own relay; the relay inhibits only that member. Zero edge
     delays still incur the relay's membrane integration and spike delivery time.
+    ``biased`` reduces the relay's resting gap and input drive together. It won
+    the bounded holding/reload score but does not reproduce autapse timing.
     This changes latch feedback only, not other mixed-sign circuit elements.
     """
-    if variant != "private":
+    if variant not in ("private", "biased"):
         raise ValueError(f"unsupported Dale latch feedback variant: {variant!r}")
     edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
     members = [m for (u, v), q in edges.items()
@@ -105,29 +116,41 @@ def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private"
     mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
     try:
         for member in members:
-            inh = net.neuron(net.roles[member] + ".fb")
-            net.synapse(member, inh, round(drive.loop * DALE_FEEDBACK_DRIVE_GAIN),
-                        DALE_FEEDBACK_INPUT_DELAY_STEPS)
-            net.synapse(inh, member, -round(drive.loop * DALE_FEEDBACK_GAIN),
-                        DALE_FEEDBACK_DELAY_STEPS)
+            if variant == "private":
+                inh = net.neuron(net.roles[member] + ".fb")
+                net.synapse(member, inh, round(drive.loop * DALE_FEEDBACK_DRIVE_GAIN),
+                            DALE_FEEDBACK_INPUT_DELAY_STEPS)
+                net.synapse(inh, member, -round(drive.loop * DALE_FEEDBACK_GAIN),
+                            DALE_FEEDBACK_DELAY_STEPS)
+            else:
+                inh = net.neuron(net.roles[member] + ".fb", bias=DALE_BIASED_BIAS_MV)
+                net.synapse(member, inh, round(drive.loop * DALE_BIASED_DRIVE_GAIN),
+                            DALE_BIASED_INPUT_DELAY_STEPS)
+                net.synapse(inh, member, -round(drive.loop * DALE_BIASED_GAIN),
+                            DALE_BIASED_DELAY_STEPS)
     finally:
         net.inhibition_mirrors = mirrors
 
 
 def validate_latch_feedback(latch_feedback: str, experimental_autapse: bool,
-                            dale_feedback_version: int = DALE_FEEDBACK_VERSION) -> None:
+                            dale_feedback_version: int = DALE_FEEDBACK_VERSION,
+                            dale_biased_version: int = DALE_BIASED_VERSION) -> None:
     """Validate builder options, including version metadata forwarded on replay.
 
     Missing policy means the historical autapse. Versions matter only when the
     corresponding circuit is selected; old autapse records remain unchanged.
     """
-    if latch_feedback not in ("autapse", "dale_private"):
+    if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
         raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
     if latch_feedback != "autapse":
         if not experimental_autapse:
-            raise ValueError("dale_private latch_feedback requires experimental_autapse=True")
-        if type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION:
+            raise ValueError(f"{latch_feedback} latch_feedback requires experimental_autapse=True")
+        if latch_feedback == "dale_private" and (
+                type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION):
             raise ValueError("unsupported Dale-feedback circuit version")
+        if latch_feedback == "dale_biased" and (
+                type(dale_biased_version) is not int or dale_biased_version != DALE_BIASED_VERSION):
+            raise ValueError("unsupported Dale-biased circuit version")
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
