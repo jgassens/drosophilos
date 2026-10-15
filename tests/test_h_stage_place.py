@@ -41,13 +41,14 @@ def test_mapping_meta_contract_keys_and_exact_types(config_f):
     meta = mapping_meta("optic_lobe", 1, 4, 0, config_f)
     expected = {"builder": str, "width": int, "ordered": bool, "watchdog_hops": int,
                 "storage": str, "rate_robust": bool, "experimental_autapse": bool,
-                "ordered_xor_oneshot": bool, "k_max": float, "isolation_weight": float,
+                "ordered_xor_oneshot": bool, "latch_feedback": str, "k_max": float, "isolation_weight": float,
                 "region": str, "restarts": int, "seed": int}
     assert set(meta) == set(expected)
     assert all(type(meta[k]) is t for k, t in expected.items())
     assert meta["builder"] == "build_adder_channel" and meta["width"] == 4
     assert meta["ordered"] and meta["watchdog_hops"] == 100 and meta["storage"] == "flipflop"
     assert meta["k_max"] == 4.0 and meta["isolation_weight"] == 1.0
+    assert meta["latch_feedback"] == "autapse"
     assert all(meta[k] is config_f for k in ("rate_robust", "experimental_autapse", "ordered_xor_oneshot"))
 
 
