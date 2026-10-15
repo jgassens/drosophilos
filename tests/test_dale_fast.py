@@ -141,7 +141,8 @@ def test_biased_stage_d_replay():
         with pytest.raises(ValueError, match="unsupported Dale-biased circuit version"):
             stage_d.recheck_record(record)
     del record["build_options"]["dale_biased_version"]
-    assert build_tick_pipeline(record)[2].net.bias == pl.net.bias  # versionless means v1
+    with pytest.raises(ValueError, match="unsupported Dale-biased circuit version"):
+        build_tick_pipeline(record)
 
 
 def test_biased_transform_preserves_mirrors_and_is_atomic():

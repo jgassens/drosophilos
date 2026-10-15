@@ -63,14 +63,13 @@ diagnostic rebuilding reproduces the private topology, and rebuilding/recheck
 reject a changed private version. Regression tests exercise both. Historical
 records still rebuild unchanged, as covered by the existing autapse tests.
 
-**Remaining integration gap:** `bench/stall_diag.py`'s legacy top-level
-`kernel_campaign` paths enumerate options explicitly and do not forward the
-new keys. In particular, a private top-level tick record can silently rebuild
-the autapse circuit, and its private version is not checked. Do not use those
-paths for private records. Forwarding/validating both keys there, and adding
-CLI exposure if wanted, requires edits outside this task's five owned paths.
-The conductor must integrate that before claiming all campaign replay paths
-support private feedback. Direct builders and nested Stage D records work.
+Replay records for `dale_private` must include `dale_feedback_version`; records
+without it are refused. A `dale_biased` record must likewise include
+`dale_biased_version`; a missing or unsupported version is refused. This
+applies to every replay path. `kernel_campaign` CLI and `rebuild_record`,
+`stall_diag`, `h1_fullgraph` mapping metadata, and `h_stage_place` forward and
+version-check `dale_biased_version`. The plumbing regression tests cover these
+paths. Historical autapse records remain unchanged.
 
 No shared variant was added. A group inhibitor would let one active latch
 inhibit other stored bits, violating the private circuit's independence; it
@@ -361,7 +360,7 @@ either Dale policy, before building the netlist.
 
 New builds record `latch_feedback='dale_biased'` and `dale_biased_version=1`;
 the independent `dale_feedback_version` still belongs to private v1. An explicit
-biased version must be integer 1 (not bool); missing version means v1, and an
+biased version must be integer 1 (not bool); missing version is refused, and an
 irrelevant policy's version is ignored. Tests rebuild nested Stage D records,
 compare ordered netlist arrays **and biases**, and check rejection of changed,
 null, string and boolean versions in both diagnostic rebuild and record recheck.
