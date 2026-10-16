@@ -16,7 +16,7 @@
   latch autapse does (`docs/stage_h/autapse_census.md`,
   `docs/stage_h/dale_feedback.md`). It could not be carried on real wiring
   without a separate inhibitory interneuron.
-- Full-size cluster results: pending (G2 jobs 4020997, 4020998)
+- Full-size cluster results (verified reset v2, commit ba3fa27): test_10000_verified_actual_noisy_reload_paths passed in both parametrizations (G2 job 4020998, 59 min). test_40000_verified_reset_survey passed in all 16 parametrizations: 13 in G2 job 4020997 before it reached its 4-hour limit, and the remaining three, fast30_bias-nominal, fast3sigma-fast_bias (the case that failed under v1 with 443 false_ready) and fast30_bias-slow_bias, in Juno jobs 459426, 459427 and 459428 (one passed each, 13-15 min).
 
 ## Scope and historical evidence
 
@@ -240,5 +240,6 @@ mirroring regression and eight related tests pass in a focused run (**9
 passed**, 1.76 s). The final non-slow collection therefore contains 150 tests.
 All **186 build-option tests** pass, including the thirteen existing
 default/machine ordered fingerprints. `git diff --check` passes. Full-size
-cluster confirmation is still required; neither this fix nor a finite survey
-releases verified reset.
+cluster confirmation was obtained in G2 jobs 4020997 and 4020998 and Juno jobs
+459426, 459427 and 459428; neither this fix nor a finite survey releases
+verified reset.
