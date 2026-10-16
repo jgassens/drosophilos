@@ -397,12 +397,13 @@ def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed
 
 def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
     """A type cut is an all-or-nothing synthetic input boundary cut, never an image edit."""
+    import hashlib
+    import json
+
     from drosophilos.connectome.embed_image import full_graph_topology
     from drosophilos.connectome.mcns import MCNS
 
     net, _, ids, policy, m, idx, pl = _placed_latch_relay()
-    from drosophilos.connectome.mcns import MCNS
-
     # Remove a designed edge so build_image has to restore it as a real Profile 3 edge.
     keep = ~((m.pre == idx["I"]) & (m.post == idx["E"]))
     m = MCNS(m.neurons, m.pre[keep], m.post[keep], m.count[keep], min_syn=1)
@@ -423,39 +424,52 @@ def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
     image = build_image(net, m2, pl, policy)
     assert image.profile3 and any(e.src == ids["edge_inh"] and e.dst == ids["edge"] for e in image.profile3)
     baseline = full_graph_topology(m2, Params(), image)
-    baseline_none = full_graph_topology(m2, Params(), image, cut_inputs_from_types=None)
+    # Frozen from full_graph_topology loaded from commit 7b4ae68 via git show,
+    # before cut_inputs_from_types existed, on this same fixture. Hash dtype strings
+    # and raw array bytes in this order, followed by the sorted compact JSON counts.
+    digest = hashlib.sha256()
     for field in ("src", "dst", "quanta", "delay"):
-        assert np.array_equal(getattr(baseline.topology, field), getattr(baseline_none.topology, field))
+        array = getattr(baseline.topology, field)
+        digest.update(array.dtype.str.encode("ascii"))
+        digest.update(array.tobytes())
+    digest.update(json.dumps(baseline.counts, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    assert digest.hexdigest() == "2961c74335ff19dc692000f8fa0c0ba08c7d448c07fff6f7e6b8996b39a6073e"
+
+    def weights(graph):
+        topo = graph.topology
+        pairs = list(zip(topo.src, topo.dst))
+        assert len(set(pairs)) == topo.nnz  # this fixture has one edge per pair
+        return dict(zip(pairs, topo.quanta))
+
+    # Adding Profile 3 edges re-sorts the full topology; anatomical positions no
+    # longer identify the same edges. Compare all full-graph weights by endpoints.
+    plain_weights = weights(baseline)
+    incoming = {(int(base.src[j]), int(base.dst[j])) for j in incoming}
+    anatomy = {(int(s), int(d)): abs(int(q)) // QUANTA_PER_SYNAPSE
+               for s, d, q in zip(base.src, base.dst, base.quanta)}
     cut = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",))
-    expected = [j for j in incoming if int(base.src[j]) == cut_pre]
+    cut_weights = weights(cut)
+    expected = {pair for pair in incoming if pair[0] == cut_pre}
     assert expected
-    assert all(cut.topology.quanta[j] == 0 for j in expected)
-    assert all(cut.topology.quanta[j] == baseline.topology.quanta[j] for j in incoming if j not in expected)
+    assert cut_weights == {pair: 0 if pair in expected else q for pair, q in plain_weights.items()}
     assert cut.counts["cut_inputs_from_types"] == ["cut_me"]
     assert cut.counts["cut_inputs_from_types_matched_neurons"] == 1
     assert cut.counts["inputs_cut_edges"] == len(expected)
-    assert cut.counts["inputs_cut_synapses"] == sum(abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in expected)
+    assert cut.counts["inputs_cut_synapses"] == sum(anatomy[pair] for pair in expected)
     assert cut.counts["inputs_remaining_edges"] == len(incoming) - len(expected)
-    remaining = [j for j in incoming if j not in expected]
-    assert cut.counts["inputs_remaining_synapses"] == sum(
-        abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in remaining)
+    remaining = incoming - expected
+    assert cut.counts["inputs_remaining_synapses"] == sum(anatomy[pair] for pair in remaining)
     assert cut.counts["inputs_remaining_edges"] == len(remaining)
     # All host outputs remain unchanged by an input-only cut.
-    outgoing = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre in hosts and post not in hosts]
-    assert all(cut.topology.quanta[j] == baseline.topology.quanta[j] for j in outgoing)
+    outgoing = [(pre, post) for pre, post in zip(base.src, base.dst) if pre in hosts and post not in hosts]
+    assert all(cut_weights[pair] == plain_weights[pair] for pair in outgoing)
     multi = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me", "also_cut"))
-    multi_expected = [j for j in incoming if int(base.src[j]) in (cut_pre, other_pre)]
-    assert {j for j in incoming if multi.topology.quanta[j] == 0} == set(multi_expected)
-    assert all(multi.topology.quanta[j] == baseline.topology.quanta[j] for j in incoming if j not in multi_expected)
+    multi_expected = {pair for pair in incoming if pair[0] in (cut_pre, other_pre)}
+    assert weights(multi) == {pair: 0 if pair in multi_expected else q for pair, q in plain_weights.items()}
     # Designed host-to-host and Profile 3 image edges are not anatomical input-boundary edges.
     for s, d, q in zip(net.src, net.dst, net.quanta):
-        j = np.flatnonzero((base.src == pl.mapping[s]) & (base.dst == pl.mapping[d]))
-        if len(j):
-            assert cut.topology.quanta[j[0]] == baseline.topology.quanta[j[0]] == q
-        else:
-            synthetic = np.flatnonzero((cut.topology.src == baseline.index_map[s]) &
-                                       (cut.topology.dst == baseline.index_map[d]))
-            assert len(synthetic) == 1 and cut.topology.quanta[synthetic[0]] == q
+        pair = (baseline.index_map[s], baseline.index_map[d])
+        assert cut_weights[pair] == plain_weights[pair] == q
 
     unknown = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("not_a_type",))
     assert np.array_equal(unknown.topology.quanta, baseline.topology.quanta)
