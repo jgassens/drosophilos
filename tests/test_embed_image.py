@@ -400,20 +400,32 @@ def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
     from drosophilos.connectome.embed_image import full_graph_topology
     from drosophilos.connectome.mcns import MCNS
 
-    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    net, _, ids, policy, m, idx, pl = _placed_latch_relay()
+    from drosophilos.connectome.mcns import MCNS
+
+    # Remove a designed edge so build_image has to restore it as a real Profile 3 edge.
+    keep = ~((m.pre == idx["I"]) & (m.post == idx["E"]))
+    m = MCNS(m.neurons, m.pre[keep], m.post[keep], m.count[keep], min_syn=1)
     hosts = set(pl.mapping.values())
     base = m.topology(Params())
     incoming = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre not in hosts and post in hosts]
     assert len(incoming) > 1
     cut_pre = int(base.src[incoming[0]])
     keep_pre = next(int(base.src[j]) for j in incoming if int(base.src[j]) != cut_pre)
+    other_pre = next(int(base.src[j]) for j in incoming
+                     if int(base.src[j]) not in (cut_pre, keep_pre))
     neurons = m.neurons.copy()
     neurons.loc[:, "type"] = "other"
     neurons.loc[cut_pre, "type"] = "cut_me"
     neurons.loc[keep_pre, "type"] = "keep_me"
+    neurons.loc[other_pre, "type"] = "also_cut"
     m2 = MCNS(neurons, m.pre, m.post, m.count, min_syn=1)
     image = build_image(net, m2, pl, policy)
+    assert image.profile3 and any(e.src == ids["edge_inh"] and e.dst == ids["edge"] for e in image.profile3)
     baseline = full_graph_topology(m2, Params(), image)
+    baseline_none = full_graph_topology(m2, Params(), image, cut_inputs_from_types=None)
+    for field in ("src", "dst", "quanta", "delay"):
+        assert np.array_equal(getattr(baseline.topology, field), getattr(baseline_none.topology, field))
     cut = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",))
     expected = [j for j in incoming if int(base.src[j]) == cut_pre]
     assert expected
@@ -424,10 +436,26 @@ def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
     assert cut.counts["inputs_cut_edges"] == len(expected)
     assert cut.counts["inputs_cut_synapses"] == sum(abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in expected)
     assert cut.counts["inputs_remaining_edges"] == len(incoming) - len(expected)
+    remaining = [j for j in incoming if j not in expected]
+    assert cut.counts["inputs_remaining_synapses"] == sum(
+        abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in remaining)
+    assert cut.counts["inputs_remaining_edges"] == len(remaining)
+    # All host outputs remain unchanged by an input-only cut.
+    outgoing = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre in hosts and post not in hosts]
+    assert all(cut.topology.quanta[j] == baseline.topology.quanta[j] for j in outgoing)
+    multi = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me", "also_cut"))
+    multi_expected = [j for j in incoming if int(base.src[j]) in (cut_pre, other_pre)]
+    assert {j for j in incoming if multi.topology.quanta[j] == 0} == set(multi_expected)
+    assert all(multi.topology.quanta[j] == baseline.topology.quanta[j] for j in incoming if j not in multi_expected)
     # Designed host-to-host and Profile 3 image edges are not anatomical input-boundary edges.
     for s, d, q in zip(net.src, net.dst, net.quanta):
         j = np.flatnonzero((base.src == pl.mapping[s]) & (base.dst == pl.mapping[d]))
-        assert len(j) == 1 and cut.topology.quanta[j[0]] == baseline.topology.quanta[j[0]] == q
+        if len(j):
+            assert cut.topology.quanta[j[0]] == baseline.topology.quanta[j[0]] == q
+        else:
+            synthetic = np.flatnonzero((cut.topology.src == baseline.index_map[s]) &
+                                       (cut.topology.dst == baseline.index_map[d]))
+            assert len(synthetic) == 1 and cut.topology.quanta[synthetic[0]] == q
 
     unknown = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("not_a_type",))
     assert np.array_equal(unknown.topology.quanta, baseline.topology.quanta)
