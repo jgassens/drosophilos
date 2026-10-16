@@ -106,6 +106,76 @@ Minimal confirmed rungs: outputs/silent **0.40, 1,334,045 synapses, 50/50**; inp
 
 On the present evidence, the live surround decides the whole-brain outcome: the same complete image computes in the sealed 3/3 control and only becomes reliable at the measured boundary thresholds.  Wiring fit and the unavailable F autapses independently rule out an unmodified Profile-2 realization, but they do not explain the transition within the already-complete image.
 
+## Round 2 (2026-10-15/16): Dale-compatible latches, fault attribution and the shielding threshold
+
+This round tests the two Dale-compatible latch designs documented in `docs/stage_h/dale_feedback.md`: `dale_private` uses a dedicated inhibitory feedback neuron for each latch member, while `dale_biased` is its sparse, asynchronous score-winning variant.  Here *carried* means a designed edge pair supplied by real anatomical wiring; *designed* is every pair required by that image.  The compact, strict source inventory is `docs/stage_h/round2.json`.
+
+### Placement
+
+The Dale images have 1,656 designed pairs rather than the autapse image's 1,516.  They remove nearly all of the original latch-autapse shortfall, but this does not establish a live computation.
+
+| placement | feedback | carried / designed | placed / unplaced |
+| --- | --- | ---: | ---: |
+| all_w0 | autapse | 809 / 1,516 | 739 / 1 |
+| all_w0 | dale_private | 1,049 / 1,656 | 879 / 1 |
+| all_w0 | dale_biased | 1,063 / 1,656 | 875 / 5 |
+| vnc_w2 | autapse | 557 / 1,516 | 711 / 29 |
+| vnc_w2 | dale_private | 573 / 1,656 | 853 / 27 |
+| vnc_w2 | dale_biased | 576 / 1,656 | 851 / 29 |
+
+### Live brain, no cut
+
+The no-cut `dale_biased` live runs are 0/50 in both surrounds and placements, just as the autapse runs are.  Thus the latch design is not what fails in the live brain.  Maximum entering excitation is reported per millisecond.
+
+| placement | surround | autapse correct/n; max exc | dale_biased correct/n; max exc |
+| --- | --- | ---: | ---: |
+| all_w0 | silent | 0/50; 27,005 | 0/50; 40,126 |
+| all_w0 | 2 Hz Poisson | 0/50; 30,646 | 0/50; 46,137 |
+| vnc_w2 | silent | 0/50; 4,726 | 0/50; 4,877 |
+| vnc_w2 | 2 Hz Poisson | 0/50; 5,350 | 0/50; 6,252 |
+
+### Fault attribution
+
+An *incoming boundary edge* is an anatomical edge from outside the host image into it.  A *scored edge* is an incoming edge that carried spikes before at least one failure and was therefore eligible for attribution.  Only 3,268 of 412,685 incoming edges in the silent run, and 38,555 in the Poisson run, carried such spikes.  Scores below are the top attribution scores, not a claim that cutting a named source type is sufficient.
+
+| surround | incoming / scored edges | top source types (score) | top source superclasses (score) |
+| --- | ---: | --- | --- |
+| silent | 412,685 / 3,268 | lLN1_bc (18,627,200); lLN2P_a (2,144,448); GNG019 (1,060,128) | cb_intrinsic (34,081,360); descending_neuron (2,542,688); cb_sensory (73,920) |
+| 2 Hz Poisson | 412,685 / 38,555 | lLN1_bc (11,554,064); GNG019 (981,600); AVLP080 (811,712) | cb_intrinsic (20,166,576); cb_sensory (8,919,248); vnc_sensory (2,549,616) |
+
+### Shielding
+
+Each row cuts all_w0 host inputs.  “Ranking” chooses boundary edges either by attribution score, by synapse count, or by the named source type; the fraction applies to the ranked edge list.  `correct/n` is additions correct out of additions attempted.  Every measured input-cut rung follows.
+
+| ranking | surround | fraction | edges / synapses cut | correct/n | max excitatory spikes entering per ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| attribution | silent | 0.05 | 20,635 / 1,783,993 | 0/10 | 37,730 |
+| attribution | 2 Hz Poisson | 0.05 | 20,635 / 357,669 | 0/10 | 26,221 |
+| attribution | silent | 0.10 | 41,269 / 2,471,943 | 0/10 | 22,416 |
+| attribution | 2 Hz Poisson | 0.10 | 41,269 / 989,672 | 0/10 | 37,420 |
+| attribution | silent | 0.20 | 82,537 / 3,147,488 | 0/10 | 29,890 |
+| attribution | 2 Hz Poisson | 0.20 | 82,537 / 2,830,363 | 0/10 | 29,179 |
+| attribution | silent | 0.30 | 123,806 / 3,496,674 | 0/10 | 24,836 |
+| attribution | 2 Hz Poisson | 0.30 | 123,806 / 3,376,405 | 0/10 | 27,921 |
+| attribution | silent | 0.50 | 206,343 / 3,842,974 | 0/10 | 17,057 |
+| attribution | 2 Hz Poisson | 0.50 | 206,343 / 3,821,051 | 0/10 | 17,984 |
+| attribution | silent | 0.70 | 288,880 / 4,008,147 | 0/10 | 8,508 |
+| attribution | 2 Hz Poisson | 0.70 | 288,880 / 4,008,147 | 0/10 | 8,377 |
+| attribution | silent | 0.90 | 371,417 / 4,090,684 | 0/10 | 2,082 |
+| attribution | 2 Hz Poisson | 0.90 | 371,417 / 4,090,684 | 0/10 | 2,285 |
+| synapse | silent | 0.05 | 20,635 / 1,880,500 | 0/10 | 37,262 |
+| synapse | silent | 0.10 | 41,269 / 2,515,729 | 0/10 | 23,295 |
+| synapse | silent | 0.20 | 82,537 / 3,163,127 | 0/10 | 28,906 |
+| synapse | silent | 0.30 | 123,806 / 3,503,051 | 0/10 | 27,514 |
+| type: lLN1_bc | silent | — | 723 / 35,144 | 0/10 | 26,177 |
+| type: lLN1_bc | 2 Hz Poisson | — | 723 / 35,144 | 0/10 | 28,267 |
+
+There is no small, targeted shield in these data.  Attribution-ranked cuts did no better than the synapse-ranked cuts.  In the earlier synapse-ranked input ladder above, the all_w0 image computes only after more than 90% of its real input is removed: at least 95% of incoming boundary edges under 2 Hz drive (the 0.95 rung was 10/10; the 1.00 confirmation was 50/50).  The attribution ranking remained 0/10 even at 90% of incoming edges in either surround.
+
+### Round-2 limits
+
+These measurements use one seed and one placement.  The shielding ladders use 10 additions at every rung below the minima; they are not 50-addition confirmations.
+
 ## Limits
 
 This is one placement seed.  Ladder rungs use 10 additions, with only the minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); all_w0 input 0.95 reached 10/10 but was not confirmed at 50, so unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
