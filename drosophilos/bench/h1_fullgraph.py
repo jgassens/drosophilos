@@ -25,6 +25,7 @@ a cluster node. Do not run it on a laptop.
 
     python -m drosophilos.bench.h1_fullgraph --n-cases 50 --seed 0 --surround silent --out data/h1_fullgraph/silent.json
     python -m drosophilos.bench.h1_fullgraph --mapping data/stage_h/place/all_w0_mapping.json --surround silent --cut-inputs-frac .5 --out data/h1_fullgraph/inputs-50.json
+    python -m drosophilos.bench.h1_fullgraph --cut-inputs-from-types lLN1_bc --out data/h1_fullgraph/no-lLN1_bc.json
 
 Fault attribution (cluster only; run from the repository root). The submit.sh options
 --cluster, --script, and --ref must precede sbatch options. First submit the live, uncut
@@ -184,7 +185,8 @@ def run(args) -> dict:
     fg = full_graph_topology(m, params, img, zero_outputs=args.outputs_zeroed, zero_inputs=args.inputs_zeroed,
                              cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac,
                              cut_inputs_by=getattr(args, "cut_inputs_by", "synapses"),
-                             attribution_in=getattr(args, "attribution_in", None))
+                             attribution_in=getattr(args, "attribution_in", None),
+                             cut_inputs_from_types=getattr(args, "cut_inputs_from_types", None))
     attr_window = getattr(args, "attribute", None)
     attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params) if attr_window is not None else None
     hosts = fg.index_map[img.real >= 0]
@@ -197,6 +199,8 @@ def run(args) -> dict:
           f"inputs cut {fg.counts['inputs_cut_edges']} ({fg.counts['inputs_cut_synapses']} synapses); "
           f"surround {args.surround}: {len(driven)} driven neurons (hosts excluded: {pops['excluded_hosts']}); "
           f"setup {time.time() - t_start:.1f}s", flush=True)
+    for warning in fg.counts.get("warnings", []):
+        print(f"[h1fg] WARNING: {warning}", flush=True)
 
     cases, words, expected = adder_cases(width, args.n_cases, args.seed)
     rng = np.random.default_rng(args.seed)
@@ -283,11 +287,13 @@ def run(args) -> dict:
         out["attribution"] = attribution.report(getattr(args, "attribution_top", 50))
         if getattr(args, "attribution_out", None) is not None:
             attribution.save(args.attribution_out)
+    warnings = fg.counts.get("warnings", [])
     print(f"[h1fg] summary ({args.surround}, outputs zeroed {args.outputs_zeroed}, inputs zeroed {args.inputs_zeroed}, "
           f"{'chained' if args.chained else 'fresh'}): {summary['outcomes']}; correct {summary['correct']}/{args.n_cases}, "
           f"identical to isolated {summary['identical_to_isolated']}/{args.n_cases}, accept ms {summary['accept_ms'][:5]}..., "
           f"max spikes in per ms exc {summary['max_exc_per_ms']} inh {summary['max_inh_per_ms']}, "
-          f"wall {summary['wall_s_total']}s ({np.mean(summary['wall_s_per_addition']) if additions else 0:.1f}s per addition)", flush=True)
+          f"wall {summary['wall_s_total']}s ({np.mean(summary['wall_s_per_addition']) if additions else 0:.1f}s per addition)"
+          f"{'; WARNING: ' + '; '.join(warnings) if warnings else ''}", flush=True)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(out, indent=1, default=str))
@@ -307,6 +313,13 @@ def parse(argv=None):
                     help="cut strongest fraction [0, 1] of anatomical edges into hosts")
     ap.add_argument("--cut-outputs-frac", type=float, default=0.0,
                     help="cut strongest fraction [0, 1] of anatomical edges from hosts")
+    def source_types(value: str) -> tuple[str, ...]:
+        types = tuple(t.strip() for t in value.split(",") if t.strip())
+        if not types:
+            raise argparse.ArgumentTypeError("expected one or more comma-separated MCNS type strings")
+        return types
+    ap.add_argument("--cut-inputs-from-types", type=source_types, default=argparse.SUPPRESS, metavar="TYPE[,TYPE...]",
+                    help="cut every input from the specified MCNS source cell type(s)")
     # Suppressed defaults preserve the legacy args JSON exactly when no new flags are used.
     ap.add_argument("--attribute", type=float, default=argparse.SUPPRESS, metavar="WINDOW_MS",
                     help="attribute failed additions to incoming deliveries in the preceding window")
@@ -334,6 +347,8 @@ def parse(argv=None):
         ap.error("--attribution-top must be nonnegative")
     if (getattr(args, "cut_inputs_by", "synapses") == "attribution") != hasattr(args, "attribution_in"):
         ap.error("--cut-inputs-by attribution requires --attribution-in (and vice versa)")
+    if hasattr(args, "cut_inputs_from_types") and (args.inputs_zeroed or args.cut_inputs_frac):
+        ap.error("--cut-inputs-from-types cannot be combined with --inputs-zeroed or --cut-inputs-frac")
     return args
 
 

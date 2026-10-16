@@ -395,6 +395,50 @@ def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed
         full_graph_topology(m2, params, img, cut_inputs_frac=1.1, base=base)
 
 
+def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
+    """A type cut is an all-or-nothing synthetic input boundary cut, never an image edit."""
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.connectome.mcns import MCNS
+
+    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    hosts = set(pl.mapping.values())
+    base = m.topology(Params())
+    incoming = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre not in hosts and post in hosts]
+    assert len(incoming) > 1
+    cut_pre = int(base.src[incoming[0]])
+    keep_pre = next(int(base.src[j]) for j in incoming if int(base.src[j]) != cut_pre)
+    neurons = m.neurons.copy()
+    neurons.loc[:, "type"] = "other"
+    neurons.loc[cut_pre, "type"] = "cut_me"
+    neurons.loc[keep_pre, "type"] = "keep_me"
+    m2 = MCNS(neurons, m.pre, m.post, m.count, min_syn=1)
+    image = build_image(net, m2, pl, policy)
+    baseline = full_graph_topology(m2, Params(), image)
+    cut = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",))
+    expected = [j for j in incoming if int(base.src[j]) == cut_pre]
+    assert expected
+    assert all(cut.topology.quanta[j] == 0 for j in expected)
+    assert all(cut.topology.quanta[j] == baseline.topology.quanta[j] for j in incoming if j not in expected)
+    assert cut.counts["cut_inputs_from_types"] == ["cut_me"]
+    assert cut.counts["cut_inputs_from_types_matched_neurons"] == 1
+    assert cut.counts["inputs_cut_edges"] == len(expected)
+    assert cut.counts["inputs_cut_synapses"] == sum(abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in expected)
+    assert cut.counts["inputs_remaining_edges"] == len(incoming) - len(expected)
+    # Designed host-to-host and Profile 3 image edges are not anatomical input-boundary edges.
+    for s, d, q in zip(net.src, net.dst, net.quanta):
+        j = np.flatnonzero((base.src == pl.mapping[s]) & (base.dst == pl.mapping[d]))
+        assert len(j) == 1 and cut.topology.quanta[j[0]] == baseline.topology.quanta[j[0]] == q
+
+    unknown = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("not_a_type",))
+    assert np.array_equal(unknown.topology.quanta, baseline.topology.quanta)
+    assert unknown.counts["inputs_cut_edges"] == unknown.counts["inputs_cut_synapses"] == 0
+    assert unknown.counts["warnings"] == ["requested input source type matched no outside neuron: not_a_type"]
+    with pytest.raises(ValueError, match="cannot be combined"):
+        full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",), cut_inputs_frac=.1)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",), zero_inputs=True)
+
+
 def test_full_graph_cut_uses_exact_decimal_ceil():
     """0.07 of exactly 100 boundary edges cuts seven, not eight from float roundoff."""
     from drosophilos.connectome.embed_image import full_graph_topology

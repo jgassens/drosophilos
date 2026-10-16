@@ -118,13 +118,17 @@ def test_cli_defaults_omit_attribution_and_validate_opt_in():
 
     defaults = vars(parse([]))
     assert not any(key in defaults for key in ("attribute", "attribution_in", "attribution_out",
-                                                "attribution_top", "cut_inputs_by"))
+                                                "attribution_top", "cut_inputs_by", "cut_inputs_from_types"))
     assert defaults["cut_inputs_frac"] == defaults["cut_outputs_frac"] == 0
     args = parse(["--attribute", "20", "--attribution-out", "scores.npz", "--attribution-top", "10"])
     assert args.attribute == 20 and args.attribution_out == Path("scores.npz") and args.attribution_top == 10
+    typed = parse(["--cut-inputs-from-types", "lLN1_bc, lLN2"])
+    assert typed.cut_inputs_from_types == ("lLN1_bc", "lLN2")
     for flags in (["--attribute", "0"], ["--attribute", "nan"], ["--attribute", "inf"],
                   ["--attribution-out", "scores.npz"], ["--cut-inputs-by", "attribution"],
-                  ["--attribution-in", "scores.npz"], ["--attribute", "20", "--attribution-top", "-1"]):
+                  ["--attribution-in", "scores.npz"], ["--attribute", "20", "--attribution-top", "-1"],
+                  ["--cut-inputs-from-types", "lLN1_bc", "--inputs-zeroed"],
+                  ["--cut-inputs-from-types", "lLN1_bc", "--cut-inputs-frac", ".1"]):
         with pytest.raises(SystemExit):
             parse(flags)
 
