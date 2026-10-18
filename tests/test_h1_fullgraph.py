@@ -50,6 +50,12 @@ def test_stage_h_mapping_meta_rebuilds_configuration_f_and_legacy_is_latch(tmp_p
         adder_build_kwargs(loaded, width_override=3)
 
 
+@pytest.mark.parametrize("latch_feedback", ["dale_private", "dale_biased", "bogus"])
+def test_legacy_mapping_refuses_explicit_nondefault_latch_feedback(latch_feedback):
+    with pytest.raises(ValueError, match="legacy mapping.*latch_feedback"):
+        adder_build_kwargs({"latch_feedback": latch_feedback})
+
+
 def test_saved_docs_mappings_rebuild_their_exact_role_sets():
     """Legacy mappings still identify every role after their builder is reconstructed."""
     docs = Path(__file__).resolve().parents[1] / "docs"
@@ -105,3 +111,60 @@ def test_h1_simulators_power_on_a_flipflop_channel_on_a_cut_synthetic_connectome
     assert [(r.status, r.decoded) for r in rf] == [("valid", 1), ("valid", 2)]
     assert whole.trace == iso.trace
     assert [(r.status, r.decoded) for r in ri] == [(r.status, r.decoded) for r in rf]
+
+
+def test_cli_defaults_omit_attribution_and_validate_opt_in():
+    from drosophilos.bench.h1_fullgraph import parse
+
+    defaults = vars(parse([]))
+    assert not any(key in defaults for key in ("attribute", "attribution_in", "attribution_out",
+                                                "attribution_top", "cut_inputs_by", "cut_inputs_from_types"))
+    assert defaults["cut_inputs_frac"] == defaults["cut_outputs_frac"] == 0
+    args = parse(["--attribute", "20", "--attribution-out", "scores.npz", "--attribution-top", "10"])
+    assert args.attribute == 20 and args.attribution_out == Path("scores.npz") and args.attribution_top == 10
+    typed = parse(["--cut-inputs-from-types", "lLN1_bc, lLN2"])
+    assert typed.cut_inputs_from_types == ("lLN1_bc", "lLN2")
+    for flags in (["--attribute", "0"], ["--attribute", "nan"], ["--attribute", "inf"],
+                  ["--attribution-out", "scores.npz"], ["--cut-inputs-by", "attribution"],
+                  ["--attribution-in", "scores.npz"], ["--attribute", "20", "--attribution-top", "-1"],
+                  ["--cut-inputs-from-types", "lLN1_bc", "--inputs-zeroed"],
+                  ["--cut-inputs-from-types", "lLN1_bc", "--cut-inputs-frac", ".1"]):
+        with pytest.raises(SystemExit):
+            parse(flags)
+
+
+def test_bench_attribution_is_opt_in_and_can_feed_cut_on_synthetic_mcns(tmp_path, monkeypatch):
+    from drosophilos.bench import h1_fullgraph as bench
+    from drosophilos.connectome.embed_image import save_mapping
+
+    params = Params()
+    channel = build_adder_channel(params, **adder_build_kwargs({}, width_override=1))
+    n = channel.net.n
+    neurons = pd.DataFrame({"bodyId": 10_000 + np.arange(n + 2), "type": "synthetic",
+                            "superclass": "sensory", "class": None, "somaSide": "R",
+                            "nt": "acetylcholine", "nt_conf": .9, "sign": np.ones(n + 2, np.int8)})
+    m = MCNS(neurons, np.array([0, n, n + 1], np.int32), np.array([n, 0, 1], np.int32),
+             np.array([1, 2, 3], np.int32), min_syn=1)
+    placement = Placement(dict(enumerate(range(n))), [], 0, [], 0, 0)
+    mapping = tmp_path / "mapping.json"
+    save_mapping(mapping, channel.net, m, placement)
+    monkeypatch.setattr(bench, "load_mcns", lambda: m)
+    monkeypatch.setattr(bench.time, "time", lambda: 1.0)  # exact JSON comparison excludes wall noise
+    common = ["--mapping", str(mapping), "--width", "1", "--n-cases", "2", "--max-ms", "10", "--chained"]
+    plain = bench.run(bench.parse(common))
+    path = tmp_path / "score.npz"
+    attributed = bench.run(bench.parse(common + ["--attribute", "20", "--attribution-out", str(path)]))
+    assert attributed["attribution"]["failures"] == 2 and path.exists()
+    assert all(r["attribution"]["step"] == r["end_step"] for r in attributed["additions"])
+    # Strip precisely the opt-in additions; all preexisting output is byte-identical.
+    attributed.pop("attribution")
+    for row in attributed["additions"]:
+        row.pop("attribution")
+    attributed["args"].pop("attribute")
+    attributed["args"].pop("attribution_out")
+    assert json.dumps(attributed, default=str) == json.dumps(plain, default=str)
+    cut = bench.run(bench.parse(common + ["--cut-inputs-by", "attribution", "--attribution-in", str(path),
+                                         "--cut-inputs-frac", "1"]))
+    assert cut["full_graph_counts"]["inputs_cut_edges"] == 2
+    assert cut["full_graph_counts"]["inputs_cut_synapses"] == 5
+    assert "attribution" not in cut

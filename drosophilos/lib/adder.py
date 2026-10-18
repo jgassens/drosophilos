@@ -7,7 +7,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault_path
-from ..protocol.latch import add_edge_relay, add_experimental_autapses, connect_trigger
+from ..protocol.latch import (DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION,
+                              add_dale_latch_feedback, add_edge_relay,
+                              add_experimental_autapses, connect_trigger,
+                              validate_latch_feedback)
 from ..sim.model import Params
 from .gates import Gates, Rail2
 from .netlist import Drive, Netlist
@@ -33,7 +36,9 @@ def operand_word(a: int, b: int, cin: int, width: int) -> int:
 def build_adder_channel(params: Params, width: int, drive: Drive | None = None, liveness: bool = True,
                         watchdog_hops: int = 80, ordered: bool = False, storage: str = "latch", *,
                         rate_robust: bool = False, experimental_autapse: bool = False,
-                        ordered_xor_oneshot: bool = False) -> Channel:
+                        ordered_xor_oneshot: bool = False, latch_feedback: str = "autapse",
+                        dale_feedback_version: int = DALE_FEEDBACK_VERSION,
+                        dale_biased_version: int = DALE_BIASED_VERSION) -> Channel:
     """`ordered=True`: the veto-relay adder (operand gate on A driven by the carry-in rails,
     B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder.
     `storage` is the output register's rail storage ("latch" or "flipflop", see add_register;
@@ -41,7 +46,13 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     register stays a latch register: the harness loads it with one pulse per rail.
     Configuration F enables rate-robust readers, experimental latch feedback and
     one-shot sum XORs together. One-shot XORs require ordered mode and the kernel's
-    default physics/drive and widths 1..8; the adder retains its own reset timing."""
+    default physics/drive and widths 1..8; the adder retains its own reset timing.
+    `latch_feedback='dale_private'` replaces only the experimental latch self-edges
+    with versioned private inhibitory relays; 'dale_biased' uses biased relays
+    with sparser feedback (not autapse-equivalent timing). The one-shot self-edge
+    remains. Each relay circuit has independent replay version metadata."""
+    validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version,
+                            dale_biased_version)
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
     if ordered_xor_oneshot and not ordered:
@@ -81,5 +92,19 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
         add_liveness(net, drive, P, Q, watchdog_hops)
     net.group("adder_latches", [x for l in G.latches for x in l.members])
     if experimental_autapse:
-        add_experimental_autapses(net, drive)
-    return Channel(net, drive, 2 * width + 1, P, Q)
+        if latch_feedback == "autapse":
+            add_experimental_autapses(net, drive)
+        else:
+            add_dale_latch_feedback(net, drive, variant=latch_feedback.removeprefix("dale_"))
+    channel = Channel(net, drive, 2 * width + 1, P, Q)
+    channel.build_options = dict(rate_robust=rate_robust,
+                                 experimental_autapse=experimental_autapse,
+                                 experimental_autapse_version=EXPERIMENTAL_AUTAPSE_VERSION,
+                                 ordered_xor_oneshot=ordered_xor_oneshot)
+    if latch_feedback == "dale_private":
+        channel.build_options.update(latch_feedback=latch_feedback,
+                                     dale_feedback_version=DALE_FEEDBACK_VERSION)
+    elif latch_feedback == "dale_biased":
+        channel.build_options.update(latch_feedback=latch_feedback,
+                                     dale_biased_version=DALE_BIASED_VERSION)
+    return channel

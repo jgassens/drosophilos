@@ -51,8 +51,9 @@ import numpy as np
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
 from ..protocol.latch import (
-    EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
-    Latch, add_edge_relay, add_experimental_autapses,
+    DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
+    Latch, add_dale_latch_feedback, add_edge_relay, add_experimental_autapses,
+    validate_latch_feedback,
     add_latch, connect_trigger,
 )
 from ..protocol.token import decode_recent, rails_for
@@ -292,7 +293,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
                    experimental_register_reset: bool = False, experimental_autapse: bool = False,
                    ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-                   master_ignition: bool = False, operand_xor_oneshot: bool = False) -> Pipeline:
+                   master_ignition: bool = False, operand_xor_oneshot: bool = False,
+                   latch_feedback: str = "autapse",
+                   dale_feedback_version: int = DALE_FEEDBACK_VERSION,
+                   dale_biased_version: int = DALE_BIASED_VERSION) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -352,6 +356,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     synapse per master rail and no neurons. The opt-in/version are recorded
     only when enabled, preserving historical records and default fingerprints.
     `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
+    `latch_feedback='dale_private'` substitutes private inhibitory relays for
+    that opt-in's storage self-edges, with the same shape restrictions. It is
+    experimental, installed last, and records `dale_feedback_version` for
+    replay validation; omitted policy/version retain historical circuits.
+    'dale_biased' uses biased relays with sparser feedback and independent
+    `dale_biased_version` metadata; it does not reproduce autapse timing.
     Memories/RAM, phases/pacing, multiple streams and multipliers require the
     complete configuration F (also ordered_xor_oneshot); autapse alone remains
     rejected on those shapes. Generic and specialized datapaths are allowed.
@@ -388,6 +398,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     survey fails. zero_once may be combined with it."""
     if type(operand_xor_oneshot) is not bool:
         raise ValueError("operand_xor_oneshot requires a bool")
+    validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version,
+                            dale_biased_version)
+    if latch_feedback != "autapse" and (master_ignition or operand_xor_oneshot or f_width16_experimental):
+        raise ValueError("master_ignition, operand_xor_oneshot, and f_width16_experimental "
+                         f"are not surveyed with {latch_feedback}")
     if operand_xor_oneshot and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
         raise ValueError("operand_xor_oneshot requires complete configuration F: rate_robust=True, "
                          "experimental_autapse=True and ordered_xor_oneshot=True")
@@ -1027,7 +1042,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         registers += [r for cell in order for r in (cell.stage, cell.master)]
         compact_register_resets(net, drive, registers)
     if experimental_autapse:
-        add_experimental_autapses(net, drive)
+        if latch_feedback == "autapse":
+            add_experimental_autapses(net, drive)
+        else:
+            add_dale_latch_feedback(net, drive, variant=latch_feedback.removeprefix("dale_"))
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
@@ -1063,6 +1081,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     }
     if f_width16_experimental:
         pl.build_options["f_width16_experimental"] = True
+    # Preserve historical records verbatim unless the new circuit is selected.
+    if latch_feedback == "dale_private":
+        pl.build_options.update(latch_feedback=latch_feedback,
+                                dale_feedback_version=DALE_FEEDBACK_VERSION)
+    elif latch_feedback == "dale_biased":
+        pl.build_options.update(latch_feedback=latch_feedback,
+                                dale_biased_version=DALE_BIASED_VERSION)
     if master_ignition:
         pl.build_options.update(master_ignition=True, master_ignition_version=MASTER_IGNITION_VERSION)
     if operand_xor_oneshot:

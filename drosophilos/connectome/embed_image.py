@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from fractions import Fraction
 import math
@@ -302,7 +302,8 @@ def image_manifest(net: Netlist, m: MCNS, img: Image, policy: Policy, params: Pa
 MAPPING_META_KEYS = (
     "builder", "width", "ordered", "watchdog_hops", "storage", "rate_robust",
     "experimental_autapse", "ordered_xor_oneshot", "k_max", "isolation_weight",
-    "region", "restarts", "seed",
+    "region", "restarts", "seed", "latch_feedback", "dale_feedback_version",
+    "dale_biased_version",
 )
 
 
@@ -385,7 +386,9 @@ def _locate(base: Topology, pre: int, post: int) -> range:
 
 def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: bool = False, zero_inputs: bool = False,
                         base: Topology | None = None, cut_outputs_frac: float = 0.0,
-                        cut_inputs_frac: float = 0.0) -> FullGraph:
+                        cut_inputs_frac: float = 0.0, cut_inputs_by: str = "synapses",
+                        attribution_in: Path | None = None,
+                        cut_inputs_from_types: Collection[str] | None = None) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
 
@@ -403,6 +406,12 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
       cut_outputs_frac / cut_inputs_frac  zero just the strongest fraction of those respective
                  anatomical boundary edges.  Ties use (post, pre) order so a cut ladder is
                  reproducible; a non-zero fraction cuts at least one edge.
+      cut_inputs_by="attribution"  rank inputs by descending score from an h_fault_attr NPZ,
+                 then synapse count, then (post, pre). Missing scores are zero. BodyIds identify
+                 pairs across runs; foreign pairs, duplicate pairs and invalid scores are rejected.
+      cut_inputs_from_types  zero every incoming anatomical edge whose outside presynaptic
+                 MCNS neuron has one of these exact ``type`` strings.  This is exclusive with
+                 input fractions and ``zero_inputs``.
     `base` must be the anatomical topology from `MCNS.topology` (quanta = sign * synapse count * QUANTA_PER_SYNAPSE), because the cut fractions recover synapse counts from it.
 
     Returns the topology, the index map designed -> full-graph, and the counts of each edit."""
@@ -411,8 +420,22 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
             raise ValueError(f"{name} must be a finite float in [0, 1], got {fraction!r}")
     if zero_outputs and cut_outputs_frac:
         raise ValueError("zero_outputs and cut_outputs_frac cannot be combined")
-    if zero_inputs and cut_inputs_frac:
-        raise ValueError("zero_inputs and cut_inputs_frac cannot be combined")
+    if cut_inputs_from_types is not None:
+        if isinstance(cut_inputs_from_types, str):
+            raise ValueError("cut_inputs_from_types must be a collection of type strings, not a string")
+        requested_types = list(dict.fromkeys(cut_inputs_from_types))
+        if not all(isinstance(t, str) for t in requested_types):
+            raise ValueError("cut_inputs_from_types must contain only type strings")
+    else:
+        requested_types = None
+    if zero_inputs and (cut_inputs_frac or requested_types is not None):
+        raise ValueError("zero_inputs cannot be combined with cut_inputs_frac or cut_inputs_from_types")
+    if cut_inputs_frac and requested_types is not None:
+        raise ValueError("cut_inputs_frac and cut_inputs_from_types cannot be combined")
+    if cut_inputs_by not in ("synapses", "attribution"):
+        raise ValueError("cut_inputs_by must be synapses or attribution")
+    if (cut_inputs_by == "attribution") != (attribution_in is not None):
+        raise ValueError("cut_inputs_by=attribution requires attribution_in (and vice versa)")
     base = base if base is not None else m.topology(params)
     if base.n != m.n:
         raise ValueError("base topology is not the connectome's")
@@ -455,16 +478,46 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
     output_sel = np.isin(base.src, hosts) & ~in_circuit[base.dst]
     input_sel = in_circuit[base.dst] & ~in_circuit[base.src]
 
-    def cut_boundary(sel: np.ndarray, fraction: float, zero: bool) -> dict:
+    def cut_boundary(sel: np.ndarray, fraction: float, zero: bool, attribution: bool = False) -> dict:
         """Zero all or a strongest deterministic prefix of one anatomical boundary."""
         edges = np.flatnonzero(sel)
         # MCNS.topology sets quanta to sign * count * QUANTA_PER_SYNAPSE.  `base` is never
         # edited, so this recovers anatomical counts without a per-edge Python lookup.
         counts = np.abs(base.quanta[edges]).astype(np.int64) // QUANTA_PER_SYNAPSE
+        scores = None
+        if attribution:
+            with np.load(attribution_in, allow_pickle=False) as saved:
+                pre, post, score = (saved[key] for key in ("pre_bodyId", "post_bodyId", "score"))
+            if any(a.ndim != 1 for a in (pre, post, score)) or not (len(pre) == len(post) == len(score)):
+                raise ValueError("attribution arrays must be equal-length vectors")
+            if not np.issubdtype(pre.dtype, np.integer) or not np.issubdtype(post.dtype, np.integer):
+                raise ValueError("attribution bodyIds must be integers")
+            if not (np.issubdtype(score.dtype, np.integer) or np.issubdtype(score.dtype, np.floating)):
+                raise ValueError("attribution scores must be real numbers")
+            if not np.all(np.isfinite(score)) or np.any(score < 0):
+                raise ValueError("attribution scores must be finite and nonnegative")
+            integer_scores = np.issubdtype(score.dtype, np.integer)
+            if integer_scores and np.any(score > np.iinfo(np.int64).max):
+                raise ValueError("integer attribution scores must fit int64")
+            try:
+                keys = m.index_of(pre).astype(np.int64) * m.n + m.index_of(post)
+            except KeyError as exc:
+                raise ValueError("attribution contains foreign bodyIds") from exc
+            if len(np.unique(keys)) != len(keys):
+                raise ValueError("attribution contains duplicate pairs")
+            boundary_keys = base.src[edges].astype(np.int64) * m.n + base.dst[edges]
+            pos = np.searchsorted(boundary_keys, keys)
+            if len(keys) and (np.any(pos >= len(edges)) or np.any(boundary_keys[np.minimum(pos, len(edges) - 1)] != keys)):
+                raise ValueError("attribution contains pairs outside this incoming boundary")
+            scores = np.zeros(len(edges), np.int64 if integer_scores else np.float64)
+            scores[pos] = score
         n_cut = len(edges) if zero else math.ceil(Fraction(str(fraction)) * len(edges))
         if n_cut:
             # np.lexsort's final key is primary: stronger first, then post and pre ascending.
-            rank_order = np.lexsort((base.src[edges], base.dst[edges], -counts))
+            rank_keys = (base.src[edges], base.dst[edges], -counts)
+            if scores is not None:
+                rank_keys += (-scores,)
+            rank_order = np.lexsort(rank_keys)
             cut = edges[rank_order[:n_cut]]
             cut_counts = counts[rank_order[:n_cut]]
             quanta[cut] = 0
@@ -479,7 +532,28 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
                 "weakest_cut_synapses": weakest}
 
     outputs = cut_boundary(output_sel, float(cut_outputs_frac), bool(zero_outputs))
-    inputs = cut_boundary(input_sel, float(cut_inputs_frac), bool(zero_inputs))
+    inputs = cut_boundary(input_sel, float(cut_inputs_frac), bool(zero_inputs), cut_inputs_by == "attribution")
+    type_cut_report = None
+    if requested_types is not None:
+        neuron_types = m.neurons["type"].astype(str).to_numpy()
+        source_matches = ~in_circuit[:m.n] & np.isin(neuron_types, requested_types)
+        type_sel = input_sel & source_matches[base.src]
+        cut = np.flatnonzero(type_sel)
+        cut_counts = np.abs(base.quanta[cut]).astype(np.int64) // QUANTA_PER_SYNAPSE
+        quanta[cut] = 0
+        all_input_edges = np.flatnonzero(input_sel)
+        all_input_counts = np.abs(base.quanta[all_input_edges]).astype(np.int64) // QUANTA_PER_SYNAPSE
+        cut_synapses = int(cut_counts.sum())
+        inputs = {"edges": int(len(all_input_edges)), "synapses": int(all_input_counts.sum()),
+                  "cut_edges": int(len(cut)), "cut_synapses": cut_synapses,
+                  "remaining_edges": int(len(all_input_edges) - len(cut)),
+                  "remaining_synapses": int(all_input_counts.sum()) - cut_synapses,
+                  "weakest_cut_synapses": int(cut_counts.min()) if len(cut) else None}
+        matched_types = set(neuron_types[source_matches])
+        missing_types = [t for t in requested_types if t not in matched_types]
+        type_cut_report = {"cut_inputs_from_types": requested_types,
+                           "cut_inputs_from_types_matched_neurons": int(source_matches.sum()),
+                           "cut_inputs_from_types_unmatched": missing_types}
 
     src = base.src
     dst = base.dst
@@ -519,6 +593,13 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
               "inputs_weakest_cut_synapses": inputs["weakest_cut_synapses"],
               "biases": n_bias, "biases_synthetic": n_bias_syn,
               "nonzero_edges": int((topo.quanta != 0).sum())}
+    if cut_inputs_by == "attribution":
+        counts["cut_inputs_by"] = cut_inputs_by
+    if type_cut_report is not None:
+        counts.update(type_cut_report)
+        if type_cut_report["cut_inputs_from_types_unmatched"]:
+            counts["warnings"] = ["requested input source type matched no outside neuron: " + t
+                                  for t in type_cut_report["cut_inputs_from_types_unmatched"]]
     return FullGraph(topo, index_map, int(m.n), counts)
 
 

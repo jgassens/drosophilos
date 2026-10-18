@@ -26,6 +26,7 @@ from ..connectome.embed_image import (adder_cases, build_image, h1_conditions, r
 from ..connectome.embed_netlist import Policy, _Anatomy, exposure_of, place_netlist
 from ..connectome.mcns import MCNS, load_mcns
 from ..lib.adder import build_adder_channel
+from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 
 REGIONS = {
@@ -50,13 +51,23 @@ def region_mask(neurons, region: str) -> np.ndarray:
 
 
 def mapping_meta(region: str, isolation_weight: float, restarts: int, seed: int,
-                 config_f: bool = True, width: int = 4) -> dict:
+                 config_f: bool = True, width: int = 4, latch_feedback: str = "autapse") -> dict:
     """Top-level save_mapping contract shared with the whole-brain bench."""
-    return {"builder": "build_adder_channel", "width": int(width), "ordered": True,
+    if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
+        raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
+    if latch_feedback != "autapse" and not config_f:
+        raise ValueError(f"{latch_feedback} latch_feedback requires configuration F")
+    meta = {"builder": "build_adder_channel", "width": int(width), "ordered": True,
             "watchdog_hops": 100, "storage": "flipflop", "rate_robust": bool(config_f),
             "experimental_autapse": bool(config_f), "ordered_xor_oneshot": bool(config_f),
+            "latch_feedback": str(latch_feedback),
             "k_max": K_MAX, "isolation_weight": float(isolation_weight), "region": str(region),
             "restarts": int(restarts), "seed": int(seed)}
+    if latch_feedback == "dale_private":
+        meta["dale_feedback_version"] = DALE_FEEDBACK_VERSION
+    elif latch_feedback == "dale_biased":
+        meta["dale_biased_version"] = DALE_BIASED_VERSION
+    return meta
 
 
 def stats(values) -> dict:
@@ -103,7 +114,7 @@ def _counts(series, top: int | None = None) -> dict:
 
 def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, restarts: int = 4,
             time_limit_s: float = 600.0, seed: int = 0, conditions: str = "AB", config_f: bool = True,
-            mapping_path: Path | None = None, width: int = 4) -> dict:
+            mapping_path: Path | None = None, width: int = 4, latch_feedback: str = "autapse") -> dict:
     """One regional placement and isolated A/B runs. Width is configurable for synthetic tests."""
     if not conditions or set(conditions) - set("AB"):
         raise ValueError("conditions must select A and/or B")
@@ -112,9 +123,15 @@ def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, re
     mask = region_mask(m.neurons, region)
     if not mask.any():
         raise ValueError(f"region {region!r} contains no neurons")
-    meta = mapping_meta(region, isolation_weight, restarts, seed, config_f, width)
+    meta = mapping_meta(region, isolation_weight, restarts, seed, config_f, width, latch_feedback)
+    feedback_version = (
+        {"dale_feedback_version": meta["dale_feedback_version"]}
+        if latch_feedback == "dale_private" else
+        {"dale_biased_version": meta["dale_biased_version"]}
+        if latch_feedback == "dale_biased" else {})
     ch = build_adder_channel(Params(), width, ordered=True, watchdog_hops=100, storage="flipflop",
-                             rate_robust=config_f, experimental_autapse=config_f, ordered_xor_oneshot=config_f)
+                             rate_robust=config_f, experimental_autapse=config_f, ordered_xor_oneshot=config_f,
+                             latch_feedback=latch_feedback, **feedback_version)
     net = ch.net
     policy = Policy(k_max=K_MAX)
     t0 = time.monotonic()
@@ -240,6 +257,11 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--conditions", default="AB")
     ap.add_argument("--no-config-f", action="store_true")
+    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private", "dale_biased"), default="autapse",
+                    help=("dale_private and dale_biased are EXPERIMENTAL and NOT autapse replacements: "
+                          "dale_private fails the three-sigma corners and reload; dale_biased passes the "
+                          "512-corner and reload bar (0/0/0, 118/128) but FAILS the separate 44-step "
+                          "rate floor (corner minimum interval 33 steps)"))
     ap.add_argument("--summarize", nargs="+", metavar="JSON")
     ap.add_argument("--table-out", type=Path)
     a = ap.parse_args()
@@ -254,9 +276,11 @@ def main() -> None:
         return
     if a.out is None or a.mapping_out is None:
         ap.error("placement requires --out and --mapping-out")
+    if a.latch_feedback != "autapse" and a.no_config_f:
+        ap.error(f"--latch-feedback {a.latch_feedback} requires configuration F")
     m = load_mcns(a.data_dir) if a.data_dir is not None else load_mcns()
     out = run_one(m, a.region, a.isolation_weight, a.cases, a.restarts, a.time_limit, a.seed,
-                  a.conditions, not a.no_config_f, a.mapping_out)
+                  a.conditions, not a.no_config_f, a.mapping_out, latch_feedback=a.latch_feedback)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1))
     print(f"wrote {a.out} and {a.mapping_out}")

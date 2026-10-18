@@ -395,6 +395,92 @@ def test_full_graph_partial_boundary_cuts_are_strongest_first_and_leave_designed
         full_graph_topology(m2, params, img, cut_inputs_frac=1.1, base=base)
 
 
+def test_full_graph_cuts_all_inputs_from_requested_source_types_only():
+    """A type cut is an all-or-nothing synthetic input boundary cut, never an image edit."""
+    import hashlib
+    import json
+
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.connectome.mcns import MCNS
+
+    net, _, ids, policy, m, idx, pl = _placed_latch_relay()
+    # Remove a designed edge so build_image has to restore it as a real Profile 3 edge.
+    keep = ~((m.pre == idx["I"]) & (m.post == idx["E"]))
+    m = MCNS(m.neurons, m.pre[keep], m.post[keep], m.count[keep], min_syn=1)
+    hosts = set(pl.mapping.values())
+    base = m.topology(Params())
+    incoming = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre not in hosts and post in hosts]
+    assert len(incoming) > 1
+    cut_pre = int(base.src[incoming[0]])
+    keep_pre = next(int(base.src[j]) for j in incoming if int(base.src[j]) != cut_pre)
+    other_pre = next(int(base.src[j]) for j in incoming
+                     if int(base.src[j]) not in (cut_pre, keep_pre))
+    neurons = m.neurons.copy()
+    neurons.loc[:, "type"] = "other"
+    neurons.loc[cut_pre, "type"] = "cut_me"
+    neurons.loc[keep_pre, "type"] = "keep_me"
+    neurons.loc[other_pre, "type"] = "also_cut"
+    m2 = MCNS(neurons, m.pre, m.post, m.count, min_syn=1)
+    image = build_image(net, m2, pl, policy)
+    assert image.profile3 and any(e.src == ids["edge_inh"] and e.dst == ids["edge"] for e in image.profile3)
+    baseline = full_graph_topology(m2, Params(), image)
+    # Frozen from full_graph_topology loaded from commit 7b4ae68 via git show,
+    # before cut_inputs_from_types existed, on this same fixture. Hash dtype strings
+    # and raw array bytes in this order, followed by the sorted compact JSON counts.
+    digest = hashlib.sha256()
+    for field in ("src", "dst", "quanta", "delay"):
+        array = getattr(baseline.topology, field)
+        digest.update(array.dtype.str.encode("ascii"))
+        digest.update(array.tobytes())
+    digest.update(json.dumps(baseline.counts, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+    assert digest.hexdigest() == "2961c74335ff19dc692000f8fa0c0ba08c7d448c07fff6f7e6b8996b39a6073e"
+
+    def weights(graph):
+        topo = graph.topology
+        pairs = list(zip(topo.src, topo.dst))
+        assert len(set(pairs)) == topo.nnz  # this fixture has one edge per pair
+        return dict(zip(pairs, topo.quanta))
+
+    # Adding Profile 3 edges re-sorts the full topology; anatomical positions no
+    # longer identify the same edges. Compare all full-graph weights by endpoints.
+    plain_weights = weights(baseline)
+    incoming = {(int(base.src[j]), int(base.dst[j])) for j in incoming}
+    anatomy = {(int(s), int(d)): abs(int(q)) // QUANTA_PER_SYNAPSE
+               for s, d, q in zip(base.src, base.dst, base.quanta)}
+    cut = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",))
+    cut_weights = weights(cut)
+    expected = {pair for pair in incoming if pair[0] == cut_pre}
+    assert expected
+    assert cut_weights == {pair: 0 if pair in expected else q for pair, q in plain_weights.items()}
+    assert cut.counts["cut_inputs_from_types"] == ["cut_me"]
+    assert cut.counts["cut_inputs_from_types_matched_neurons"] == 1
+    assert cut.counts["inputs_cut_edges"] == len(expected)
+    assert cut.counts["inputs_cut_synapses"] == sum(anatomy[pair] for pair in expected)
+    assert cut.counts["inputs_remaining_edges"] == len(incoming) - len(expected)
+    remaining = incoming - expected
+    assert cut.counts["inputs_remaining_synapses"] == sum(anatomy[pair] for pair in remaining)
+    assert cut.counts["inputs_remaining_edges"] == len(remaining)
+    # All host outputs remain unchanged by an input-only cut.
+    outgoing = [(pre, post) for pre, post in zip(base.src, base.dst) if pre in hosts and post not in hosts]
+    assert all(cut_weights[pair] == plain_weights[pair] for pair in outgoing)
+    multi = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me", "also_cut"))
+    multi_expected = {pair for pair in incoming if pair[0] in (cut_pre, other_pre)}
+    assert weights(multi) == {pair: 0 if pair in multi_expected else q for pair, q in plain_weights.items()}
+    # Designed host-to-host and Profile 3 image edges are not anatomical input-boundary edges.
+    for s, d, q in zip(net.src, net.dst, net.quanta):
+        pair = (baseline.index_map[s], baseline.index_map[d])
+        assert cut_weights[pair] == plain_weights[pair] == q
+
+    unknown = full_graph_topology(m2, Params(), image, cut_inputs_from_types=("not_a_type",))
+    assert np.array_equal(unknown.topology.quanta, baseline.topology.quanta)
+    assert unknown.counts["inputs_cut_edges"] == unknown.counts["inputs_cut_synapses"] == 0
+    assert unknown.counts["warnings"] == ["requested input source type matched no outside neuron: not_a_type"]
+    with pytest.raises(ValueError, match="cannot be combined"):
+        full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",), cut_inputs_frac=.1)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        full_graph_topology(m2, Params(), image, cut_inputs_from_types=("cut_me",), zero_inputs=True)
+
+
 def test_full_graph_cut_uses_exact_decimal_ceil():
     """0.07 of exactly 100 boundary edges cuts seven, not eight from float roundoff."""
     from drosophilos.connectome.embed_image import full_graph_topology
@@ -416,6 +502,92 @@ def test_full_graph_cut_uses_exact_decimal_ceil():
     fg = full_graph_topology(m2, Params(), img, cut_outputs_frac=.07)
     assert fg.counts["outputs_edges"] == 100
     assert fg.counts["outputs_cut_edges"] == 7
+
+
+def test_full_graph_attribution_cuts_scores_then_counts_then_post_pre(tmp_path):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    img = build_image(net, m, pl, policy)
+    base = m.topology(Params())
+    plain = full_graph_topology(m, Params(), img, base=base)
+    hosts = set(pl.mapping.values())
+    boundary = [j for j, (pre, post) in enumerate(zip(base.src, base.dst)) if pre not in hosts and post in hosts]
+    assert len(boundary) > 10
+    counts = {j: abs(int(base.quanta[j])) // QUANTA_PER_SYNAPSE for j in boundary}
+    scores = {j: i % 3 for i, j in enumerate(boundary)}
+    # A weak edge outranks every unscored strong edge. Equal scores include count AND pair ties.
+    scores[min(boundary, key=counts.get)] = 10
+    assert len({(scores[j], counts[j]) for j in boundary}) < len(boundary)
+    ranked = sorted(boundary, key=lambda j: (-scores[j], -counts[j], int(base.dst[j]), int(base.src[j])))
+    bodies = m.neurons["bodyId"].to_numpy()
+    path = tmp_path / "attr.npz"
+    shuffled = np.random.default_rng(0).permutation(boundary)
+    np.savez_compressed(path, pre_bodyId=bodies[base.src[shuffled]], post_bodyId=bodies[base.dst[shuffled]],
+                        score=[scores[j] for j in shuffled])
+    for fraction in (0, .05, .1, .2, .3, .7, 1):
+        fg = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                                 attribution_in=path, cut_inputs_frac=fraction)
+        n_cut = int(np.ceil(fraction * len(boundary)))
+        cut = ranked[:n_cut]
+        assert {j for j in boundary if fg.topology.quanta[j] == 0} == set(cut)
+        assert fg.counts["inputs_cut_edges"] == n_cut
+        assert fg.counts["inputs_cut_synapses"] == sum(counts[j] for j in cut)
+        assert fg.counts["inputs_remaining_synapses"] == sum(counts[j] for j in ranked[n_cut:])
+        assert fg.counts["inputs_weakest_cut_synapses"] == (min(counts[j] for j in cut) if cut else None)
+        if fraction == 0:
+            assert np.array_equal(fg.topology.quanta, plain.topology.quanta)
+        if fraction == 1:
+            zero = full_graph_topology(m, Params(), img, zero_inputs=True, base=base)
+            assert np.array_equal(fg.topology.quanta, zero.topology.quanta)
+            assert fg.counts["inputs_cut_synapses"] == zero.counts["inputs_cut_synapses"]
+    # Explicit legacy ranking has exactly the original topology arrays and count JSON.
+    legacy = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="synapses")
+    assert legacy.counts == plain.counts and "cut_inputs_by" not in plain.counts
+    for name in ("src", "dst", "quanta", "delay", "indptr"):
+        assert getattr(legacy.topology, name).tobytes() == getattr(plain.topology, name).tobytes()
+    # Empty scores mean zero throughout, reducing exactly to the old synapse ordering.
+    np.savez_compressed(path, pre_bodyId=np.empty(0, np.int64), post_bodyId=np.empty(0, np.int64),
+                        score=np.empty(0, np.int64))
+    zero_scores = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                                     attribution_in=path, cut_inputs_frac=.3)
+    synapses = full_graph_topology(m, Params(), img, base=base, cut_inputs_frac=.3)
+    assert zero_scores.topology.quanta.tobytes() == synapses.topology.quanta.tobytes()
+    # Adjacent integer scores above float64's exact range must not collapse into a tie.
+    weak = min(boundary, key=counts.get)
+    strong = max((j for j in boundary if j != weak), key=counts.get)
+    assert counts[weak] < counts[strong]
+    np.savez_compressed(path, pre_bodyId=bodies[base.src[[strong, weak]]],
+                        post_bodyId=bodies[base.dst[[strong, weak]]],
+                        score=np.array([2**53, 2**53 + 1], np.int64))
+    exact = full_graph_topology(m, Params(), img, base=base, cut_inputs_by="attribution",
+                               attribution_in=path, cut_inputs_frac=.0001)
+    assert exact.topology.quanta[weak] == 0 and exact.topology.quanta[strong] != 0
+
+
+@pytest.mark.parametrize("bad", ["negative", "nan", "duplicate", "foreign", "host_host"])
+def test_full_graph_rejects_invalid_attribution(tmp_path, bad):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, _, _, policy, m, _, pl = _placed_latch_relay()
+    image = build_image(net, m, pl, policy)
+    hosts = set(pl.mapping.values())
+    j = next(i for i, (a, b) in enumerate(zip(m.pre, m.post)) if a not in hosts and b in hosts)
+    pre, post = int(m.pre[j]), int(m.post[j])
+    bodies = m.neurons["bodyId"].to_numpy()
+    pre_body, post_body, score = [bodies[pre]], [bodies[post]], [1.0]
+    if bad in ("negative", "nan"):
+        score = [-1 if bad == "negative" else np.nan]
+    elif bad == "duplicate":
+        pre_body *= 2; post_body *= 2; score *= 2
+    elif bad == "foreign":
+        pre_body = [999_999]
+    elif bad == "host_host":
+        pre_body = [bodies[min(hosts)]]
+    path = tmp_path / "bad.npz"
+    np.savez_compressed(path, pre_bodyId=pre_body, post_bodyId=post_body, score=score)
+    with pytest.raises(ValueError, match="attribution"):
+        full_graph_topology(m, Params(), image, cut_inputs_by="attribution", attribution_in=path, cut_inputs_frac=.1)
 
 
 def test_latch_ignites_and_holds_inside_the_synthetic_full_graph():
