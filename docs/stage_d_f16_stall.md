@@ -652,3 +652,22 @@ Limits: 2 passes per copy (calibration-length runs, not 1,000-pass campaigns); 1
 | 114 | RTX 3090 fp32 | G2 4019504 | 16,000/16,000 | 0 | 0 | 0 | 0 | 0/0 | 275.8 | 22,850 |
 
 Totals: 400 noisy copies × 20 passes, 64,000/64,000 outputs correct, 0 frozen copies. One-sided 95% upper bound per output `1-0.05^(1/64000) = 4.68e-5`; per copy (20-pass) `1-0.05^(1/400) = 0.746%`. Limits: 20 passes, not 1,000; three of four seeds ran fp32.
+
+### 100-pass campaigns (2026-10-16)
+
+`render2.c` perspective campaigns, configuration F + `master_ignition` v2 + `operand_xor_oneshot` v3 + `f_width16_experimental`, 126,523 neurons / 260,114 synapses, built at commit `826b9fd`; mix B, 100 copies per noisy seed, 100 passes × 8 outputs = 800 outputs per copy. Flags: `--rate-robust --experimental-autapse --ordered-xor-oneshot --f-width16-experimental --master-ignition --operand-xor-oneshot`.
+
+| Seed | Device | Juno/G2 job | Outputs ok | Wrong | Missing | Faults | Timeouts | Refusals/retries | Neural s | Wall s |
+|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|
+| 110 | H200 fp64 | Juno 457859 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1274.2 | 39,887 |
+| 115 | H200 fp64 | Juno 457860 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1276.9 | 39,845 |
+| 116 | H200 fp64 | Juno 459506 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1271.6 | 39,918 |
+| 117 | RTX 3090 fp32 | G2 4019909 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1272.6 | 105,247 |
+| 118 | RTX 3090 fp32 | G2 4019910 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1280.0 | 105,872 |
+| 119 | RTX 3090 fp32 | G2 4019911 | 80,000/80,000 | 0 | 0 | 0 | 0 | 0/0 | 1278.7 | 105,402 |
+
+Totals: 600 noisy copies × 100 passes, 480,000/480,000 outputs correct, 0 wrong, 0 missing, 0 extra, 0 faults, 0 timeouts, 0 frozen copies. One-sided 95% upper bound per output `1-0.05^(1/480000) = 6.24e-6`; per 100-pass copy `1-0.05^(1/600) = 0.498%`. Pooled with the 2-pass and 20-pass both-repairs campaigns (19,200 + 64,000 + 480,000 = 563,200 outputs, one resent watchdog timeout and no wrong outputs), the per-output bound is `5.32e-6`.
+
+Seed 116 first ran as G2 4019908 (RTX 3090 fp32), which was preempted by the gpu-preempt partition after 28.6 h at 79,348/80,000 outputs with 0 faults and 1 resent watchdog timeout; kernel_campaign has no checkpointing, so it was rerun from scratch on Juno as 459506 and only the Juno record is counted.
+
+Limits: 100 passes, not 1,000; three of six seeds ran fp32 on RTX 3090; one seed per job, no checkpointing.
