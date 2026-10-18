@@ -20,6 +20,7 @@ cd ~/drosophilos
 # commit). data/ and runs/ are symlinks back into ~/drosophilos, so --out data/... lands there;
 # an --out under any other directory is lost with the worktree.
 if [ -n "${DROSO_SHA:-}" ]; then
+  : "${SLURM_JOB_ID:?SLURM_JOB_ID is empty}"
   wt=~/drosophilos-jobs/$SLURM_JOB_ID
   mkdir -p ~/drosophilos-jobs
   # Retry the transient cluster filesystem getcwd failure seen on 2026-09-30.
@@ -29,8 +30,8 @@ if [ -n "${DROSO_SHA:-}" ]; then
       echo "job $SLURM_JOB_ID: could not create worktree for $DROSO_SHA" >&2
       exit 1
     fi
-    rm -rf "$wt" || true
-    cd ~/drosophilos && git worktree prune || true
+    git worktree remove --force "$wt" 2>/dev/null || true
+    rm -rf "$wt"
     sleep 10
   done
   trap 'cd ~/drosophilos && git worktree remove --force "$wt"' EXIT
@@ -42,4 +43,4 @@ source ~/miniforge3/etc/profile.d/conda.sh
 conda activate drosophilos
 echo "job $SLURM_JOB_ID on $(hostname), commit $(git rev-parse --short HEAD), $(date -Is)"
 nvidia-smi -L || true
-exec python -m "$@"
+python -m "$@"

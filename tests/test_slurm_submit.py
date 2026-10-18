@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -49,7 +50,7 @@ def repo(tmp_path):
         FAKE_SSH_COUNTER=str(counter),
     )
 
-    def run(behavior, *options, combined=False):
+    def run(behavior, *options, combined=False, module_args=None):
         fake.write_text(
             '#!/bin/bash\nset -eu\n'
             'printf "%s\\n" "$@" >> "$FAKE_SSH_LOG"\n'
@@ -60,8 +61,10 @@ def repo(tmp_path):
             + behavior + "\n"
         )
         fake.chmod(0o755)
+        if module_args is None:
+            module_args = ["--device", "cuda"]
         return subprocess.run(
-            ["/bin/bash", str(script), *options, "--", MODULE, "--device", "cuda"],
+            ["/bin/bash", str(script), *options, "--", MODULE, *module_args],
             cwd=root,
             env=env,
             text=True,
@@ -135,7 +138,7 @@ def test_dry_run_does_not_push_or_ssh(repo):
     assert not repo.log.exists()
     assert git(repo.origin, "show-ref", env=repo.env, check=False).returncode == 1
     assert f"dry run: would push HEAD ({repo.head}) to origin" in result.stdout
-    assert "dry run: " + repo.env["DROSO_SSH"] + " juno cd ~/drosophilos" in result.stdout
+    assert "dry run: " + repo.env["DROSO_SSH"] + " -o ConnectTimeout=20 juno cd ~/drosophilos" in result.stdout
     assert "&& echo 'droso-submit: sbatch' && sbatch" in result.stdout
     assert "slurm/juno-cpu.sbatch" in result.stdout
 
@@ -144,15 +147,76 @@ def test_dry_run_does_not_push_or_ssh(repo):
 def test_remote_command_contains_marker_before_sbatch(repo, options):
     result = repo.run("echo 'droso-submit: sbatch'\necho 'Submitted batch job 123'", *options)
     assert result.returncode == 0
-    cluster, remote = repo.log.read_text().splitlines()
+    ssh_args = repo.log.read_text().splitlines()
+    cluster, remote = ssh_args[-2:]
+    assert ssh_args[:-2] == ["-o", "ConnectTimeout=20"]
+    assert "ServerAliveInterval" not in " ".join(ssh_args)
     assert cluster == "juno"
     assert "git fetch -q origin" in remote
     assert f"git checkout -q --detach {repo.head}" in remote
     assert "mkdir -p runs && echo 'droso-submit: sbatch' && sbatch " in remote
-    assert f"--export=ALL,DROSO_SHA={repo.head}" in remote
+    assert f"--export=ALL,DROSO_SHA={repo.head}" in shlex.split(remote)
     assert f"slurm/juno.sbatch {MODULE} --device cuda" in remote
     for option in options:
         assert option in remote
+
+
+@pytest.mark.parametrize("script", ["juno", "juno cpu (test)"])
+@pytest.mark.parametrize("options", [[], ["--job-name=my job"]])
+def test_remote_command_quotes_arguments(repo, script, options):
+    result = repo.run(
+        "echo 'droso-submit: sbatch'\necho 'Submitted batch job 123'",
+        "--script", script, *options,
+        module_args=["--label", "a sample (trial)"],
+    )
+    assert result.returncode == 0
+    remote = repo.log.read_text().splitlines()[-1]
+    if options:
+        assert r"--job-name=my\ job" in remote
+    assert r"a\ sample\ \(trial\)" in remote
+    home = repo.root.parent / "remote-home"
+    (home / "drosophilos").mkdir(parents=True)
+    harness = (
+        "git() { :; }\n"
+        "sbatch() { printf 'sbatch arg: %s\\n' \"$@\"; }\n"
+        + remote
+    )
+    evaluated = subprocess.run(
+        ["/bin/bash", "-c", harness],
+        env={**repo.env, "HOME": str(home)},
+        text=True, capture_output=True,
+    )
+    assert evaluated.returncode == 0, evaluated.stderr
+    assert evaluated.stdout.splitlines() == [
+        MARKER,
+        f"sbatch arg: --export=ALL,DROSO_SHA={repo.head}",
+        *(f"sbatch arg: {option}" for option in options),
+        f"sbatch arg: slurm/{script}.sbatch",
+        f"sbatch arg: {MODULE}",
+        "sbatch arg: --label",
+        "sbatch arg: a sample (trial)",
+    ]
+
+
+@pytest.mark.parametrize("setting, value, message", [
+    ("DROSO_SUBMIT_ATTEMPTS", "0", "positive integer"),
+    ("DROSO_SUBMIT_ATTEMPTS", "-1", "positive integer"),
+    ("DROSO_SUBMIT_ATTEMPTS", "invalid", "positive integer"),
+    ("DROSO_SUBMIT_ATTEMPTS", "1.5", "positive integer"),
+    ("DROSO_SUBMIT_RETRY_SLEEP", "-1", "non-negative integer"),
+    ("DROSO_SUBMIT_RETRY_SLEEP", "invalid", "non-negative integer"),
+    ("DROSO_SUBMIT_RETRY_SLEEP", "0.5", "non-negative integer"),
+])
+def test_invalid_retry_settings_do_not_push_or_ssh(repo, setting, value, message):
+    repo.env[setting] = value
+    result = repo.run("exit 99", combined=True)
+    assert result.returncode != 0
+    assert repo.calls() == 0
+    assert git(repo.origin, "show-ref", env=repo.env, check=False).returncode == 1
+    assert f"{setting} must be a {message}" in result.stdout
+    assert result.stdout.splitlines()[-1] == (
+        f"submit.sh: NOT SUBMITTED: juno slurm/juno.sbatch -- {MODULE} --device cuda"
+    )
 
 
 def test_marker_with_large_output_never_retries(repo):
@@ -214,6 +278,115 @@ def test_dry_run_checks_locally(repo, failure):
     assert repo.calls() == 0
     assert git(repo.origin, "show-ref", env=repo.env, check=False).returncode == 1
     assert "NOT SUBMITTED" in result.stdout.splitlines()[-1]
+
+
+@pytest.fixture
+def sbatch_job(tmp_path):
+    real_git = shutil.which("git")
+    env = os.environ.copy()
+    env.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    home = tmp_path / "home"
+    root = home / "drosophilos"
+    root.mkdir(parents=True)
+    git(root, "init", env=env)
+    git(root, "config", "user.name", "Submit test", env=env)
+    git(root, "config", "user.email", "submit@example.invalid", env=env)
+    git(root, "config", "commit.gpgsign", "false", env=env)
+    (root / "README").write_text("Test worktree\n")
+    git(root, "add", "README", env=env)
+    git(root, "commit", "-m", "Initial commit", env=env)
+    sha = git(root, "rev-parse", "HEAD", env=env).stdout.strip()
+    conda = home / "miniforge3/etc/profile.d/conda.sh"
+    conda.parent.mkdir(parents=True)
+    conda.write_text("conda() { :; }\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    counter = tmp_path / "worktree.count"
+    wrappers = {
+        "git": (
+            "#!/bin/bash\nset -eu\n"
+            'if [ "${1:-}" = worktree ] && [ "${2:-}" = add ]; then\n'
+            '  count=0\n'
+            '  if [ -f "$FAKE_GIT_COUNTER" ]; then read -r count < "$FAKE_GIT_COUNTER"; fi\n'
+            '  count=$((count + 1))\n'
+            '  printf "%s\\n" "$count" > "$FAKE_GIT_COUNTER"\n'
+            '  if [ "$count" -eq 1 ] || [ "$FAKE_GIT_ALWAYS_FAIL" -eq 1 ]; then\n'
+            "    echo 'fatal: Unable to read current working directory: No such file or directory' >&2\n"
+            '    exit 128\n'
+            '  fi\n'
+            'fi\n'
+            'exec "$REAL_GIT" "$@"\n'
+        ),
+        "nvidia-smi": "#!/bin/bash\nexit 0\n",
+        "sleep": "#!/bin/bash\nexit 0\n",
+        "python": (
+            "#!/bin/bash\n"
+            'printf "python arg: %s\\n" "$@"\n'
+            'printf "python cwd: %s\\n" "$PWD"\n'
+            'exit 0\n'
+        ),
+    }
+    for name, content in wrappers.items():
+        wrapper = bin_dir / name
+        wrapper.write_text(content)
+        wrapper.chmod(0o755)
+    env.update(
+        HOME=str(home),
+        PATH=str(bin_dir) + os.pathsep + env["PATH"],
+        SLURM_JOB_ID="77",
+        DROSO_SHA=sha,
+        REAL_GIT=real_git,
+        FAKE_GIT_COUNTER=str(counter),
+        FAKE_GIT_ALWAYS_FAIL="0",
+    )
+
+    def run(script):
+        return subprocess.run(
+            ["/bin/bash", str(script), "drosophilos.dummy"],
+            cwd=home, env=env, text=True, capture_output=True,
+        )
+
+    return SimpleNamespace(
+        home=home, root=root, env=env, counter=counter, run=run,
+        wt=home / "drosophilos-jobs/77",
+    )
+
+
+@pytest.mark.parametrize("script", sorted(SLURM.glob("*.sbatch")))
+def test_sbatch_worktree_retries_and_cleans_up(sbatch_job, script):
+    result = sbatch_job.run(script)
+    assert result.returncode == 0, result.stderr
+    assert sbatch_job.counter.read_text().strip() == "2"
+    assert "Unable to read current working directory" in result.stderr
+    assert "python arg: -m\npython arg: drosophilos.dummy\n" in result.stdout
+    assert f"python cwd: {sbatch_job.wt}" in result.stdout
+    assert not sbatch_job.wt.exists()
+    registered = git(
+        sbatch_job.root, "worktree", "list", "--porcelain", env=sbatch_job.env
+    ).stdout
+    assert str(sbatch_job.wt) not in registered
+
+
+@pytest.mark.parametrize("script", sorted(SLURM.glob("*.sbatch")))
+def test_sbatch_worktree_attempts_exhausted(sbatch_job, script):
+    sbatch_job.env["FAKE_GIT_ALWAYS_FAIL"] = "1"
+    result = sbatch_job.run(script)
+    assert result.returncode == 1
+    assert sbatch_job.counter.read_text().strip() == "3"
+    assert "could not create worktree" in result.stderr
+    assert "python arg:" not in result.stdout
+
+
+@pytest.mark.parametrize("script", sorted(SLURM.glob("*.sbatch")))
+def test_sbatch_empty_job_id_preserves_jobs_directory(sbatch_job, script):
+    sentinel = sbatch_job.home / "drosophilos-jobs/sentinel"
+    sentinel.mkdir(parents=True)
+    sbatch_job.env["SLURM_JOB_ID"] = ""
+    result = sbatch_job.run(script)
+    assert result.returncode != 0
+    assert "SLURM_JOB_ID is empty" in result.stderr
+    assert sentinel.is_dir()
+    assert not sbatch_job.counter.exists()
 
 
 @pytest.mark.parametrize("script", sorted(SLURM.glob("*.sbatch")) + [SLURM / "submit.sh"])
