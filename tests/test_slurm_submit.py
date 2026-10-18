@@ -258,6 +258,91 @@ def test_job_id_confirms_success_even_if_ssh_fails(repo):
     assert repo.calls() == 1
     assert result.stdout.splitlines()[-1] == "Submitted batch job 123"
     assert "connection closed" in result.stdout
+
+
+SBATCH_SCRIPTS = ["juno.sbatch", "g2.sbatch", "juno-cpu.sbatch"]
+
+
+@pytest.fixture
+def sbatch_exit_job(tmp_path):
+    home = tmp_path / "home"
+    checkout = home / "drosophilos"
+    checkout.mkdir(parents=True)
+    env = os.environ.copy()
+    env.update(GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    git(checkout, "init", env=env)
+    git(checkout, "config", "user.name", "Sbatch test", env=env)
+    git(checkout, "config", "user.email", "sbatch@example.invalid", env=env)
+    (checkout / "data").mkdir()
+    (checkout / "runs").mkdir()
+    (checkout / "tracked").write_text("test\n")
+    git(checkout, "add", ".", env=env)
+    git(checkout, "commit", "-m", "test", env=env)
+    conda = home / "miniforge3/etc/profile.d/conda.sh"
+    conda.parent.mkdir(parents=True)
+    conda.write_text("conda() { :; }\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_git = bin_dir / "git"
+    fake_git.write_text(
+        "#!/bin/bash\n"
+        'if [ "${FAIL_WORKTREE_REMOVE:-0}" = 1 ] && [ "$1" = worktree ] && [ "$2" = remove ]; then exit 1; fi\n'
+        f'exec "{shutil.which("git")}" "$@"\n'
+    )
+    fake_git.chmod(0o755)
+    fake_python = bin_dir / "python"
+    fake_python.write_text('#!/bin/bash\nexit "${FAKE_PYTHON_STATUS:-0}"\n')
+    fake_python.chmod(0o755)
+    fake_sleep = bin_dir / "sleep"
+    fake_sleep.write_text("#!/bin/bash\nexit 0\n")
+    fake_sleep.chmod(0o755)
+    return SimpleNamespace(home=home, checkout=checkout, bin_dir=bin_dir, env=env)
+
+
+def run_sbatch_job(sbatch_exit_job, script, *, python_status=0, fail_remove=False):
+    job_id = "987654"
+    env = {
+        **sbatch_exit_job.env,
+        "HOME": str(sbatch_exit_job.home),
+        "PATH": f"{sbatch_exit_job.bin_dir}:{os.environ['PATH']}",
+        "DROSO_SHA": git(sbatch_exit_job.checkout, "rev-parse", "HEAD", env=sbatch_exit_job.env).stdout.strip(),
+        "SLURM_JOB_ID": job_id,
+        "FAKE_PYTHON_STATUS": str(python_status),
+        "FAIL_WORKTREE_REMOVE": "1" if fail_remove else "0",
+    }
+    result = subprocess.run(
+        ["/bin/bash", str(SLURM / script), "example.module"],
+        cwd=sbatch_exit_job.checkout,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    return result, sbatch_exit_job.home / "drosophilos-jobs" / job_id
+
+
+@pytest.mark.parametrize("script",SBATCH_SCRIPTS)
+def test_sbatch_cleanup_failure_preserves_success(sbatch_exit_job, script):
+    result, wt = run_sbatch_job(sbatch_exit_job, script, fail_remove=True)
+    assert result.returncode == 0, result.stderr
+    assert wt.is_dir()
+
+
+@pytest.mark.parametrize("script",SBATCH_SCRIPTS)
+def test_sbatch_python_failure_is_preserved_and_worktree_removed(sbatch_exit_job, script):
+    result, wt = run_sbatch_job(sbatch_exit_job, script, python_status=3)
+    assert result.returncode == 3
+    assert not wt.exists()
+
+
+@pytest.mark.parametrize("script",SBATCH_SCRIPTS)
+def test_sbatch_force_clears_stale_worktree_registration(sbatch_exit_job, script):
+    stale = sbatch_exit_job.home / "drosophilos-jobs" / "987654"
+    stale.parent.mkdir()
+    git(sbatch_exit_job.checkout, "worktree", "add", "--detach", str(stale), "HEAD", env=sbatch_exit_job.env)
+    shutil.rmtree(stale)
+    result, wt = run_sbatch_job(sbatch_exit_job, script)
+    assert result.returncode == 0, result.stderr
+    assert not wt.exists()
     assert MARKER not in result.stdout
 
 

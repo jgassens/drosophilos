@@ -21,16 +21,16 @@ if [ -n "${DROSO_SHA:-}" ]; then
   mkdir -p ~/drosophilos-jobs
   # Retry the transient cluster filesystem getcwd failure seen on 2026-09-30.
   for attempt in 1 2 3; do
-    if cd ~/drosophilos && git worktree add -q --detach "$wt" "$DROSO_SHA"; then break; fi
+    if cd ~/drosophilos && git worktree add -q -f --detach "$wt" "$DROSO_SHA"; then break; fi # -f clears stale missing registrations
     if [ "$attempt" -eq 3 ]; then
       echo "job $SLURM_JOB_ID: could not create worktree for $DROSO_SHA" >&2
       exit 1
     fi
     git worktree remove --force "$wt" 2>/dev/null || true
-    rm -rf "$wt"
+    rm -rf "$wt" || true
     sleep 10
   done
-  trap 'cd ~/drosophilos && git worktree remove --force "$wt"' EXIT
+  trap 'cd ~/drosophilos && git worktree remove --force "$wt" || true' EXIT
   ln -s ~/drosophilos/data "$wt/data"
   ln -s ~/drosophilos/runs "$wt/runs"
   cd "$wt"
