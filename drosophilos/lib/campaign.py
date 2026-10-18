@@ -16,6 +16,10 @@ Error classes:
 from __future__ import annotations
 
 import json
+import os
+import signal
+import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,6 +33,113 @@ from ..sim.model import Params
 from ..sim.trace import SpikeTrace
 from ..protocol.handshake import Channel
 from ..protocol.token import rails_for
+
+
+CHECKPOINT_EXIT = 75
+CHECKPOINT_VERSION = 1
+
+
+def atomic_write(path, write) -> None:
+    """Publish a complete file, including durability of its directory entry on POSIX."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            write(stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class CampaignCheckpoint:
+    """Trusted local checkpoint files (torch/pickle), written only at block boundaries.
+
+    Signal handlers only set a flag. In particular they never serialize an in-flight
+    simulator step or interrupt an atomic write. The observer's pending buffer is saved
+    without flushing it, preserving host scheduling on the fast backend.
+    """
+
+    def __init__(self, path, every_s=1800):
+        self.path = Path(path)
+        self.every_s = every_s
+        self.last_write = time.monotonic()
+        self.signal_received = None
+        self.resume_state = None
+        self.saved = None
+        self.fingerprint = None
+        self.rng = None
+        self.args = None
+        self._handlers = {}
+
+    def __enter__(self):
+        for sig in (signal.SIGTERM, signal.SIGUSR1):
+            self._handlers[sig] = signal.signal(sig, self._signal)
+        return self
+
+    def __exit__(self, *exc):
+        for sig, handler in self._handlers.items():
+            signal.signal(sig, handler)
+
+    def _signal(self, sig, frame):
+        self.signal_received = sig
+
+    def configure(self, fingerprint, args, rng):
+        self.fingerprint, self.args, self.rng = fingerprint, dict(args), rng
+        if self.path.exists():
+            # Only load checkpoints from a trusted source: this includes Python objects.
+            self.saved = torch.load(self.path, map_location="cpu", weights_only=False)
+            if self.saved.get("version") != CHECKPOINT_VERSION:
+                raise ValueError("unsupported campaign checkpoint version")
+            previous = self.saved.get("fingerprint", {})
+            if previous != fingerprint:
+                changed = sorted(k for k in previous.keys() | fingerprint.keys()
+                                 if previous.get(k) != fingerprint.get(k))
+                raise ValueError("campaign checkpoint fingerprint mismatch: " + ", ".join(changed))
+            if not self.saved.get("finished"):
+                self.resume_state = self.saved["run"]
+
+    def _write(self, **state):
+        payload = dict(version=CHECKPOINT_VERSION, fingerprint=self.fingerprint,
+                       args=self.args, numpy_rng=self.rng.bit_generator.state, **state)
+        atomic_write(self.path, lambda stream: torch.save(payload, stream))
+        self.last_write = time.monotonic()
+
+    def poll(self, sim, host, observer):
+        if self.signal_received is None and time.monotonic() - self.last_write < self.every_s:
+            return
+        # Device-only observation configuration is rebuilt; retain all mutable buffers,
+        # host spike history and legacy ingestion cursor, including pending observations.
+        observation = {k: v for k, v in vars(observer).items()
+                       if k not in ("_watch_device", "device")}
+        self._write(finished=False, run=dict(simulator=sim.snapshot(), host=host.snapshot(),
+                                            observer=observation,
+                                            legacy_spikes=None if getattr(sim, "observer", None) is observer else
+                                            (sim._spk_step, sim._spk_node, sim._spk_neuron)),
+                    torch_rng=torch.get_rng_state(),
+                    cuda_rng=torch.cuda.get_rng_state_all() if sim.device.type == "cuda" else None)
+        print(f"checkpoint: {self.path} at step {sim.step_index}", file=sys.stderr, flush=True)
+        if self.signal_received is not None:
+            raise SystemExit(CHECKPOINT_EXIT)
+
+    def restore_rng(self, sim):
+        if self.resume_state is not None:
+            self.rng.bit_generator.state = self.saved["numpy_rng"]
+            torch.set_rng_state(self.saved["torch_rng"])
+            if self.saved.get("cuda_rng") is not None:
+                torch.cuda.set_rng_state_all(self.saved["cuda_rng"])
+
+    def finish(self, record):
+        # Keep a small completion marker, allowing every remaining afterany job to exit.
+        self._write(finished=True, record=record)
 
 
 @dataclass(frozen=True)

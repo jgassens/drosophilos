@@ -229,6 +229,8 @@ class TorchSim:
             "g": self.g.clone(),
             "r": self.r.clone(),
             "ring": self.ring.clone(),
+            "stray_rng": None if self._stray_gen is None else self._stray_gen.get_state(),
+            "stray_p": self.stray_p, "stray_q": self.stray_q,
             "events": {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in self._events.items()},
             "quanta": None if self.t_quanta is None else self.t_quanta.clone(),
             "V_th": self.V_th.clone(),
@@ -238,16 +240,24 @@ class TorchSim:
         }
 
     def restore(self, snap: dict) -> None:
+        # Checkpoint files are loaded on CPU; move dynamic tensors to this simulator.
+        snap = {k: (v.to(self.device) if isinstance(v, torch.Tensor) and k != "stray_rng" else v)
+                for k, v in snap.items()}
         self.step_index = int(snap["step_index"])
         self.V = snap["V"].clone()
         self.g = snap["g"].clone()
         self.r = snap["r"].clone()
         self.ring = snap["ring"].clone()
-        self._events = defaultdict(list, {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in snap["events"].items()})
+        self._events = defaultdict(list, {k: [(a.to(self.device).clone(), b.to(self.device).clone(), c.to(self.device).clone()) for a, b, c in v] for k, v in snap["events"].items()})
         self.t_quanta = None if snap["quanta"] is None else snap["quanta"].clone()
         self.V_th = snap["V_th"].clone()
         self.bias = snap["bias"].clone()
         self.gain = snap["gain"].clone()
         self.silenced = snap["silenced"].clone()
+        self.stray_p, self.stray_q = snap.get("stray_p", self.stray_p), snap.get("stray_q", self.stray_q)
+        if snap.get("stray_rng") is not None:
+            if self._stray_gen is None:
+                self._stray_gen = torch.Generator(device=self.device)
+            self._stray_gen.set_state(snap["stray_rng"].cpu())
         self._spk_step, self._spk_node, self._spk_neuron = [], [], []
         self.rec_V, self.rec_g = [], []

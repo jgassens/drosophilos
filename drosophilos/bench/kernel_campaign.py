@@ -10,16 +10,21 @@ exact 95 % upper limits, like the block campaigns of A2.
 """
 
 import argparse
+import hashlib
 import json
+import math
 import re
+import subprocess
 import time
 import traceback
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
-from ..lib.campaign import make_perturbed_sim
+from ..lib.campaign import CampaignCheckpoint, atomic_write, make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
@@ -178,6 +183,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--robust-request-clear", action="store_true",
                     help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--checkpoint", default=None, help="atomically save/resume a trusted local checkpoint")
+    ap.add_argument("--checkpoint-every-s", type=float, default=1800,
+                    help="wall seconds between checkpoints (default: 1800); signals also save and exit 75")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
     ap.add_argument("--dump-roles", default=None, help="regular expression matched against neuron roles")
@@ -190,6 +198,49 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.repeats < 1:
         ap.error("--repeats must be positive")
+    if not math.isfinite(a.checkpoint_every_s) or a.checkpoint_every_s <= 0:
+        ap.error("--checkpoint-every-s must be finite and positive")
+    if a.checkpoint and a.out and Path(a.checkpoint).resolve() == Path(a.out).resolve():
+        ap.error("--checkpoint and --out must be different paths")
+    if a.checkpoint:
+        with CampaignCheckpoint(a.checkpoint, a.checkpoint_every_s) as checkpoint:
+            try:
+                return _main(a, ap, checkpoint)
+            except ValueError as exc:
+                ap.error(str(exc))
+    return _main(a, ap)
+
+
+def _fingerprint(a, pl, params):
+    import torch
+    root = Path(__file__).resolve().parents[2]
+    try:
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
+                                         stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unavailable"
+    source = hashlib.sha256()
+    for directory in (root / "drosophilos", root / "examples"):
+        for path in sorted(directory.rglob("*")):
+            if path.suffix in (".py", ".c"):
+                source.update(str(path.relative_to(root)).encode())
+                source.update(path.read_bytes())
+    topology = pl.net.topology()
+    net_hash = hashlib.sha256()
+    for field in ("src", "dst", "delay", "quanta", "bias"):
+        value = getattr(topology, field)
+        if value is not None:
+            net_hash.update(np.asarray(value).tobytes())
+    config = {k: v for k, v in vars(a).items()
+              if k not in ("checkpoint", "checkpoint_every_s", "out", "dump_out")}
+    return dict(commit=commit, source=source.hexdigest(), config=config,
+                build_options=pl.build_options, params=asdict(params),
+                neurons=pl.net.n, edges=pl.net.nnz, topology=net_hash.hexdigest(),
+                torch=str(torch.__version__), numpy=np.__version__,
+                device_name=torch.cuda.get_device_name(a.device) if a.device.startswith("cuda") else a.device)
+
+
+def _main(a, ap, checkpoint=None):
     P = Params()
     ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust,
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
@@ -221,8 +272,35 @@ def main(argv=None):
     t0 = time.time()
     import torch
     dtype = torch.float32 if a.fp32 else torch.float64
+    if checkpoint is not None:
+        checkpoint.configure(_fingerprint(a, pl, P), vars(a), rng)
+        if checkpoint.saved and checkpoint.saved.get("finished"):
+            rec = checkpoint.saved["record"]
+            if a.out:
+                encoded = json.dumps(rec, indent=1).encode()
+                if not Path(a.out).exists() or Path(a.out).read_bytes() != encoded:
+                    atomic_write(a.out, lambda stream: stream.write(encoded))
+            return
+        if a.out and Path(a.out).exists():
+            try:
+                rec = json.loads(Path(a.out).read_text())
+            except (ValueError, OSError):
+                rec = {}
+            expected = dict(block=a.block, copies=B, seed=a.seed, repeats=a.repeats,
+                            mix=a.mix, backend=a.backend, neurons=pl.net.n, edges=pl.net.nnz,
+                            tokens_list=tokens, **pl.build_options)
+            if (all(rec.get(k) == v for k, v in expected.items()) and
+                    all(k in rec for k in ("outputs", "per_node", "neural_s", "missing", "ok", "wrong")) and
+                    len(rec["per_node"]) == B and len(rec["outputs"]) == B and
+                    rec.get("outputs_expected") == len(tokens) * len(ks.outputs) * B and
+                    rec["ok"] + rec["wrong"] + rec["missing"] == rec["outputs_expected"]):
+                checkpoint.finish(rec)
+                return
     sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype,
                              backend=a.backend)
+    if checkpoint is not None:
+        checkpoint.restore_rng(sim)
+        sim.campaign_checkpoint = checkpoint
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
                                          expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
                                          capture_spikes=capture, backend=a.backend, observe_every=a.observe_every)
@@ -279,8 +357,13 @@ def main(argv=None):
     if capture is not None:
         rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
     if a.out:
-        with open(a.out, "w") as stream:
-            json.dump(rec, stream, indent=1)
+        if checkpoint is not None:
+            atomic_write(a.out, lambda stream: stream.write(json.dumps(rec, indent=1).encode()))
+        else:
+            with open(a.out, "w") as stream:
+                json.dump(rec, stream, indent=1)
+    if checkpoint is not None:
+        checkpoint.finish(rec)
     print(json.dumps(rec, indent=1), flush=True)
 
 

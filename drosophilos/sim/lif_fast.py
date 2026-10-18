@@ -467,7 +467,7 @@ class FastSim:
         self.V.copy_(st["V"]); self.g.copy_(st["g"]); self.r.copy_(st["r"])
         self.ring.copy_(st["ring"]); self._slot.copy_(st["slot"])
         if self._stray_gen is not None and st["stray_rng"] is not None:
-            self._stray_gen.set_state(st["stray_rng"])
+            self._stray_gen.set_state(st["stray_rng"].cpu())
 
     def snapshot(self) -> dict:
         snap = self._state_clone()
@@ -477,13 +477,19 @@ class FastSim:
             "quanta": None if self.t_quanta is None else self.t_quanta.clone(),
             "V_th": self.V_th.clone(), "bias": self.bias.clone(), "gain": self.gain.clone(),
             "silenced": self.silenced.clone(),
+            "stray_p": self.stray_p, "stray_q": self.stray_q,
         })
         return snap
 
     def restore(self, snap: dict) -> None:
+        snap = {k: (v.to(self.device) if isinstance(v, torch.Tensor) and k != "stray_rng" else v)
+                for k, v in snap.items()}
+        self.stray_p, self.stray_q = snap.get("stray_p", self.stray_p), snap.get("stray_q", self.stray_q)
+        if snap.get("stray_rng") is not None and self._stray_gen is None:
+            self._stray_gen = torch.Generator(device=self.device)
         self.step_index = int(snap["step_index"])
         self._state_restore(snap)
-        self._events = defaultdict(list, {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in snap["events"].items()})
+        self._events = defaultdict(list, {k: [(a.to(self.device).clone(), b.to(self.device).clone(), c.to(self.device).clone()) for a, b, c in v] for k, v in snap["events"].items()})
         if snap["quanta"] is not None:
             if self.t_quanta is None or not torch.equal(self.t_quanta, snap["quanta"]):
                 raise ValueError("FastSim bakes per-node quanta into its delivery tables; restore cannot change them")
