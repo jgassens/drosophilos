@@ -253,11 +253,12 @@ class ResetVerification:
     exhausted: Latch
     added_neurons: int
     added_synapses: int
+    version: int = 1
 
 
 def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
                            inh: int, ready: int, ready_chain: list[int],
-                           fault_target: int | None = None) -> ResetVerification:
+                           fault_target: int | None = None, *, version: int = 1) -> ResetVerification:
     """Experimental silence certificate with three statically unrolled retries.
 
     Finalize AFTER every reset extension and mirrored reader. The domain is the
@@ -276,7 +277,14 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
     This is a spiking circuit, not a host observer. Neither silence nor a bounded
     retry count proves analogue recovery. It is retained for falsifiable tests;
     ``verified_register_reset=True`` is rejected by the public kernel builder.
+
+    Version 1 preserves the recorded 2026-10-04 prototype byte for byte.
+    Version 2 adds local feedback inhibition to the attempt entries and timer
+    relays: a doublet must not multiply through recovery into repeated READY.
+    It remains an unqualified, direct-experiment opt-in.
     """
+    if version not in (1, 2):
+        raise ValueError("reset verification version must be 1 or 2")
     if len(ready_chain) != 15:
         raise ValueError("reset verification requires a fifteen-hop recovery chain")
     if not 0 <= VERIFY_DELAY_STEPS <= D_MAX:
@@ -294,12 +302,14 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         net.synapse(tap, busy, drive.pulse)
     exhausted = add_latch(net, drive, f"{name}.verify.exhausted")
     attempts, checks = [], []
+    pulse_nodes = [trigger, *ready_chain, ready]
     start = trigger
     previous_deadline = None
     for attempt in range(VERIFY_MAX_RETRIES + 1):
         prefix = f"{name}.verify.a{attempt}"
         if attempt:
             start = net.neuron(f"{prefix}.reset")
+            pulse_nodes.append(start)
             net.synapse(previous_deadline, start, drive.pulse)
             prev = start
             net.synapse(start, inh, drive.pulse)
@@ -311,6 +321,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
             prev = start
             for k in range(15):
                 recovery = net.neuron(f"{prefix}.recovery{k}")
+                pulse_nodes.append(recovery)
                 net.synapse(prev, recovery, drive.pulse)
                 prev = recovery
         else:
@@ -319,6 +330,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         recovery_end = prev
         for k in range(VERIFY_WINDOW_LINKS):
             timer = net.neuron(f"{prefix}.quiet{k}")
+            pulse_nodes.append(timer)
             if attempt == k == 0:
                 # Preserve existing consumers of READY and the recovery prefix.
                 edge = old_edge[0]
@@ -336,6 +348,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         prev = recovery_end
         for k in range(7):
             deadline = net.neuron(f"{prefix}.deadline{k}")
+            pulse_nodes.append(deadline)
             net.synapse(prev, deadline, drive.pulse, VERIFY_DELAY_STEPS)
             if k >= 4:
                 net.synapse(certificate, deadline, -int(round(2.2 * drive.loop)))
@@ -346,9 +359,21 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         net.synapse(exhausted.u, entry, -int(round(2.2 * drive.loop)))
     if fault_target is not None:
         net.synapse(exhausted.u, fault_target, drive.ignite)
+    if version == 2:
+        # Feedback is local, like add_experimental_autapses; genuine reset
+        # inhibition must still mirror onto any existing or future readers.
+        mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
+        try:
+            for relay in pulse_nodes:
+                # Immediate feedback prevents a second spike from residual
+                # charge plus strays, including doublets born inside recovery.
+                # BUSY/exhaustion and ordinary reset taps/inhibitor stay intact.
+                net.synapse(relay, relay, -int(round(4.4 * drive.loop)), 0)
+        finally:
+            net.inhibition_mirrors = mirrors
     net.group(f"{name}.verify.exhausted", exhausted.members)
     return ResetVerification(domain, busy, tuple(attempts), tuple(checks), exhausted,
-                             net.n - n0, net.nnz - e0)
+                             net.n - n0, net.nnz - e0, version)
 
 
 def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),
