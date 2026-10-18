@@ -14,7 +14,6 @@ import hashlib
 import json
 import math
 import re
-import subprocess
 import time
 import traceback
 from dataclasses import asdict
@@ -24,7 +23,7 @@ import numpy as np
 
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
-from ..lib.campaign import CampaignCheckpoint, atomic_write, make_perturbed_sim
+from ..lib.campaign import CampaignCheckpoint, CheckpointError, atomic_write, make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
@@ -206,7 +205,7 @@ def main(argv=None):
         with CampaignCheckpoint(a.checkpoint, a.checkpoint_every_s) as checkpoint:
             try:
                 return _main(a, ap, checkpoint)
-            except ValueError as exc:
+            except CheckpointError as exc:
                 ap.error(str(exc))
     return _main(a, ap)
 
@@ -214,11 +213,6 @@ def main(argv=None):
 def _fingerprint(a, pl, params):
     import torch
     root = Path(__file__).resolve().parents[2]
-    try:
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
-                                         stderr=subprocess.DEVNULL, text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        commit = "unavailable"
     source = hashlib.sha256()
     for directory in (root / "drosophilos", root / "examples"):
         for path in sorted(directory.rglob("*")):
@@ -233,7 +227,7 @@ def _fingerprint(a, pl, params):
             net_hash.update(np.asarray(value).tobytes())
     config = {k: v for k, v in vars(a).items()
               if k not in ("checkpoint", "checkpoint_every_s", "out", "dump_out")}
-    return dict(commit=commit, source=source.hexdigest(), config=config,
+    return dict(source=source.hexdigest(), config=config,
                 build_options=pl.build_options, params=asdict(params),
                 neurons=pl.net.n, edges=pl.net.nnz, topology=net_hash.hexdigest(),
                 torch=str(torch.__version__), numpy=np.__version__,
@@ -279,13 +273,17 @@ def _main(a, ap, checkpoint=None):
             if a.out:
                 encoded = json.dumps(rec, indent=1).encode()
                 if not Path(a.out).exists() or Path(a.out).read_bytes() != encoded:
-                    atomic_write(a.out, lambda stream: stream.write(encoded))
+                    atomic_write(a.out, lambda stream: stream.write(encoded), mode=0o666)
             return
         if a.out and Path(a.out).exists():
             try:
                 rec = json.loads(Path(a.out).read_text())
             except (ValueError, OSError):
                 rec = {}
+            if not isinstance(rec, dict) or rec.get("checkpoint_fingerprint") != checkpoint.fingerprint:
+                raise CheckpointError(
+                    "existing --out has no matching checkpoint fingerprint; "
+                    "use a different --out path or move the stale output before starting")
             expected = dict(block=a.block, copies=B, seed=a.seed, repeats=a.repeats,
                             mix=a.mix, backend=a.backend, neurons=pl.net.n, edges=pl.net.nnz,
                             tokens_list=tokens, **pl.build_options)
@@ -296,6 +294,7 @@ def _main(a, ap, checkpoint=None):
                     rec["ok"] + rec["wrong"] + rec["missing"] == rec["outputs_expected"]):
                 checkpoint.finish(rec)
                 return
+            raise CheckpointError("existing --out has a matching fingerprint but is not a complete campaign record")
     sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype,
                              backend=a.backend)
     if checkpoint is not None:
@@ -356,9 +355,11 @@ def _main(a, ap, checkpoint=None):
         rec["dale_feedback_version"] = pl.build_options.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
     if capture is not None:
         rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
+    if checkpoint is not None:
+        rec["checkpoint_fingerprint"] = checkpoint.fingerprint
     if a.out:
         if checkpoint is not None:
-            atomic_write(a.out, lambda stream: stream.write(json.dumps(rec, indent=1).encode()))
+            atomic_write(a.out, lambda stream: stream.write(json.dumps(rec, indent=1).encode()), mode=0o666)
         else:
             with open(a.out, "w") as stream:
                 json.dump(rec, stream, indent=1)

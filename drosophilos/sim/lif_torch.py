@@ -228,7 +228,8 @@ class TorchSim:
             "V": self.V.clone(),
             "g": self.g.clone(),
             "r": self.r.clone(),
-            "ring": self.ring.clone(),
+            # One flattened COO index per nonzero instead of three coordinates.
+            "ring": self.ring.flatten().to_sparse(),
             "stray_rng": None if self._stray_gen is None else self._stray_gen.get_state(),
             "stray_p": self.stray_p, "stray_q": self.stray_q,
             "events": {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in self._events.items()},
@@ -247,7 +248,8 @@ class TorchSim:
         self.V = snap["V"].clone()
         self.g = snap["g"].clone()
         self.r = snap["r"].clone()
-        self.ring = snap["ring"].clone()
+        ring = snap["ring"]
+        self.ring = (ring.to_dense().reshape(self.L, self.B, self.n) if ring.is_sparse else ring.clone())
         self._events = defaultdict(list, {k: [(a.to(self.device).clone(), b.to(self.device).clone(), c.to(self.device).clone()) for a, b, c in v] for k, v in snap["events"].items()})
         self.t_quanta = None if snap["quanta"] is None else snap["quanta"].clone()
         self.V_th = snap["V_th"].clone()

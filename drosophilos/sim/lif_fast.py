@@ -456,21 +456,24 @@ class FastSim:
         return np.array(self.rec_V), np.array(self.rec_g)
 
     # ---- snapshots (schedule.md §8) ------------------------------------------------------------
-    def _state_clone(self) -> dict:
+    def _state_clone(self, *, sparse_ring=False) -> dict:
         return {
             "V": self.V.clone(), "g": self.g.clone(), "r": self.r.clone(),
-            "ring": self.ring.clone(), "slot": self._slot.clone(),
+            "ring": self.ring.flatten().to_sparse() if sparse_ring else self.ring.clone(),
+            "slot": self._slot.clone(),
             "stray_rng": None if self._stray_gen is None else self._stray_gen.get_state(),
         }
 
     def _state_restore(self, st: dict) -> None:
         self.V.copy_(st["V"]); self.g.copy_(st["g"]); self.r.copy_(st["r"])
-        self.ring.copy_(st["ring"]); self._slot.copy_(st["slot"])
+        ring = st["ring"]
+        self.ring.copy_(ring.to_dense().reshape(self.ring.shape) if ring.is_sparse else ring)
+        self._slot.copy_(st["slot"])
         if self._stray_gen is not None and st["stray_rng"] is not None:
             self._stray_gen.set_state(st["stray_rng"].cpu())
 
     def snapshot(self) -> dict:
-        snap = self._state_clone()
+        snap = self._state_clone(sparse_ring=True)
         snap.update({
             "step_index": self.step_index,
             "events": {k: [(a.clone(), b.clone(), c.clone()) for a, b, c in v] for k, v in self._events.items()},

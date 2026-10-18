@@ -11,28 +11,30 @@ import time
 import pytest
 
 
+def _small_block(name, params, **options):
+    from drosophilos.compiler.kernel import KernelSpec, kernel_outputs
+    from drosophilos.lib import kernel
+    ks = KernelSpec([dict(name="out", op="MOV", a=("const", "zero"), b="input")],
+                    {"zero": 0}, {}, "input", 2)
+    ks.outputs = ["out"]
+    pl = kernel.build_pipeline(params, 2, ks.cells, consts=ks.consts, outputs=ks.outputs)
+    tokens = [1]
+    return ks, pl, tokens, kernel_outputs(ks, tokens)
+
+
 def _worker():
     """Exercise the real CLI/runner with a two-bit MOV instead of a large campaign."""
     import ast
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import torch
     from drosophilos.bench import kernel_campaign as kc
-    from drosophilos.compiler.kernel import KernelSpec, kernel_outputs
     from drosophilos.lib import kernel
     from drosophilos.lib.campaign import CampaignCheckpoint
 
     torch.set_num_threads(1)
     scenario, backend, mode, step, checkpoint, output = sys.argv[1:]
 
-    def small_block(name, params, **options):
-        ks = KernelSpec([dict(name="out", op="MOV", a=("const", "zero"), b="input")],
-                        {"zero": 0}, {}, "input", 2)
-        ks.outputs = ["out"]
-        pl = kernel.build_pipeline(params, 2, ks.cells, consts=ks.consts, outputs=ks.outputs)
-        tokens = [1]
-        return ks, pl, tokens, kernel_outputs(ks, tokens)
-
-    kc.block = small_block
+    kc.block = _small_block
     if mode == "legacy":
         # Pin the pre-change revision: committing this work must not silently turn
         # this regression check into a comparison of the new runner with itself.
@@ -48,6 +50,8 @@ def _worker():
     def run(*args, **kwargs):
         if mode == "no_compute":
             raise AssertionError("finished chain recomputed")
+        if mode == "runner_error":
+            raise ValueError("simulated runner failure")
         if scenario == "refusal":
             # Stateless: every load of word 1 loses bit zero; blocks after two
             # watchdog refusals. Checkpoint while the first refusal is queued for retry.
@@ -101,6 +105,7 @@ def _run(tmp_path, **kwargs):
 def _record(path):
     record = json.loads(path.read_text())
     record.pop("wall_s")
+    record.pop("checkpoint_fingerprint", None)
     # JSON's NaN represents the historical all-missing confidence limit.
     return json.dumps(record, sort_keys=True)
 
@@ -114,6 +119,7 @@ def baselines(tmp_path_factory):
         name = scenario + backend
         run = _run(directory, scenario=scenario, backend=backend, mode="plain", name=name)
         assert run.returncode == 0, run.stderr
+        assert "checkpoint_fingerprint" not in json.loads((directory / f"{name}.json").read_text())
         result[scenario, backend] = _record(directory / f"{name}.json")
     return result
 
@@ -129,6 +135,11 @@ def test_exact_fresh_process_resume(tmp_path, baselines, backend, scenario, step
     interrupted = _run(tmp_path, backend=backend, scenario=scenario, mode="interrupt", step=step)
     assert interrupted.returncode == 75, interrupted.stderr
     assert not (tmp_path / "run.json").exists()
+    import torch
+    saved = torch.load(tmp_path / "run.pt", weights_only=False)["run"]
+    assert "legacy_spikes" not in saved
+    if backend == "torch":
+        assert saved["observer"]["_legacy_seen"] == 0
     resumed = _run(tmp_path, backend=backend, scenario=scenario)
     assert resumed.returncode == 0, resumed.stderr
     assert _record(tmp_path / "run.json") == baselines[scenario, backend]
@@ -163,6 +174,12 @@ def test_sigterm_saves_and_exits_75(tmp_path, baselines):
 
 def test_finished_chain_is_noop(tmp_path):
     assert _run(tmp_path).returncode == 0
+    record = json.loads((tmp_path / "run.json").read_text())
+    assert "checkpoint_fingerprint" in record
+    assert "commit" not in record["checkpoint_fingerprint"]
+    ordinary = tmp_path / "ordinary.json"
+    ordinary.write_text("{}")
+    assert (tmp_path / "run.json").stat().st_mode == ordinary.stat().st_mode
     modified = (tmp_path / "run.json").stat().st_mtime_ns
     rerun = _run(tmp_path, mode="no_compute")
     assert rerun.returncode == 0, rerun.stderr
@@ -171,6 +188,72 @@ def test_finished_chain_is_noop(tmp_path):
     (tmp_path / "run.pt").unlink()
     rerun = _run(tmp_path, mode="no_compute")
     assert rerun.returncode == 0, rerun.stderr
+
+
+@pytest.mark.parametrize("fingerprint", [None, {"source": "older-code"}])
+def test_stale_output_is_refused_without_overwrite(tmp_path, fingerprint):
+    assert _run(tmp_path, mode="plain").returncode == 0
+    path = tmp_path / "run.json"
+    rec = json.loads(path.read_text())
+    if fingerprint is not None:
+        rec["checkpoint_fingerprint"] = fingerprint
+    path.write_text(json.dumps(rec))
+    original = path.read_bytes()
+    modified = path.stat().st_mtime_ns
+    refused = _run(tmp_path, mode="no_compute")
+    assert refused.returncode == 2, refused.stderr
+    assert "existing --out has no matching checkpoint fingerprint" in refused.stderr
+    assert path.read_bytes() == original and path.stat().st_mtime_ns == modified
+    assert not (tmp_path / "run.pt").exists()
+
+
+def test_fingerprint_ignores_commit_but_checks_source_and_device(monkeypatch):
+    import torch
+    from drosophilos.bench import kernel_campaign as kc
+    from drosophilos.sim.model import Params
+    params = Params()
+    _, pl, _, _ = _small_block("fanout", params)
+    args = kc.parser().parse_args(["fanout", "--device", "cuda"])
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "GPU model A")
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "commit A")
+    before = kc._fingerprint(args, pl, params)
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "unrelated commit B")
+    assert kc._fingerprint(args, pl, params) == before
+    assert "commit" not in before
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "GPU model B")
+    assert kc._fingerprint(args, pl, params)["device_name"] != before["device_name"]
+    read_bytes = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda path: read_bytes(path) +
+                        (b"\n# changed source" if path.name == "kernel.py" else b""))
+    assert kc._fingerprint(args, pl, params)["source"] != before["source"]
+
+
+def test_runner_value_error_is_not_an_argument_error(tmp_path):
+    result = _run(tmp_path, mode="runner_error")
+    assert result.returncode == 1, result.stderr
+    assert "ValueError: simulated runner failure" in result.stderr
+    assert "Traceback" in result.stderr
+    assert "error: simulated runner failure" not in result.stderr
+
+
+def test_checkpoint_version_error_is_an_argument_error(tmp_path):
+    import torch
+    torch.save({"version": -1}, tmp_path / "run.pt")
+    result = _run(tmp_path)
+    assert result.returncode == 2
+    assert "unsupported campaign checkpoint version" in result.stderr
+
+
+def test_startup_removes_only_this_checkpoints_temporary_files(tmp_path):
+    from drosophilos.lib.campaign import CampaignCheckpoint
+    stale = [tmp_path / "run.pt.1234abcd.tmp", tmp_path / "run.pt.ab_cd123.tmp"]
+    keep = [tmp_path / name for name in ("other.pt.1234abcd.tmp", "run.pt.tmp",
+                                        "run.pt.notes.tmp", "run.pt.1234abcd.tmp.backup", "run.pt")]
+    for path in stale + keep:
+        path.write_bytes(b"keep")
+    with CampaignCheckpoint(tmp_path / "run.pt"):
+        assert all(not path.exists() for path in stale)
+        assert all(path.read_bytes() == b"keep" for path in keep)
 
 
 def test_periodic_checkpoint_continues_exactly(tmp_path, baselines):
@@ -197,13 +280,50 @@ def test_simulator_snapshot_restores_stray_rng_and_delay_ring(backend):
     sim.run(31)
     got = sim.snapshot()
     for key in ("V", "g", "r", "ring", "stray_rng"):
-        assert torch.equal(got[key], expected[key]), key
+        actual, want = got[key], expected[key]
+        if key == "ring":
+            assert actual.is_sparse and want.is_sparse
+            actual, want = actual.to_dense(), want.to_dense()
+        assert torch.equal(actual, want), key
+
+
+@pytest.mark.parametrize("backend", ["torch", "torch-fast"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_sparse_ring_serialization_restores_identical_dense_tensor(backend, empty):
+    import io
+    import torch
+    from drosophilos.sim.lif_fast import FastSim
+    from drosophilos.sim.lif_torch import TorchSim
+    from drosophilos.sim.model import Topology
+    cls = TorchSim if backend == "torch" else FastSim
+    topo = Topology.from_edges(2048, [], [], [], [])
+    sim = cls(topo, n_nodes=2, dtype=torch.float32)
+    if not empty:
+        sim.ring[0, 0, 0] = 2**62 + 17
+        sim.ring[-1, -1, -1] = -(2**62) - 19
+        sim.ring[13, 1, 1024] = 42
+    expected = sim.ring.clone()
+    snap = sim.snapshot()
+    ring = snap["ring"].coalesce()
+    assert ring.is_sparse and ring.dtype == expected.dtype
+    assert ring.indices().shape == (1, 0 if empty else 3)
+    assert torch.equal(ring.to_dense().reshape(expected.shape), expected)
+    stream = io.BytesIO()
+    torch.save(snap, stream)
+    assert stream.tell() < expected.numel() * expected.element_size() // 4
+    stream.seek(0)
+    restored = cls(topo, n_nodes=2, dtype=torch.float32)
+    restored.restore(torch.load(stream, map_location="cpu", weights_only=False))
+    assert restored.ring.layout == torch.strided
+    assert restored.ring.dtype == expected.dtype
+    assert torch.equal(restored.ring, expected)
 
 
 @pytest.mark.parametrize("backend", ["torch", "torch-fast"])
 def test_default_record_matches_prechange_runner(tmp_path, baselines, backend):
     result = _run(tmp_path, backend=backend, mode="legacy")
     assert result.returncode == 0, result.stderr
+    assert "checkpoint_fingerprint" not in json.loads((tmp_path / "run.json").read_text())
     assert _record(tmp_path / "run.json") == baselines["normal", backend]
 
 
@@ -220,6 +340,17 @@ def test_atomic_failure_preserves_previous_file(tmp_path):
         atomic_write(path, fail)
     assert path.read_bytes() == b"previous"
     assert list(tmp_path.iterdir()) == [path]
+
+
+def test_atomic_output_preserves_existing_permissions(tmp_path):
+    import stat
+    from drosophilos.lib.campaign import atomic_write
+    path = tmp_path / "output.json"
+    path.write_text("old")
+    path.chmod(0o640)
+    atomic_write(path, lambda stream: stream.write(b"new"), mode=0o666)
+    assert path.read_bytes() == b"new"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
 
 
 @pytest.mark.parametrize("cluster", ["juno", "g2"])

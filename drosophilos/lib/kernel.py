@@ -1942,8 +1942,6 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     if checkpoint is not None and checkpoint.resume_state is not None:
         saved = checkpoint.resume_state
         sim.restore(saved["simulator"])
-        if saved["legacy_spikes"] is not None:
-            sim._spk_step, sim._spk_node, sim._spk_neuron = saved["legacy_spikes"]
         state = PipelineRunState.restore(saved["host"], pl)
         scheds, want = state.schedules, state.want
         observation = saved["observer"].copy()

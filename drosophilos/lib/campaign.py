@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import secrets
 import signal
+import stat
 import sys
-import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -39,13 +41,28 @@ CHECKPOINT_EXIT = 75
 CHECKPOINT_VERSION = 1
 
 
-def atomic_write(path, write) -> None:
+class CheckpointError(ValueError):
+    """Invalid checkpoint identity or incompatible existing campaign output."""
+
+
+def atomic_write(path, write, *, mode=0o600) -> None:
     """Publish a complete file, including durability of its directory entry on POSIX."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    # O_EXCL and a unique name keep saves atomic. Unlike mkstemp's fixed 0600,
+    # os.open applies the caller's umask to new public output files (mode=0666).
+    previous_mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+    while True:
+        temporary = path.with_name(path.name + "." + secrets.token_hex(4) + ".tmp")
+        try:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            break
+        except FileExistsError:
+            continue
     try:
         with os.fdopen(fd, "wb") as stream:
+            if previous_mode is not None:
+                os.fchmod(stream.fileno(), previous_mode)
             write(stream)
             stream.flush()
             os.fsync(stream.fileno())
@@ -81,6 +98,13 @@ class CampaignCheckpoint:
         self._handlers = {}
 
     def __enter__(self):
+        # Also recognizes the original mkstemp eight-character suffix. Never clean
+        # another checkpoint's files, or arbitrary .tmp files in this directory.
+        pattern = re.compile(re.escape(self.path.name) + r"\.[a-z0-9_]{8}\.tmp")
+        if self.path.parent.exists():
+            for path in self.path.parent.iterdir():
+                if pattern.fullmatch(path.name) and path.is_file():
+                    path.unlink()
         for sig in (signal.SIGTERM, signal.SIGUSR1):
             self._handlers[sig] = signal.signal(sig, self._signal)
         return self
@@ -98,12 +122,12 @@ class CampaignCheckpoint:
             # Only load checkpoints from a trusted source: this includes Python objects.
             self.saved = torch.load(self.path, map_location="cpu", weights_only=False)
             if self.saved.get("version") != CHECKPOINT_VERSION:
-                raise ValueError("unsupported campaign checkpoint version")
+                raise CheckpointError("unsupported campaign checkpoint version")
             previous = self.saved.get("fingerprint", {})
             if previous != fingerprint:
                 changed = sorted(k for k in previous.keys() | fingerprint.keys()
                                  if previous.get(k) != fingerprint.get(k))
-                raise ValueError("campaign checkpoint fingerprint mismatch: " + ", ".join(changed))
+                raise CheckpointError("campaign checkpoint fingerprint mismatch: " + ", ".join(changed))
             if not self.saved.get("finished"):
                 self.resume_state = self.saved["run"]
 
@@ -116,14 +140,15 @@ class CampaignCheckpoint:
     def poll(self, sim, host, observer):
         if self.signal_received is None and time.monotonic() - self.last_write < self.every_s:
             return
-        # Device-only observation configuration is rebuilt; retain all mutable buffers,
-        # host spike history and legacy ingestion cursor, including pending observations.
+        # Device-only observation configuration is rebuilt. Legacy chunks have all
+        # been ingested into the observer; only its watched history affects the runner.
         observation = {k: v for k, v in vars(observer).items()
                        if k not in ("_watch_device", "device")}
+        if getattr(sim, "observer", None) is not observer:
+            assert observer._legacy_seen == len(sim._spk_step)
+            observation["_legacy_seen"] = 0  # restore starts with empty legacy lists
         self._write(finished=False, run=dict(simulator=sim.snapshot(), host=host.snapshot(),
-                                            observer=observation,
-                                            legacy_spikes=None if getattr(sim, "observer", None) is observer else
-                                            (sim._spk_step, sim._spk_node, sim._spk_neuron)),
+                                            observer=observation),
                     torch_rng=torch.get_rng_state(),
                     cuda_rng=torch.cuda.get_rng_state_all() if sim.device.type == "cuda" else None)
         print(f"checkpoint: {self.path} at step {sim.step_index}", file=sys.stderr, flush=True)
