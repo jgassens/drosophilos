@@ -8,6 +8,7 @@
 # Pushes HEAD to origin, fetches it on the cluster, submits slurm/<cluster>.sbatch and prints the job
 # id; the job checks its commit out in a worktree of its own when it starts. Refuses a dirty tree: the cluster runs exactly the committed code.
 # --dry-run checks locally and prints the push and remote command without running them; DROSO_SSH overrides ssh.
+# Sbatch options and job arguments are shell-quoted remotely: ~ stays literal; use absolute paths without $HOME or paths relative to ~/drosophilos.
 # DROSO_SUBMIT_RETRY_SLEEP: seconds between safe retries before sbatch runs (default 10).
 # DROSO_SUBMIT_ATTEMPTS: maximum remote attempts before sbatch runs (default 3).
 # A connection that never opens ran nothing, so it is retried safely.

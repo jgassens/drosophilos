@@ -2,7 +2,9 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
 import subprocess
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -286,6 +288,7 @@ def sbatch_exit_job(tmp_path):
     fake_git = bin_dir / "git"
     fake_git.write_text(
         "#!/bin/bash\n"
+        'if [ "$1" = worktree ] && [ "$2" = add ]; then printf "%s\\n" "$*" >> "$FAKE_GIT_ADD_LOG"; fi\n'
         'if [ "${FAIL_WORKTREE_REMOVE:-0}" = 1 ] && [ "$1" = worktree ] && [ "$2" = remove ]; then exit 1; fi\n'
         f'exec "{shutil.which("git")}" "$@"\n'
     )
@@ -296,17 +299,22 @@ def sbatch_exit_job(tmp_path):
     fake_sleep = bin_dir / "sleep"
     fake_sleep.write_text("#!/bin/bash\nexit 0\n")
     fake_sleep.chmod(0o755)
+    fake_nvidia = bin_dir / "nvidia-smi"
+    fake_nvidia.write_text("#!/bin/bash\nexit 0\n")
+    fake_nvidia.chmod(0o755)
+    env.update(
+        HOME=str(home),
+        PATH=f"{bin_dir}:{env['PATH']}",
+        DROSO_SHA=git(checkout, "rev-parse", "HEAD", env=env).stdout.strip(),
+        SLURM_JOB_ID="987654",
+        FAKE_GIT_ADD_LOG=str(tmp_path / "worktree-add.log"),
+    )
     return SimpleNamespace(home=home, checkout=checkout, bin_dir=bin_dir, env=env)
 
 
 def run_sbatch_job(sbatch_exit_job, script, *, python_status=0, fail_remove=False):
-    job_id = "987654"
     env = {
         **sbatch_exit_job.env,
-        "HOME": str(sbatch_exit_job.home),
-        "PATH": f"{sbatch_exit_job.bin_dir}:{os.environ['PATH']}",
-        "DROSO_SHA": git(sbatch_exit_job.checkout, "rev-parse", "HEAD", env=sbatch_exit_job.env).stdout.strip(),
-        "SLURM_JOB_ID": job_id,
         "FAKE_PYTHON_STATUS": str(python_status),
         "FAIL_WORKTREE_REMOVE": "1" if fail_remove else "0",
     }
@@ -317,7 +325,7 @@ def run_sbatch_job(sbatch_exit_job, script, *, python_status=0, fail_remove=Fals
         text=True,
         capture_output=True,
     )
-    return result, sbatch_exit_job.home / "drosophilos-jobs" / job_id
+    return result, sbatch_exit_job.home / "drosophilos-jobs" / env["SLURM_JOB_ID"]
 
 
 @pytest.mark.parametrize("script",SBATCH_SCRIPTS)
@@ -334,14 +342,68 @@ def test_sbatch_python_failure_is_preserved_and_worktree_removed(sbatch_exit_job
     assert not wt.exists()
 
 
+@pytest.mark.parametrize("script", SBATCH_SCRIPTS)
+@pytest.mark.parametrize("python_status", [0, 7])
+def test_sbatch_sigterm_waits_for_python_final_write(sbatch_exit_job, script, python_status):
+    started = sbatch_exit_job.home / "python-started"
+    fake_python = sbatch_exit_job.bin_dir / "python"
+    fake_python.write_text(
+        "#!/bin/bash\n"
+        "finish() {\n"
+        "  /bin/sleep 0.2\n"
+        "  printf 'final\\n' > data/final.txt || exit 99\n"
+        '  exit "$FAKE_PYTHON_STATUS"\n'
+        "}\n"
+        "trap finish TERM\n"
+        'printf "%s\\n" "$$" > "$FAKE_PYTHON_STARTED"\n'
+        "while :; do /bin/sleep 0.1; done\n"
+    )
+    env = {
+        **sbatch_exit_job.env,
+        "FAKE_PYTHON_STATUS": str(python_status),
+        "FAKE_PYTHON_STARTED": str(started),
+    }
+    wt = sbatch_exit_job.home / "drosophilos-jobs" / env["SLURM_JOB_ID"]
+    job = subprocess.Popen(
+        ["/bin/bash", str(SLURM / script), "example.module"],
+        cwd=sbatch_exit_job.checkout, env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        python_pid = None
+        while job.poll() is None and time.monotonic() < deadline:
+            if started.exists() and (pid := started.read_text().strip()):
+                python_pid = int(pid)
+                break
+            time.sleep(0.01)
+        assert python_pid is not None, "fake Python did not start within 10 seconds"
+        # Signal the shell alone first; Slurm delivers Python's signal separately.
+        job.send_signal(signal.SIGTERM)
+        os.kill(python_pid, signal.SIGTERM)
+        stdout, stderr = job.communicate(timeout=10)
+        assert job.returncode == python_status, stdout + stderr
+        assert (sbatch_exit_job.checkout / "data/final.txt").read_text() == "final\n"
+        assert not wt.exists()
+    finally:
+        try:
+            os.killpg(job.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        job.communicate(timeout=5)
+
+
 @pytest.mark.parametrize("script",SBATCH_SCRIPTS)
 def test_sbatch_force_clears_stale_worktree_registration(sbatch_exit_job, script):
     stale = sbatch_exit_job.home / "drosophilos-jobs" / "987654"
     stale.parent.mkdir()
     git(sbatch_exit_job.checkout, "worktree", "add", "--detach", str(stale), "HEAD", env=sbatch_exit_job.env)
     shutil.rmtree(stale)
+    add_log = Path(sbatch_exit_job.env["FAKE_GIT_ADD_LOG"])
+    add_log.unlink()  # Count only the job's attempts, not the stale registration setup.
     result, wt = run_sbatch_job(sbatch_exit_job, script)
     assert result.returncode == 0, result.stderr
+    assert len(add_log.read_text().splitlines()) == 1
     assert not wt.exists()
     assert MARKER not in result.stdout
 

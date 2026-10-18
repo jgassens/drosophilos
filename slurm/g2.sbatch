@@ -43,4 +43,6 @@ source ~/miniforge3/etc/profile.d/conda.sh
 conda activate drosophilos
 echo "job $SLURM_JOB_ID on $(hostname), commit $(git rev-parse --short HEAD), $(date -Is)"
 nvidia-smi -L || true
+# Keep the worktree until Python finishes its signal handler and exits.
+trap ':' TERM HUP INT
 python -m "$@"
