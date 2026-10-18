@@ -2,7 +2,7 @@
 
 ## Answer
 
-No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 100% of all_w0's host inputs (4,131,952) or 90% of vnc_w2's (1,291,471).  Whole-CNS w0 under 2 Hz drive succeeds at the smallest tested rung of 95% (90% failed; fractions between 90% and 95% were not tested); central_brain w0 needs more than 95%, while VNC w2 succeeds at 90%.  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
+No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 95% of whole-CNS w0 (all_w0)'s host inputs (4,111,318 synapses) or 90% of vnc_w2's (1,291,471).  Whole-CNS w0 under 2 Hz drive succeeds at the smallest tested rung of 95% (90% failed; fractions between 90% and 95% were not tested); central_brain w0 needs more than 95%, while VNC w2 succeeds at 90%.  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
 
 An earlier whole-brain batch was discarded because `h1_fullgraph` did not inject the flip-flop register's power-on pulse (every addition faulted even with the brain fully cut off); this was fixed in `e8f5f3b`, after which the sealed control computed 3/3.
 
@@ -67,9 +67,9 @@ The ladder tables retain every measured rung.  “Cut” is edge pairs / anatomi
 | inputs, 2 Hz Poisson | 1.00 | 412,685 / 4,131,952 | 10/10 |
 | inputs, 2 Hz Poisson (confirmation) | 1.00 | 412,685 / 4,131,952 | **50/50** |
 
-Minimal confirmed rungs: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inputs/2 Hz **1.00, 4,131,952 synapses, 50/50**.
+Minimal confirmed rungs in the ladder: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inputs/2 Hz **0.95, 4,111,318 synapses, 50/50** (replication).
 
-For all_w0 inputs, the 50/50 minimum is 1.00; the 0.95 rung reached 10/10 but was not confirmed at 50.  In the separate whole-CNS w0 replication below, 90% failed and 95% was the smallest tested successful rung; fractions between 90% and 95% were not tested.
+For all_w0, the 0.95 rung reached 10/10 in the ladder and was confirmed at 50/50 on seeds 0 and 1 in the replication below.  The smallest confirmed rung is 0.95 (90% failed; fractions between 90% and 95% were not tested).  Here all_w0 is whole-CNS w0, not a separate placement.
 
 ### vnc_w2
 
@@ -189,11 +189,11 @@ Result files under `data/stage_h/fullgraph/`: `all_w0_cutin0.90_poisson_n50_s0.j
 
 ### Round-2 limits
 
-These measurements use one seed and one placement.  The shielding ladders use 10 additions at every rung below the minima; they are not 50-addition confirmations.
+The Dale, attribution, and type-cut measurements use one seed and one placement.  The shielding threshold replication used two seeds (all_w0) and two placements (all_w0, central_brain_w0).  The shielding ladders use 10 additions at every rung below the minima; they are not 50-addition confirmations.
 
 ## Limits
 
-This is one placement seed.  Ladder rungs use 10 additions, with only the minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); all_w0 input 0.95 reached 10/10 but was not confirmed at 50, so unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
+The Dale, attribution, and type-cut measurements use one seed and one placement.  Ladder rungs use 10 additions, with minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); the 0.95 all_w0 input rung was confirmed 50/50 on seeds 0 and 1 in the replication.  Unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
 
 ## Reproduce
 
@@ -224,4 +224,4 @@ slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilo
 slurm/submit.sh --cluster g2 --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph [flags above]
 ```
 
-`docs/stage_h/fullgraph.json` is the strict compact inventory of all 44 runs, including the source counts, cluster, and job id.
+`docs/stage_h/fullgraph.json` inventories the 44 ladder runs, including source counts, cluster, and job id.  The six replication runs (Juno 459507–459509; G2 4023560, 4023561, 4023564) are listed in the replication table above.
