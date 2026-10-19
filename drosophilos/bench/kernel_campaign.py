@@ -10,17 +10,22 @@ exact 95 % upper limits, like the block campaigns of A2.
 """
 
 import argparse
+import hashlib
 import json
+import math
 import re
 import time
 import traceback
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 
 from ..compiler.frontend_c import compile_c
 from ..compiler.kernel import compile_kernel, kernel_outputs, loop_body
-from ..lib.campaign import make_perturbed_sim
+from ..lib.campaign import CampaignCheckpoint, CheckpointError, atomic_write, make_perturbed_sim
 from ..lib.kernel import TRUE_GUARD_VERSION, build_pipeline, run_pipeline_batched
+from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 from ..sim.model import Params
 from .a2_campaigns import MIXES
 from .stall_diag import write_compact_dump
@@ -36,7 +41,9 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
           robust_register_reset: bool = False, verified_register_reset: bool = False,
           experimental_register_reset: bool = False, experimental_autapse: bool = False,
           ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-          master_ignition: bool = False, operand_xor_oneshot: bool = False):
+          master_ignition: bool = False, operand_xor_oneshot: bool = False,
+          latch_feedback: str = "autapse", dale_feedback_version: int | None = None,
+          dale_biased_version: int | None = None):
     if name == "render":
         prog = compile_c(open("examples/render.c").read())
         ks = compile_kernel(prog, loop_body(prog, "main", "loop3"), "col", params={"heading": 3})
@@ -77,7 +84,11 @@ def block(name: str, params: Params, *, datapath: str = "generic", rate_robust: 
                         experimental_register_reset=experimental_register_reset,
                         experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
                         f_width16_experimental=f_width16_experimental, master_ignition=master_ignition,
-                        operand_xor_oneshot=operand_xor_oneshot)
+                        operand_xor_oneshot=operand_xor_oneshot, latch_feedback=latch_feedback,
+                        **({} if dale_feedback_version is None else
+                           {"dale_feedback_version": dale_feedback_version}),
+                        **({} if dale_biased_version is None else
+                           {"dale_biased_version": dale_biased_version}))
     ref = kernel_outputs(ks, tokens)
     return ks, pl, tokens, ref
 
@@ -92,7 +103,7 @@ def rebuild_record(record: dict):
     flags = ("rate_robust", "zero_once", "robust_request_clear", "robust_register_reset",
              "verified_register_reset", "experimental_register_reset", "experimental_autapse",
              "ordered_xor_oneshot", "f_width16_experimental", "master_ignition", "operand_xor_oneshot")
-    from ..protocol.latch import MASTER_IGNITION_VERSION
+    from ..protocol.latch import MASTER_IGNITION_VERSION, validate_latch_feedback
     from ..lib.gates import validate_operand_xor_record
     validate_operand_xor_record(record)
     if "master_ignition" in record and type(record["master_ignition"]) is not bool:
@@ -103,7 +114,17 @@ def rebuild_record(record: dict):
         raise ValueError("unsupported master-ignition circuit version")
     if "f_width16_experimental" in record and type(record["f_width16_experimental"]) is not bool:
         raise ValueError("unsupported campaign build option f_width16_experimental: expected a bool")
+    latch_feedback = record.get("latch_feedback", "autapse")
+    dale_feedback_version = record.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
+    dale_biased_version = record.get("dale_biased_version")
+    try:
+        validate_latch_feedback(latch_feedback, record.get("experimental_autapse", False),
+                                dale_feedback_version, dale_biased_version)
+    except ValueError as exc:
+        raise ValueError(f"unsupported campaign latch_feedback: {exc}") from exc
     built = block(record["block"], Params(), datapath=record.get("datapath", "generic"),
+                  latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
+                  dale_biased_version=dale_biased_version,
                   **{key: record.get(key, False) for key in flags})
     pl = built[1]
     for key, value in pl.build_options.items():
@@ -141,6 +162,11 @@ def parser() -> argparse.ArgumentParser:
                     help="UNQUALIFIED v3: share operand/sum transaction pulses with carry branches and strengthen operand/carry/sum clears; requires complete configuration F")
     ap.add_argument("--experimental-autapse", action="store_true",
                     help="EXPERIMENTAL: requires --rate-robust; unqualified on the 44-step rate floor and reload margin")
+    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private", "dale_biased"), default="autapse",
+                    help=("dale_private and dale_biased are EXPERIMENTAL and NOT autapse replacements: "
+                          "dale_private fails the three-sigma corners and reload; dale_biased passes the "
+                          "512-corner and reload bar (0/0/0, 118/128) but FAILS the separate 44-step "
+                          "rate floor (corner minimum interval 33 steps)"))
     ap.add_argument("--master-ignition", action="store_true",
                     help="EXPERIMENTAL: stagger selected master partner ignition from qualified COPY; requires rate readers and experimental autapses")
     ap.add_argument("--f-width16-experimental", action="store_true",
@@ -156,6 +182,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--robust-request-clear", action="store_true",
                     help="use the opt-in compact clear on DONE's false request rails")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--checkpoint", default=None, help="atomically save/resume a trusted local checkpoint")
+    ap.add_argument("--checkpoint-every-s", type=float, default=1800,
+                    help="wall seconds between checkpoints (default: 1800); signals also save and exit 75")
     ap.add_argument("--fp32", action="store_true", help="single precision (Apple GPU always; GeForce cards are slow at float64)")
     ap.add_argument("--dump-node", type=int, default=None, help="copy whose matching neural spikes to retain")
     ap.add_argument("--dump-roles", default=None, help="regular expression matched against neuron roles")
@@ -168,6 +197,44 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.repeats < 1:
         ap.error("--repeats must be positive")
+    if not math.isfinite(a.checkpoint_every_s) or a.checkpoint_every_s <= 0:
+        ap.error("--checkpoint-every-s must be finite and positive")
+    if a.checkpoint and a.out and Path(a.checkpoint).resolve() == Path(a.out).resolve():
+        ap.error("--checkpoint and --out must be different paths")
+    if a.checkpoint:
+        with CampaignCheckpoint(a.checkpoint, a.checkpoint_every_s) as checkpoint:
+            try:
+                return _main(a, ap, checkpoint)
+            except CheckpointError as exc:
+                ap.error(str(exc))
+    return _main(a, ap)
+
+
+def _fingerprint(a, pl, params):
+    import torch
+    root = Path(__file__).resolve().parents[2]
+    source = hashlib.sha256()
+    for directory in (root / "drosophilos", root / "examples"):
+        for path in sorted(directory.rglob("*")):
+            if path.suffix in (".py", ".c"):
+                source.update(str(path.relative_to(root)).encode())
+                source.update(path.read_bytes())
+    topology = pl.net.topology()
+    net_hash = hashlib.sha256()
+    for field in ("src", "dst", "delay", "quanta", "bias"):
+        value = getattr(topology, field)
+        if value is not None:
+            net_hash.update(np.asarray(value).tobytes())
+    config = {k: v for k, v in vars(a).items()
+              if k not in ("checkpoint", "checkpoint_every_s", "out", "dump_out")}
+    return dict(source=source.hexdigest(), config=config,
+                build_options=pl.build_options, params=asdict(params),
+                neurons=pl.net.n, edges=pl.net.nnz, topology=net_hash.hexdigest(),
+                torch=str(torch.__version__), numpy=np.__version__,
+                device_name=torch.cuda.get_device_name(a.device) if a.device.startswith("cuda") else a.device)
+
+
+def _main(a, ap, checkpoint=None):
     P = Params()
     ks, pl, tokens, ref = block(a.block, P, datapath=a.datapath, rate_robust=a.rate_robust,
                               zero_once=a.zero_once, robust_request_clear=a.robust_request_clear,
@@ -176,7 +243,7 @@ def main(argv=None):
                               experimental_register_reset=a.experimental_register_reset,
                               experimental_autapse=a.experimental_autapse, ordered_xor_oneshot=a.ordered_xor_oneshot,
                               f_width16_experimental=a.f_width16_experimental, master_ignition=a.master_ignition,
-                              operand_xor_oneshot=a.operand_xor_oneshot)
+                              operand_xor_oneshot=a.operand_xor_oneshot, latch_feedback=a.latch_feedback)
     if a.repeats != 1:
         tokens = tokens * a.repeats
         ref = kernel_outputs(ks, tokens)
@@ -199,8 +266,40 @@ def main(argv=None):
     t0 = time.time()
     import torch
     dtype = torch.float32 if a.fp32 else torch.float64
+    if checkpoint is not None:
+        checkpoint.configure(_fingerprint(a, pl, P), vars(a), rng)
+        if checkpoint.saved and checkpoint.saved.get("finished"):
+            rec = checkpoint.saved["record"]
+            if a.out:
+                encoded = json.dumps(rec, indent=1).encode()
+                if not Path(a.out).exists() or Path(a.out).read_bytes() != encoded:
+                    atomic_write(a.out, lambda stream: stream.write(encoded), mode=0o666)
+            return
+        if a.out and Path(a.out).exists():
+            try:
+                rec = json.loads(Path(a.out).read_text())
+            except (ValueError, OSError):
+                rec = {}
+            if not isinstance(rec, dict) or rec.get("checkpoint_fingerprint") != checkpoint.fingerprint:
+                raise CheckpointError(
+                    "existing --out has no matching checkpoint fingerprint; "
+                    "use a different --out path or move the stale output before starting")
+            expected = dict(block=a.block, copies=B, seed=a.seed, repeats=a.repeats,
+                            mix=a.mix, backend=a.backend, neurons=pl.net.n, edges=pl.net.nnz,
+                            tokens_list=tokens, **pl.build_options)
+            if (all(rec.get(k) == v for k, v in expected.items()) and
+                    all(k in rec for k in ("outputs", "per_node", "neural_s", "missing", "ok", "wrong")) and
+                    len(rec["per_node"]) == B and len(rec["outputs"]) == B and
+                    rec.get("outputs_expected") == len(tokens) * len(ks.outputs) * B and
+                    rec["ok"] + rec["wrong"] + rec["missing"] == rec["outputs_expected"]):
+                checkpoint.finish(rec)
+                return
+            raise CheckpointError("existing --out has a matching fingerprint but is not a complete campaign record")
     sim = make_perturbed_sim(pl.net.topology(), P, B, pert, rng, n_steps, device=a.device, dtype=dtype,
                              backend=a.backend)
+    if checkpoint is not None:
+        checkpoint.restore_rng(sim)
+        sim.campaign_checkpoint = checkpoint
     outs, sim, st = run_pipeline_batched(pl, P, [list(tokens) for _ in range(B)], max_ms=a.max_ms, device=a.device,
                                          expect_outputs=[len(tokens) * len(pl.outputs)] * B, sim=sim, dtype=dtype,
                                          capture_spikes=capture, backend=a.backend, observe_every=a.observe_every)
@@ -249,11 +348,23 @@ def main(argv=None):
            "outputs": [{o: [[int(s_), (None if v is None else int(v))] for s_, v in outs[b][o]] for o in ks.outputs} for b in range(B)],
            "first_output_ms": st.get("first_output_ms"), "per_token_ms": st.get("per_token_ms")}
     rec.update(pl.build_options)
+    rec["latch_feedback"] = a.latch_feedback
+    if a.latch_feedback == "dale_biased":
+        rec["dale_biased_version"] = pl.build_options.get("dale_biased_version", DALE_BIASED_VERSION)
+    else:
+        rec["dale_feedback_version"] = pl.build_options.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
     if capture is not None:
         rec.update(spike_dumps=dump_paths, spike_dump_errors=dump_errors)
+    if checkpoint is not None:
+        rec["checkpoint_fingerprint"] = checkpoint.fingerprint
     if a.out:
-        with open(a.out, "w") as stream:
-            json.dump(rec, stream, indent=1)
+        if checkpoint is not None:
+            atomic_write(a.out, lambda stream: stream.write(json.dumps(rec, indent=1).encode()), mode=0o666)
+        else:
+            with open(a.out, "w") as stream:
+                json.dump(rec, stream, indent=1)
+    if checkpoint is not None:
+        checkpoint.finish(rec)
     print(json.dumps(rec, indent=1), flush=True)
 
 

@@ -120,13 +120,18 @@ def compact_register_resets(net: Netlist, drive: Drive, registers: list[Register
     compact_reset_domains(net, drive, [(r.reset_trigger, r.reset_inh) for r in registers])
 
 
-def verify_register_resets(net: Netlist, drive: Drive, registers: list[Register]) -> None:
+def verify_register_resets(net: Netlist, drive: Drive, registers: list[Register],
+                           *, version: int = 1) -> None:
     """Install the unqualified closed-loop prototype for direct experiments only.
 
     No kernel flag enables this pass: silence does not qualify the complete
     reload path. In particular the combined three-sigma datapath corner fails
     before the first reset. See tests/test_verified_reset.py.
+    Version 1 is the recorded prototype; version 2 opts into entry/timer relay
+    feedback inhibition. Neither version changes a public kernel policy.
     """
+    if version not in (1, 2):
+        raise ValueError("reset verification version must be 1 or 2")
     if any(r.storage != "latch" or r.flag_storage != "latch" for r in registers):
         raise ValueError("reset verification requires latch storage")
     if any(r.verification is not None for r in registers):
@@ -135,7 +140,7 @@ def verify_register_resets(net: Netlist, drive: Drive, registers: list[Register]
         name = net.roles[reg.reset_trigger].removesuffix(".reset")
         reg.verification = add_reset_verification(
             net, drive, name, reg.reset_trigger, reg.reset_inh, reg.ready, reg.ready_chain,
-            None if reg.fault_latch is None else reg.fault_latch.u)
+            None if reg.fault_latch is None else reg.fault_latch.u, version=version)
 
 
 @dataclass

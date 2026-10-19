@@ -51,8 +51,9 @@ import numpy as np
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
 from ..protocol.latch import (
-    EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
-    Latch, add_edge_relay, add_experimental_autapses,
+    DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
+    Latch, add_dale_latch_feedback, add_edge_relay, add_experimental_autapses,
+    validate_latch_feedback,
     add_latch, connect_trigger,
 )
 from ..protocol.token import decode_recent, rails_for
@@ -292,7 +293,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    robust_register_reset: bool = False, verified_register_reset: bool = False,
                    experimental_register_reset: bool = False, experimental_autapse: bool = False,
                    ordered_xor_oneshot: bool = False, f_width16_experimental: bool = False,
-                   master_ignition: bool = False, operand_xor_oneshot: bool = False) -> Pipeline:
+                   master_ignition: bool = False, operand_xor_oneshot: bool = False,
+                   latch_feedback: str = "autapse",
+                   dale_feedback_version: int = DALE_FEEDBACK_VERSION,
+                   dale_biased_version: int = DALE_BIASED_VERSION) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -352,6 +356,12 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     synapse per master rail and no neurons. The opt-in/version are recorded
     only when enabled, preserving historical records and default fingerprints.
     `experimental_autapse=True` is EXPERIMENTAL and requires rate_robust=True.
+    `latch_feedback='dale_private'` substitutes private inhibitory relays for
+    that opt-in's storage self-edges, with the same shape restrictions. It is
+    experimental, installed last, and records `dale_feedback_version` for
+    replay validation; omitted policy/version retain historical circuits.
+    'dale_biased' uses biased relays with sparser feedback and independent
+    `dale_biased_version` metadata; it does not reproduce autapse timing.
     Memories/RAM, phases/pacing, multiple streams and multipliers require the
     complete configuration F (also ordered_xor_oneshot); autapse alone remains
     rejected on those shapes. Generic and specialized datapaths are allowed.
@@ -388,6 +398,11 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     survey fails. zero_once may be combined with it."""
     if type(operand_xor_oneshot) is not bool:
         raise ValueError("operand_xor_oneshot requires a bool")
+    validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version,
+                            dale_biased_version)
+    if latch_feedback != "autapse" and (master_ignition or operand_xor_oneshot or f_width16_experimental):
+        raise ValueError("master_ignition, operand_xor_oneshot, and f_width16_experimental "
+                         f"are not surveyed with {latch_feedback}")
     if operand_xor_oneshot and not (rate_robust and experimental_autapse and ordered_xor_oneshot):
         raise ValueError("operand_xor_oneshot requires complete configuration F: rate_robust=True, "
                          "experimental_autapse=True and ordered_xor_oneshot=True")
@@ -1027,7 +1042,10 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
         registers += [r for cell in order for r in (cell.stage, cell.master)]
         compact_register_resets(net, drive, registers)
     if experimental_autapse:
-        add_experimental_autapses(net, drive)
+        if latch_feedback == "autapse":
+            add_experimental_autapses(net, drive)
+        else:
+            add_dale_latch_feedback(net, drive, variant=latch_feedback.removeprefix("dale_"))
     outs = [cells[o] for o in (outputs or [order[-1].name])]
     pl = Pipeline(net, drive, n, in_reg, P, order, const_rails, mem_objs, image, in_creq, outs,
                   {st: (reg, P_) for st, (reg, P_, _) in inputs.items()}, datapath)
@@ -1063,6 +1081,13 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     }
     if f_width16_experimental:
         pl.build_options["f_width16_experimental"] = True
+    # Preserve historical records verbatim unless the new circuit is selected.
+    if latch_feedback == "dale_private":
+        pl.build_options.update(latch_feedback=latch_feedback,
+                                dale_feedback_version=DALE_FEEDBACK_VERSION)
+    elif latch_feedback == "dale_biased":
+        pl.build_options.update(latch_feedback=latch_feedback,
+                                dale_biased_version=DALE_BIASED_VERSION)
     if master_ignition:
         pl.build_options.update(master_ignition=True, master_ignition_version=MASTER_IGNITION_VERSION)
     if operand_xor_oneshot:
@@ -1550,6 +1575,58 @@ def run_pipeline(pl: Pipeline, params: Params, tokens: list, *, max_ms: float = 
     return first, sim, stats
 
 
+@dataclass
+class PipelineRunState:
+    """Mutable host state at a simulation block boundary; no closures or circuit objects.
+
+    A campaign attaches its checkpoint controller to the simulator, preserving the public
+    runner signature. Other callers do not create snapshots or install signal handlers.
+    """
+    settle: int = 3000
+    schedules: list = field(default_factory=list)
+    want: list = field(default_factory=list)
+    seen_f: object = None
+    seen_t: object = None
+    bad: object = None
+    last_timeout: object = None
+    last_commit: object = None
+    n_commit: object = None
+    last_load: object = None
+    refused: object = None
+    retry: object = None
+    blocked: object = None
+    processed_through: object = None
+    n_ready: object = None
+    loaded: object = None
+    last_ready: object = None
+    last_wm: object = None
+    outs: object = None
+    loads: object = None
+    load_events: object = None
+    k: object = None
+    pending: object = None
+    done_nodes: object = None
+    t_load: object = None
+    t_start: object = None
+    t_last_report: object = None
+    step_last_report: object = None
+    steps_since_check: object = None
+    profiled_steps: object = None
+    finished: object = None
+
+    def snapshot(self) -> dict:
+        state = vars(self).copy()
+        state["pending"] = [(s, b, cell.name) for s, b, cell in self.pending]
+        return state
+
+    @classmethod
+    def restore(cls, saved: dict, pl: Pipeline):
+        state = cls(**saved)
+        cells = {c.name: c for c in pl.outputs}
+        state.pending = [(s, b, cells[name]) for s, b, name in saved["pending"]]
+        return state
+
+
 def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_ms: float = 60000, device: str = "cpu",
                          expect_outputs: list | None = None, dtype=None, sim=None,
                          progress: "float | callable | None" = 300,
@@ -1608,6 +1685,8 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     from ..sim.lif_fast import FastSim
     from ..sim.lif_torch import TorchSim
     from ..sim.profile import Profiler
+    state = PipelineRunState()
+    checkpoint = getattr(sim, "campaign_checkpoint", None)
     net, drive = pl.net, pl.drive
     B = len(schedules)
     runner_started = time.perf_counter()
@@ -1647,35 +1726,35 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     fault_n = {c.stage.fault_latch.u for c in pl.cells} | {reg.stage.fault_latch.u for reg, _ in pl.inputs.values()}
     timeout_n = {P_.watchdog.timeout.u for _, P_ in pl.inputs.values() if P_.watchdog is not None}
     fault_ids = np.array(sorted(fault_n | timeout_n), dtype=np.int64)
-    seen_f, seen_t, bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
+    state.seen_f, state.seen_t, state.bad = set(), set(), 0  # (node, latch) first spikes; non-valid output words
     timeout_of = {P_.watchdog.timeout.u: st for st, (_, P_) in pl.inputs.items() if P_.watchdog is not None}
-    last_timeout = [{st: None for st in pl.inputs} for _ in range(B)]
-    last_commit = [{st: None for st in pl.inputs} for _ in range(B)]  # last stage->master commit rise
-    n_commit = [0] * B  # commit rises: words the kernel took in (their outputs are still owed)
-    last_load = [{st: None for st in pl.inputs} for _ in range(B)]  # the word each stream holds
-    refused = [[] for _ in range(B)]  # detected refusals: TIMEOUT rises on a loaded word
-    retry = [[] for _ in range(B)]  # load events to deliver again on the READY the reset raises
-    blocked = [False] * B  # a word refused max_retries times over: the node stops here
-    processed_through = observer.available_through
+    state.last_timeout = [{st: None for st in pl.inputs} for _ in range(B)]
+    state.last_commit = [{st: None for st in pl.inputs} for _ in range(B)]  # last stage->master commit rise
+    state.n_commit = [0] * B  # commit rises: words the kernel took in (their outputs are still owed)
+    state.last_load = [{st: None for st in pl.inputs} for _ in range(B)]  # the word each stream holds
+    state.refused = [[] for _ in range(B)]  # detected refusals: TIMEOUT rises on a loaded word
+    state.retry = [[] for _ in range(B)]  # load events to deliver again on the READY the reset raises
+    state.blocked = [False] * B  # a word refused max_retries times over: the node stops here
+    state.processed_through = observer.available_through
 
     def count_latches(s_: int) -> tuple[np.ndarray, np.ndarray]:
         nd, nr = observer.fired_at(s_)
         mf = np.isin(nr, fault_ids)
         for u, b in zip(nr[mf].tolist(), nd[mf].tolist()):
             if u in timeout_n:
-                seen_t.add((b, u))
+                state.seen_t.add((b, u))
                 st = timeout_of[u]
-                if last_timeout[b][st] is None or s_ - last_timeout[b][st] > 3 * period:
-                    ev_ = last_load[b][st]
+                if state.last_timeout[b][st] is None or s_ - state.last_timeout[b][st] > 3 * period:
+                    ev_ = state.last_load[b][st]
                     # a TIMEOUT after the word's commit to its master is a stray spike (the
                     # reset it triggers clears an already-consumed stage): not a refusal to
                     # resend — a resend would duplicate the word (review finding)
-                    committed = (ev_ is not None and last_commit[b][st] is not None
-                                 and last_commit[b][st] > ev_["event_step"])
-                    duplicate = ev_ is not None and (ev_ in retry[b] or bool(ev_.get("refused")))
+                    committed = (ev_ is not None and state.last_commit[b][st] is not None
+                                 and state.last_commit[b][st] > ev_["event_step"])
+                    duplicate = ev_ is not None and (ev_ in state.retry[b] or bool(ev_.get("refused")))
                     again = (ev_ is not None and retry_refused and not committed and not duplicate
                              and ev_["attempts"] < max_retries)
-                    refused[b].append({"node": b, "stream": st, "step": s_,
+                    state.refused[b].append({"node": b, "stream": st, "step": s_,
                                        "value": None if ev_ is None else ev_["value"],
                                        "schedule_index": None if ev_ is None else ev_["schedule_index"],
                                        "attempt": None if ev_ is None else ev_["attempts"] + 1,
@@ -1684,33 +1763,21 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     if ev_ is not None and not committed:
                         ev_["refused"] = True
                     if again:
-                        retry[b].append(ev_)
+                        state.retry[b].append(ev_)
                     elif ev_ is not None and not committed and not duplicate:
-                        blocked[b] = True  # not resent (retries exhausted or off): the stream stops here
-                last_timeout[b][st] = s_
+                        state.blocked[b] = True  # not resent (retries exhausted or off): the stream stops here
+                state.last_timeout[b][st] = s_
             else:
-                seen_f.add((b, u))
+                state.seen_f.add((b, u))
         return nd, nr
 
     def drain_latches() -> None:
         """Settle time: faults and timeouts are counted (the old runner scanned every chunk);
         READY rises before the first load are not tokens and are not counted."""
-        nonlocal processed_through
-        while processed_through < observer.available_through:
-            processed_through += 1
-            count_latches(processed_through)
+        while state.processed_through < observer.available_through:
+            state.processed_through += 1
+            count_latches(state.processed_through)
 
-    load_started = time.perf_counter()
-    for b in range(B):
-        load_pipeline_image(sim, pl, node=b)
-    settle = 3000  # the image's completions settle
-    while settle and not stop_requested():
-        _advance(sim, observer, min(block, settle), trim)
-        settle -= min(block, settle)
-        drain_latches()
-    observer.flush()
-    drain_latches()
-    t_load = time.perf_counter() - load_started
     first_stream = next(iter(pl.inputs))
     scheds = []
     for sc in schedules:
@@ -1728,17 +1795,18 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
     for o in pl.outputs:
         watch[o.master.completion.u] = ("out", o)
     watch_ids = np.array(sorted(watch), dtype=np.int64)
-    n_ready = [{st: 0 for st in pl.inputs} for _ in range(B)]
-    loaded = [{st: 0 for st in pl.inputs} for _ in range(B)]
-    last_ready = [{st: None for st in pl.inputs} for _ in range(B)]
-    last_wm = [{o.name: None for o in pl.outputs} for _ in range(B)]
-    outs = [{o.name: [] for o in pl.outputs} for _ in range(B)]
-    loads = [[] for _ in range(B)]
-    load_events = [[] for _ in range(B)]
-    k = [0] * B
-    pending = []  # (step, node, cell)
+    state.n_ready = [{st: 0 for st in pl.inputs} for _ in range(B)]
+    state.loaded = [{st: 0 for st in pl.inputs} for _ in range(B)]
+    state.last_ready = [{st: None for st in pl.inputs} for _ in range(B)]
+    state.last_wm = [{o.name: None for o in pl.outputs} for _ in range(B)]
+    state.outs = [{o.name: [] for o in pl.outputs} for _ in range(B)]
+    state.loads = [[] for _ in range(B)]
+    state.load_events = [[] for _ in range(B)]
+    state.k = [0] * B
+    state.pending = []  # (step, node, cell)
     want = expect_outputs or [len(sc) for sc in scheds]
-    done_nodes = [False] * B
+    state.schedules, state.want = scheds, want
+    state.done_nodes = [False] * B
 
     def default_progress(report: dict) -> None:
         print(f"progress: {report['elapsed_s']:.0f}s elapsed, {report['neural_ms']:.0f} ms neural, "
@@ -1752,36 +1820,34 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
         progress_interval, progress_fn = 300, progress
     else:
         progress_interval, progress_fn = progress, default_progress
-    t_start = time.perf_counter()
-    t_last_report = t_start
-    step_last_report = sim.step_index
+    state.t_start = None
+    state.t_last_report = None
+    state.step_last_report = sim.step_index
     STEP_CHECK = 1000
-    steps_since_check = 0
+    state.steps_since_check = 0
 
     profile_target = max(0, int(profile_steps or 0))
-    profiled_steps = 0
-    if profile_target and not stop_requested():
-        profiler.enabled = True
+    state.profiled_steps = 0
 
     def host_schedule() -> None:
         for b in range(B):
-            if blocked[b]:
+            if state.blocked[b]:
                 continue
-            if retry[b]:  # a refused word goes in again before the schedule advances
-                ev_ = retry[b][0]
+            if state.retry[b]:  # a refused word goes in again before the schedule advances
+                ev_ = state.retry[b][0]
                 st, value, min_outs, index = ev_["stream"], ev_["value"], ev_["min_outs"], ev_["schedule_index"]
                 attempts = ev_["attempts"] + 1
-            elif k[b] < len(scheds[b]):
-                st, value, min_outs = scheds[b][k[b]]
-                index, attempts = k[b], 0
+            elif state.k[b] < len(scheds[b]):
+                st, value, min_outs = scheds[b][state.k[b]]
+                index, attempts = state.k[b], 0
             else:
                 continue
-            n_out = sum(len(v) for v in outs[b].values())
-            prev = last_load[b][st]
+            n_out = sum(len(v) for v in state.outs[b].values())
+            prev = state.last_load[b][st]
             # the previous word must have reached its master (a stray reset re-raises READY
             # without consuming anything: counting READY alone ran the host a word ahead)
-            settled = retry[b] or prev is None or (last_commit[b][st] is not None and last_commit[b][st] > prev["event_step"])
-            if settled and n_ready[b][st] >= loaded[b][st] and n_out >= min_outs and (not loads[b] or sim.step_index >= loads[b][-1] + gap):
+            settled = state.retry[b] or prev is None or (state.last_commit[b][st] is not None and state.last_commit[b][st] > prev["event_step"])
+            if settled and state.n_ready[b][st] >= state.loaded[b][st] and n_out >= min_outs and (not state.loads[b] or sim.step_index >= state.loads[b][-1] + gap):
                 t = sim.step_index + 5
                 Pst = pl.inputs[st][1]
                 rails = list(rails_for(value, pl.n))
@@ -1789,89 +1855,130 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
                     rails = list(rail_filter(b, index, st, value, rails))
                 ev_n = [Pst.rails[i][r].u for i, r in rails]
                 sim.add_events(b, [t] * len(ev_n), ev_n, [drive.ignite] * len(ev_n))
-                loads[b].append(t)
+                state.loads[b].append(t)
                 event = {"schedule_index": index, "stream": st, "value": value, "min_outs": min_outs,
                          "injected_step": sim.step_index, "event_step": t,
-                         "injected_wall_s": time.perf_counter(), "retry": bool(retry[b]), "attempts": attempts}
-                load_events[b].append(event)
-                last_load[b][st] = event
-                loaded[b][st] += 1
-                if retry[b]:
-                    retry[b].pop(0)
+                         "injected_wall_s": time.perf_counter(), "retry": bool(state.retry[b]), "attempts": attempts}
+                state.load_events[b].append(event)
+                state.last_load[b][st] = event
+                state.loaded[b][st] += 1
+                if state.retry[b]:
+                    state.retry[b].pop(0)
                 else:
-                    k[b] += 1
+                    state.k[b] += 1
 
     def lost_word(b: int, st: str, s_: int) -> None:
         """READY rose while the stream's last word had neither reached its master nor been
         refused: the stage was reset under it (a stray reset) and it is gone without a
         TIMEOUT. Resend it like a refusal (review finding)."""
-        prev = last_load[b][st]
-        if prev is None or prev in retry[b] or prev.get("refused"):
+        prev = state.last_load[b][st]
+        if prev is None or prev in state.retry[b] or prev.get("refused"):
             return
-        if last_commit[b][st] is not None and last_commit[b][st] > prev["event_step"]:
+        if state.last_commit[b][st] is not None and state.last_commit[b][st] > prev["event_step"]:
             return
         prev["refused"] = True
         again = retry_refused and prev["attempts"] < max_retries
-        refused[b].append({"node": b, "stream": st, "step": s_, "value": prev["value"],
+        state.refused[b].append({"node": b, "stream": st, "step": s_, "value": prev["value"],
                            "schedule_index": prev["schedule_index"], "attempt": prev["attempts"] + 1,
                            "committed": False, "reason": "reset", "retried": again})
         if again:
-            retry[b].append(prev)
+            state.retry[b].append(prev)
         else:
-            blocked[b] = True
+            state.blocked[b] = True
 
     def decode_and_watch(s_: int) -> bool:
-        nonlocal bad
-        while pending and s_ >= pending[0][0] + window:
-            stp, b, cell = pending.pop(0)
+        while state.pending and s_ >= state.pending[0][0] + window:
+            stp, b, cell = state.pending.pop(0)
             v, status = decode_recent(observer, cell.master.rail_taps[: pl.n], stp + window, window, node=b)
             value = v if status == "valid" else None
-            outs[b][cell.name].append((stp, value))
+            state.outs[b][cell.name].append((stp, value))
             if on_output is not None:
                 on_output(b, cell.name, stp, value, time.perf_counter())
-            bad += status != "valid"
+            state.bad += status != "valid"
         nd, nr = count_latches(s_)  # before the exit test: a fault on the terminal step counts (review)
         for b in range(B):
-            if not done_nodes[b] and blocked[b] and not any(p_[1] == b for p_ in pending):
+            if not state.done_nodes[b] and state.blocked[b] and not any(p_[1] == b for p_ in state.pending):
                 per_token = want[b] // max(1, len(scheds[b]))
-                if sum(len(v) for v in outs[b].values()) >= n_commit[b] * per_token:
-                    done_nodes[b] = True  # fail-stop once the words it did take in have produced their outputs
-            if (not done_nodes[b] and k[b] >= len(scheds[b]) and not retry[b]
-                    and sum(len(v) for v in outs[b].values()) >= want[b]):
-                done_nodes[b] = True
-        if all(done_nodes) and not pending:
+                if sum(len(v) for v in state.outs[b].values()) >= state.n_commit[b] * per_token:
+                    state.done_nodes[b] = True  # fail-stop once the words it did take in have produced their outputs
+            if (not state.done_nodes[b] and state.k[b] >= len(scheds[b]) and not state.retry[b]
+                    and sum(len(v) for v in state.outs[b].values()) >= want[b]):
+                state.done_nodes[b] = True
+        if all(state.done_nodes) and not state.pending:
             return True
         m = np.isin(nr, watch_ids)
         for u, b in zip(nr[m].tolist(), nd[m].tolist()):
             kind, what = watch[u]
             if kind == "ready":
-                if last_ready[b][what] is None or s_ - last_ready[b][what] > 3 * period:
-                    n_ready[b][what] += 1
+                if state.last_ready[b][what] is None or s_ - state.last_ready[b][what] > 3 * period:
+                    state.n_ready[b][what] += 1
                     lost_word(b, what, s_)
-                last_ready[b][what] = s_
+                state.last_ready[b][what] = s_
             elif kind == "commit":
-                if last_commit[b][what] is None or s_ - last_commit[b][what] > 3 * period:
-                    n_commit[b] += 1
-                last_commit[b][what] = s_
+                if state.last_commit[b][what] is None or s_ - state.last_commit[b][what] > 3 * period:
+                    state.n_commit[b] += 1
+                state.last_commit[b][what] = s_
             else:
-                if last_wm[b][what.name] is None or s_ - last_wm[b][what.name] > 3 * period:
-                    pending.append((s_, b, what))
-                last_wm[b][what.name] = s_
+                if state.last_wm[b][what.name] is None or s_ - state.last_wm[b][what.name] > 3 * period:
+                    state.pending.append((s_, b, what))
+                state.last_wm[b][what.name] = s_
         return False
 
     def process_observed() -> bool:
         """Read every step that became observable since the last call (one step for a
         RefSim/TorchSim; a FastSim's block, or K steps at a transfer)."""
-        nonlocal processed_through
         done = False
-        while processed_through < observer.available_through and not done:
-            processed_through += 1
-            done = decode_and_watch(processed_through)
+        while state.processed_through < observer.available_through and not done:
+            state.processed_through += 1
+            done = decode_and_watch(state.processed_through)
         return done
 
+    def checkpoint_boundary() -> None:
+        if checkpoint is not None:
+            # Do not flush: changing the observation cadence changes host scheduling.
+            checkpoint.poll(sim, state, observer)
+
+    load_started = time.perf_counter()
+    if checkpoint is not None and checkpoint.resume_state is not None:
+        saved = checkpoint.resume_state
+        sim.restore(saved["simulator"])
+        state = PipelineRunState.restore(saved["host"], pl)
+        scheds, want = state.schedules, state.want
+        observation = saved["observer"].copy()
+        observer._obs.copy_(observation.pop("_obs"))
+        observer.__dict__.update(observation)
+        if isinstance(sim, FastSim):
+            sim.set_observer(observer)  # restore compatibility list aliases
+        # The state now owns the host lists; do not retain a second CPU copy of the
+        # large simulator tensors throughout the resumed job.
+        checkpoint.resume_state = checkpoint.saved = None
+        del saved, observation
+    else:
+        load_started = time.perf_counter()
+        for b in range(B):
+            load_pipeline_image(sim, pl, node=b)
+    # Checkpoints may be taken while the initial image is settling, too.
+    while state.settle and not stop_requested():
+        count = min(block, state.settle)
+        _advance(sim, observer, count, trim)
+        state.settle -= count
+        drain_latches()
+        checkpoint_boundary()
+    if state.t_load is None:
+        observer.flush()
+        drain_latches()
+        state.t_load = time.perf_counter() - load_started
+    if state.t_start is None:
+        state.t_start = time.perf_counter()
+        state.t_last_report = state.t_start
+        state.step_last_report = sim.step_index
+    if profile_target and not stop_requested() and state.profiled_steps < profile_target:
+        profiler.enabled = True
+    checkpoint_boundary()
+
     truncated = stop_requested()
-    finished = False
-    while not stop_requested() and sim.step_index < int(max_ms / params.dt):
+    state.finished = bool(state.finished)
+    while not state.finished and not stop_requested() and sim.step_index < int(max_ms / params.dt):
         profiling_this_step = profiler.enabled
         if profiling_this_step:
             with profiler.region("host_schedule"):
@@ -1879,49 +1986,50 @@ def run_pipeline_batched(pl: Pipeline, params: Params, schedules: list, *, max_m
         else:
             host_schedule()
         _advance(sim, observer, block, trim)
-        steps_since_check += block
-        if progress_interval and steps_since_check >= STEP_CHECK:
-            steps_since_check = 0
+        state.steps_since_check += block
+        if progress_interval and state.steps_since_check >= STEP_CHECK:
+            state.steps_since_check = 0
             now = time.perf_counter()
-            if now - t_last_report >= progress_interval:
-                steps_per_s = (sim.step_index - step_last_report) / (now - t_last_report)
+            if now - state.t_last_report >= progress_interval:
+                steps_per_s = (sim.step_index - state.step_last_report) / (now - state.t_last_report)
                 progress_fn({
-                    "elapsed_s": now - t_start, "neural_ms": sim.step_index * params.dt, "steps_per_s": steps_per_s,
-                    "outputs": sum(sum(len(v) for v in o.values()) for o in outs), "expected_outputs": sum(want),
-                    "nodes_done": sum(done_nodes), "total_nodes": B,
-                    "faults": len(seen_f), "timeouts": len(seen_t), "outs": outs,
-                    "refusals": sum(len(r) for r in refused),
+                    "elapsed_s": now - state.t_start, "neural_ms": sim.step_index * params.dt, "steps_per_s": steps_per_s,
+                    "outputs": sum(sum(len(v) for v in o.values()) for o in state.outs), "expected_outputs": sum(want),
+                    "nodes_done": sum(state.done_nodes), "total_nodes": B,
+                    "faults": len(state.seen_f), "timeouts": len(state.seen_t), "outs": state.outs,
+                    "refusals": sum(len(r) for r in state.refused),
                 })
-                t_last_report, step_last_report = now, sim.step_index
+                state.t_last_report, state.step_last_report = now, sim.step_index
         if profiling_this_step:
             with profiler.region("decode"):
-                finished = process_observed()
-            profiled_steps += block
-            if profiled_steps >= profile_target:
+                state.finished = process_observed()
+            state.profiled_steps += block
+            if state.profiled_steps >= profile_target:
                 profiler.enabled = False
         else:
-            finished = process_observed()
-        if finished:
+            state.finished = process_observed()
+        checkpoint_boundary()
+        if state.finished:
             break
     truncated = stop_requested()
     observer.flush()
-    if not finished:
+    if not state.finished:
         process_observed()
-    work_outstanding = any(k[b] < len(scheds[b]) or retry[b] or
-                           sum(len(v) for v in outs[b].values()) < want[b] for b in range(B)) or bool(pending)
+    work_outstanding = any(state.k[b] < len(scheds[b]) or state.retry[b] or
+                           sum(len(v) for v in state.outs[b].values()) < want[b] for b in range(B)) or bool(state.pending)
     hit_max_ms = sim.step_index >= int(max_ms / params.dt) and work_outstanding and not truncated
     profile_regions = profiler.regions()
-    stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": loaded,
-             "outputs": [sum(len(v) for v in o.values()) for o in outs], "neural_ms": sim.step_index * params.dt,
-             "load_steps": loads, "load_events": load_events, "t_load": t_load,
-             "faults": len(seen_f), "timeouts": len(seen_t), "bad_outputs": bad,
-             "refusals": sum(len(r) for r in refused), "refused": refused,
-             "retries": sum(1 for le in load_events for e in le if e["retry"]),
-             "blocked_nodes": [b for b in range(B) if blocked[b]],
+    stats = {"neurons": net.n, "nodes": B, "tokens": [len(sc) for sc in scheds], "loaded": state.loaded,
+             "outputs": [sum(len(v) for v in o.values()) for o in state.outs], "neural_ms": sim.step_index * params.dt,
+             "load_steps": state.loads, "load_events": state.load_events, "t_load": state.t_load,
+             "faults": len(state.seen_f), "timeouts": len(state.seen_t), "bad_outputs": state.bad,
+             "refusals": sum(len(r) for r in state.refused), "refused": state.refused,
+             "retries": sum(1 for le in state.load_events for e in le if e["retry"]),
+             "blocked_nodes": [b for b in range(B) if state.blocked[b]],
              "host_stalls": bool(hit_max_ms), "truncated": bool(truncated),
              "wall_s": time.perf_counter() - runner_started,
-             "profile": {"profiled_steps": profiled_steps, "regions": profile_regions},
+             "profile": {"profiled_steps": state.profiled_steps, "regions": profile_regions},
              **_sim_stats(sim, observer)}
     if capture_spikes is not None:
         stats["captured_spikes"] = observer.capture_spikes()
-    return outs, sim, stats
+    return state.outs, sim, stats
