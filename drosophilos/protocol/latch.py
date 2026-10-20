@@ -17,6 +17,22 @@ EXPERIMENTAL_AUTAPSE_VERSION = 1
 EXPERIMENTAL_AUTAPSE_GAIN = 0.2
 EXPERIMENTAL_AUTAPSE_DELAY_STEPS = 0
 
+# Experimental private inhibitory relay circuit. Bump on any circuit retuning.
+DALE_FEEDBACK_VERSION = 1
+DALE_FEEDBACK_GAIN = 0.2
+DALE_FEEDBACK_DRIVE_GAIN = 1.0
+DALE_FEEDBACK_INPUT_DELAY_STEPS = 0
+DALE_FEEDBACK_DELAY_STEPS = 0
+
+# Bounded fast-feedback design round's score winner, NOT autapse-equivalent
+# timing: its biased relay skips member spikes. Private v1 above is unchanged.
+DALE_BIASED_VERSION = 1
+DALE_BIASED_BIAS_MV = 5.6
+DALE_BIASED_DRIVE_GAIN = 0.2
+DALE_BIASED_GAIN = 0.2
+DALE_BIASED_INPUT_DELAY_STEPS = 0
+DALE_BIASED_DELAY_STEPS = 0
+
 # Version 1 (rejected): simultaneous u/v ignition admits fast reset survivors.
 # Version 2: keep u at delay 18, assist v 60 steps later from the SAME COPY arm.
 MASTER_IGNITION_VERSION = 2
@@ -74,6 +90,67 @@ def add_experimental_autapses(net: Netlist, drive: Drive) -> None:
                             EXPERIMENTAL_AUTAPSE_DELAY_STEPS)
     finally:
         net.inhibition_mirrors = mirrors
+
+
+def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private") -> None:
+    """Finalize excitatory storage with private inhibitory feedback neurons.
+
+    Like autapses, install last, after all readers and controllers. Each member
+    excites only its own relay; the relay inhibits only that member. Zero edge
+    delays still incur the relay's membrane integration and spike delivery time.
+    ``biased`` reduces the relay's resting gap and input drive together. It won
+    the bounded holding/reload score but does not reproduce autapse timing.
+    This changes latch feedback only, not other mixed-sign circuit elements.
+    """
+    if variant not in ("private", "biased"):
+        raise ValueError(f"unsupported Dale latch feedback variant: {variant!r}")
+    edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
+    members = [m for (u, v), q in edges.items()
+               if q == drive.loop and edges.get((v, u)) == drive.loop
+               and net.roles[u].endswith(".u")
+               and net.roles[v] == net.roles[u].removesuffix(".u") + ".v"
+               for m in (u, v)]
+    roles = set(net.roles)
+    if any(net.roles[m] + ".fb" in roles or (m, m) in edges for m in members):
+        raise ValueError("latch feedback already installed")
+    mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
+    try:
+        for member in members:
+            if variant == "private":
+                inh = net.neuron(net.roles[member] + ".fb")
+                net.synapse(member, inh, round(drive.loop * DALE_FEEDBACK_DRIVE_GAIN),
+                            DALE_FEEDBACK_INPUT_DELAY_STEPS)
+                net.synapse(inh, member, -round(drive.loop * DALE_FEEDBACK_GAIN),
+                            DALE_FEEDBACK_DELAY_STEPS)
+            else:
+                inh = net.neuron(net.roles[member] + ".fb", bias=DALE_BIASED_BIAS_MV)
+                net.synapse(member, inh, round(drive.loop * DALE_BIASED_DRIVE_GAIN),
+                            DALE_BIASED_INPUT_DELAY_STEPS)
+                net.synapse(inh, member, -round(drive.loop * DALE_BIASED_GAIN),
+                            DALE_BIASED_DELAY_STEPS)
+    finally:
+        net.inhibition_mirrors = mirrors
+
+
+def validate_latch_feedback(latch_feedback: str, experimental_autapse: bool,
+                            dale_feedback_version: int = DALE_FEEDBACK_VERSION,
+                            dale_biased_version: int = DALE_BIASED_VERSION) -> None:
+    """Validate builder options, including version metadata forwarded on replay.
+
+    Missing policy means the historical autapse. Versions matter only when the
+    corresponding circuit is selected; old autapse records remain unchanged.
+    """
+    if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
+        raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
+    if latch_feedback != "autapse":
+        if not experimental_autapse:
+            raise ValueError(f"{latch_feedback} latch_feedback requires experimental_autapse=True")
+        if latch_feedback == "dale_private" and (
+                type(dale_feedback_version) is not int or dale_feedback_version != DALE_FEEDBACK_VERSION):
+            raise ValueError("unsupported Dale-feedback circuit version")
+        if latch_feedback == "dale_biased" and (
+                type(dale_biased_version) is not int or dale_biased_version != DALE_BIASED_VERSION):
+            raise ValueError("unsupported Dale-biased circuit version")
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),
@@ -176,11 +253,12 @@ class ResetVerification:
     exhausted: Latch
     added_neurons: int
     added_synapses: int
+    version: int = 1
 
 
 def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
                            inh: int, ready: int, ready_chain: list[int],
-                           fault_target: int | None = None) -> ResetVerification:
+                           fault_target: int | None = None, *, version: int = 1) -> ResetVerification:
     """Experimental silence certificate with three statically unrolled retries.
 
     Finalize AFTER every reset extension and mirrored reader. The domain is the
@@ -199,7 +277,14 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
     This is a spiking circuit, not a host observer. Neither silence nor a bounded
     retry count proves analogue recovery. It is retained for falsifiable tests;
     ``verified_register_reset=True`` is rejected by the public kernel builder.
+
+    Version 1 preserves the recorded 2026-10-04 prototype byte for byte.
+    Version 2 adds local feedback inhibition to the attempt entries and timer
+    relays: a doublet must not multiply through recovery into repeated READY.
+    It remains an unqualified, direct-experiment opt-in.
     """
+    if version not in (1, 2):
+        raise ValueError("reset verification version must be 1 or 2")
     if len(ready_chain) != 15:
         raise ValueError("reset verification requires a fifteen-hop recovery chain")
     if not 0 <= VERIFY_DELAY_STEPS <= D_MAX:
@@ -217,12 +302,14 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         net.synapse(tap, busy, drive.pulse)
     exhausted = add_latch(net, drive, f"{name}.verify.exhausted")
     attempts, checks = [], []
+    pulse_nodes = [trigger, *ready_chain, ready]
     start = trigger
     previous_deadline = None
     for attempt in range(VERIFY_MAX_RETRIES + 1):
         prefix = f"{name}.verify.a{attempt}"
         if attempt:
             start = net.neuron(f"{prefix}.reset")
+            pulse_nodes.append(start)
             net.synapse(previous_deadline, start, drive.pulse)
             prev = start
             net.synapse(start, inh, drive.pulse)
@@ -234,6 +321,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
             prev = start
             for k in range(15):
                 recovery = net.neuron(f"{prefix}.recovery{k}")
+                pulse_nodes.append(recovery)
                 net.synapse(prev, recovery, drive.pulse)
                 prev = recovery
         else:
@@ -242,6 +330,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         recovery_end = prev
         for k in range(VERIFY_WINDOW_LINKS):
             timer = net.neuron(f"{prefix}.quiet{k}")
+            pulse_nodes.append(timer)
             if attempt == k == 0:
                 # Preserve existing consumers of READY and the recovery prefix.
                 edge = old_edge[0]
@@ -259,6 +348,7 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         prev = recovery_end
         for k in range(7):
             deadline = net.neuron(f"{prefix}.deadline{k}")
+            pulse_nodes.append(deadline)
             net.synapse(prev, deadline, drive.pulse, VERIFY_DELAY_STEPS)
             if k >= 4:
                 net.synapse(certificate, deadline, -int(round(2.2 * drive.loop)))
@@ -269,9 +359,21 @@ def add_reset_verification(net: Netlist, drive: Drive, name: str, trigger: int,
         net.synapse(exhausted.u, entry, -int(round(2.2 * drive.loop)))
     if fault_target is not None:
         net.synapse(exhausted.u, fault_target, drive.ignite)
+    if version == 2:
+        # Feedback is local, like add_experimental_autapses; genuine reset
+        # inhibition must still mirror onto any existing or future readers.
+        mirrors, net.inhibition_mirrors = net.inhibition_mirrors, {}
+        try:
+            for relay in pulse_nodes:
+                # Immediate feedback prevents a second spike from residual
+                # charge plus strays, including doublets born inside recovery.
+                # BUSY/exhaustion and ordinary reset taps/inhibitor stay intact.
+                net.synapse(relay, relay, -int(round(4.4 * drive.loop)), 0)
+        finally:
+            net.inhibition_mirrors = mirrors
     net.group(f"{name}.verify.exhausted", exhausted.members)
     return ResetVerification(domain, busy, tuple(attempts), tuple(checks), exhausted,
-                             net.n - n0, net.nnz - e0)
+                             net.n - n0, net.nnz - e0, version)
 
 
 def add_edge_relay(net: Netlist, drive: Drive, name: str, source: int, strength: float = 2.2, hold_from=(),

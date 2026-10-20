@@ -2,7 +2,7 @@
 
 ## Answer
 
-No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 100% of all_w0's host inputs (4,131,952) or 90% of vnc_w2's (1,291,471).  The all_w0 input minimum is confirmed at 1.00; its 0.95 rung reached 10/10 but was not run at 50, placing the threshold above 0.90 and possibly at or below 0.95.  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
+No: under Profile 2 (only real anatomical wiring and documented parameter edits), no tested region hosted configuration F's 740-neuron ordered four-bit adder reliably in the live simulated brain.  All six live runs were 0/50.  The complete condition-A image computed only after a large, measured boundary cut: in a silent surround, cut 50% of all_w0's host outputs (2,941,830 synapses) or 40% of vnc_w2's (1,334,045); under 2 Hz sensory input, cut 95% of whole-CNS w0 (all_w0)'s host inputs (4,111,318 synapses) or 90% of vnc_w2's (1,291,471).  Whole-CNS w0 under 2 Hz drive succeeds at the smallest tested rung of 95% (90% failed; fractions between 90% and 95% were not tested); central_brain w0 needs more than 95%, while VNC w2 succeeds at 90%.  Here, a *host* is a real MCNS neuron assigned to one designed adder neuron; a *Profile 3 edge* is a designed edge added where anatomy does not supply it.
 
 An earlier whole-brain batch was discarded because `h1_fullgraph` did not inject the flip-flop register's power-on pulse (every addition faulted even with the brain fully cut off); this was fixed in `e8f5f3b`, after which the sealed control computed 3/3.
 
@@ -67,9 +67,9 @@ The ladder tables retain every measured rung.  “Cut” is edge pairs / anatomi
 | inputs, 2 Hz Poisson | 1.00 | 412,685 / 4,131,952 | 10/10 |
 | inputs, 2 Hz Poisson (confirmation) | 1.00 | 412,685 / 4,131,952 | **50/50** |
 
-Minimal confirmed rungs: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inputs/2 Hz **1.00, 4,131,952 synapses, 50/50**.
+Minimal confirmed rungs in the ladder: outputs/silent **0.50, 2,941,830 synapses, 50/50**; inputs/2 Hz **0.95, 4,111,318 synapses, 50/50** (replication).
 
-For all_w0 inputs, the 50/50 minimum is 1.00; the 0.95 rung reached 10/10 but was not confirmed at 50, so the threshold lies above 0.90 and possibly at or below 0.95.
+For all_w0, the 0.95 rung reached 10/10 in the ladder and was confirmed at 50/50 on seeds 0 and 1 in the replication below.  The smallest confirmed rung is 0.95 (90% failed; fractions between 90% and 95% were not tested).  Here all_w0 is whole-CNS w0, not a separate placement.
 
 ### vnc_w2
 
@@ -106,9 +106,94 @@ Minimal confirmed rungs: outputs/silent **0.40, 1,334,045 synapses, 50/50**; inp
 
 On the present evidence, the live surround decides the whole-brain outcome: the same complete image computes in the sealed 3/3 control and only becomes reliable at the measured boundary thresholds.  Wiring fit and the unavailable F autapses independently rule out an unmodified Profile-2 realization, but they do not explain the transition within the already-complete image.
 
+## Round 2 (2026-10-15/16): Dale-compatible latches, fault attribution and the shielding threshold
+
+This round tests the two Dale-compatible latch designs documented in `docs/stage_h/dale_feedback.md`: `dale_private` uses a dedicated inhibitory feedback neuron for each latch member, while `dale_biased` is its sparse, asynchronous score-winning variant.  Here *carried* means a designed edge pair supplied by real anatomical wiring; *designed* is every pair required by that image.  The compact, strict source inventory is `docs/stage_h/round2.json`.
+
+### Placement
+
+The Dale images have 1,656 designed pairs rather than the autapse image's 1,516.  They remove nearly all of the original latch-autapse shortfall, but this does not establish a live computation.
+
+| placement | feedback | carried / designed | placed / unplaced |
+| --- | --- | ---: | ---: |
+| all_w0 | autapse | 809 / 1,516 | 739 / 1 |
+| all_w0 | dale_private | 1,049 / 1,656 | 879 / 1 |
+| all_w0 | dale_biased | 1,063 / 1,656 | 875 / 5 |
+| vnc_w2 | autapse | 557 / 1,516 | 711 / 29 |
+| vnc_w2 | dale_private | 573 / 1,656 | 853 / 27 |
+| vnc_w2 | dale_biased | 576 / 1,656 | 851 / 29 |
+
+### Live brain, no cut
+
+The no-cut `dale_biased` live runs are 0/50 in both surrounds and placements, just as the autapse runs are.  The equal 0/50 results show that replacing the latch did not rescue the computation.  Maximum entering excitation is reported per millisecond.
+
+| placement | surround | autapse correct/n; max exc | dale_biased correct/n; max exc |
+| --- | --- | ---: | ---: |
+| all_w0 | silent | 0/50; 27,005 | 0/50; 40,126 |
+| all_w0 | 2 Hz Poisson | 0/50; 30,646 | 0/50; 46,137 |
+| vnc_w2 | silent | 0/50; 4,726 | 0/50; 4,877 |
+| vnc_w2 | 2 Hz Poisson | 0/50; 5,350 | 0/50; 6,252 |
+
+### Fault attribution
+
+An *incoming boundary edge* is an anatomical edge from outside the host image into it.  A *scored edge* is an incoming edge with a spike arrival in the 20 ms window before a failure, and was therefore eligible for attribution.  Only 3,268 of 412,685 incoming edges in the silent run, and 38,555 in the Poisson run, carried such spikes in those windows; other incoming edges may have carried spikes outside the window.  Scores below are the top attribution scores, not a claim that cutting a named source type is sufficient.
+
+| surround | incoming / scored edges | top source types (score) | top source superclasses (score) |
+| --- | ---: | --- | --- |
+| silent | 412,685 / 3,268 | lLN1_bc (18,627,200); lLN2P_a (2,144,448); GNG019 (1,060,128) | cb_intrinsic (34,081,360); descending_neuron (2,542,688); cb_sensory (73,920) |
+| 2 Hz Poisson | 412,685 / 38,555 | lLN1_bc (11,554,064); GNG019 (981,600); AVLP080 (811,712) | cb_intrinsic (20,166,576); cb_sensory (8,919,248); vnc_sensory (2,549,616) |
+
+### Shielding
+
+Each row cuts all_w0 host inputs.  “Ranking” chooses boundary edges either by attribution score, by synapse count, or by the named source type; the fraction applies to the ranked edge list.  `correct/n` is additions correct out of additions attempted.  Every measured input-cut rung follows.
+
+| ranking | surround | fraction | edges / synapses cut | correct/n | max excitatory spikes entering per ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| attribution | silent | 0.05 | 20,635 / 1,783,993 | 0/10 | 37,730 |
+| attribution | 2 Hz Poisson | 0.05 | 20,635 / 357,669 | 0/10 | 26,221 |
+| attribution | silent | 0.10 | 41,269 / 2,471,943 | 0/10 | 22,416 |
+| attribution | 2 Hz Poisson | 0.10 | 41,269 / 989,672 | 0/10 | 37,420 |
+| attribution | silent | 0.20 | 82,537 / 3,147,488 | 0/10 | 29,890 |
+| attribution | 2 Hz Poisson | 0.20 | 82,537 / 2,830,363 | 0/10 | 29,179 |
+| attribution | silent | 0.30 | 123,806 / 3,496,674 | 0/10 | 24,836 |
+| attribution | 2 Hz Poisson | 0.30 | 123,806 / 3,376,405 | 0/10 | 27,921 |
+| attribution | silent | 0.50 | 206,343 / 3,842,974 | 0/10 | 17,057 |
+| attribution | 2 Hz Poisson | 0.50 | 206,343 / 3,821,051 | 0/10 | 17,984 |
+| attribution | silent | 0.70 | 288,880 / 4,008,147 | 0/10 | 8,508 |
+| attribution | 2 Hz Poisson | 0.70 | 288,880 / 4,008,147 | 0/10 | 8,377 |
+| attribution | silent | 0.90 | 371,417 / 4,090,684 | 0/10 | 2,082 |
+| attribution | 2 Hz Poisson | 0.90 | 371,417 / 4,090,684 | 0/10 | 2,285 |
+| synapse | silent | 0.05 | 20,635 / 1,880,500 | 0/10 | 37,262 |
+| synapse | silent | 0.10 | 41,269 / 2,515,729 | 0/10 | 23,295 |
+| synapse | silent | 0.20 | 82,537 / 3,163,127 | 0/10 | 28,906 |
+| synapse | silent | 0.30 | 123,806 / 3,503,051 | 0/10 | 27,514 |
+| type: lLN1_bc | silent | — | 723 / 35,144 | 0/10 | 26,177 |
+| type: lLN1_bc | 2 Hz Poisson | — | 723 / 35,144 | 0/10 | 28,267 |
+
+There is no small, targeted shield in these data.  Attribution-ranked cuts did no better than the synapse-ranked cuts.  In the earlier synapse-ranked input ladder above, the all_w0 image's smallest tested successful rung is 95% of incoming boundary edges under 2 Hz drive (90% failed; fractions between 90% and 95% were not tested).  The attribution ranking remained 0/10 even at 90% of incoming edges in either surround.
+
+### Replication (2026-10-16), 2 Hz Poisson surround, synapse-ranked input cuts, 50 additions each
+
+| Placement | Cut | Seed | Correct | Fault | No accept | Timeout | Max exc spikes in per ms | Job |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| all_w0 | 90% | 0 | 0/50 | 3 | 37 | 10 | 2,629 | Juno 459507 |
+| all_w0 | 95% | 0 | 50/50 | 0 | 0 | 0 | 740 | Juno 459508 |
+| all_w0 | 95% | 1 | 50/50 | 0 | 0 | 0 | 746 | Juno 459509 |
+| all_w0 | 100% | 1 | 50/50 | 0 | 0 | 0 | 0 | G2 4023560 |
+| central_brain_w0 | 95% | 0 | 5/50 | 0 | 0 | 45 | 1,555 | G2 4023561 |
+| central_brain_w0 | 100% | 0 | 50/50 | 0 | 0 | 0 | 0 | G2 4023564 |
+
+The whole-CNS w0 threshold replicates across seeds 0 and 1: 90% fails 0/50, while 95% passes 50/50 on both seeds.  The second placement, central_brain w0, needs more than 95% (5/50 at 95%, with all 45 failures timing out; 50/50 at 100%), so the shielding requirement is placement dependent, from about 80–90% for the VNC w2 hosts to more than 95% for central_brain w0.
+
+Result files under `data/stage_h/fullgraph/`: `all_w0_cutin0.90_poisson_n50_s0.json`, `all_w0_cutin0.95_poisson_n50_s0.json`, `all_w0_cutin0.95_poisson_n50_s1.json`, `all_w0_cutin1.0_poisson_n50_s1.json`, `central_brain_w0_cutin0.95_poisson_n50_s0.json`, and `central_brain_w0_cutin1.0_poisson_n50_s0.json`; built at `ba2e7d5`.
+
+### Round-2 limits
+
+The Dale, attribution, and type-cut measurements use one seed and one placement.  The shielding threshold replication used two seeds (all_w0) and two placements (all_w0, central_brain_w0).  The shielding ladders use 10 additions at every rung below the minima; they are not 50-addition confirmations.
+
 ## Limits
 
-This is one placement seed.  Ladder rungs use 10 additions, with only the minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); all_w0 input 0.95 reached 10/10 but was not confirmed at 50, so unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
+The Dale, attribution, and type-cut measurements use one seed and one placement.  Ladder rungs use 10 additions, with minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); the 0.95 all_w0 input rung was confirmed 50/50 on seeds 0 and 1 in the replication.  Unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
 
 ## Reproduce
 
@@ -139,4 +224,4 @@ slurm/submit.sh --cluster juno --script juno-cpu --time=2-00:00:00 -- drosophilo
 slurm/submit.sh --cluster g2 --time=2-00:00:00 -- drosophilos.bench.h1_fullgraph [flags above]
 ```
 
-`docs/stage_h/fullgraph.json` is the strict compact inventory of all 44 runs, including the source counts, cluster, and job id.
+`docs/stage_h/fullgraph.json` inventories the 44 ladder runs, including source counts, cluster, and job id.  The six replication runs (Juno 459507–459509; G2 4023560, 4023561, 4023564) are listed in the replication table above.

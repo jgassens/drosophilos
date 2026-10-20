@@ -12,6 +12,7 @@ from test_embed_netlist import latch_relay_netlist, synthetic_mcns
 from drosophilos.bench.h_stage_place import (REGIONS, host_exposure, main, mapping_meta, region_mask,
                                            run_one, stats, summarize)
 from drosophilos.connectome.embed_netlist import Policy
+from drosophilos.protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
 
 
 def test_region_masks_are_disjoint_and_cover_the_declared_superclasses():
@@ -41,14 +42,27 @@ def test_mapping_meta_contract_keys_and_exact_types(config_f):
     meta = mapping_meta("optic_lobe", 1, 4, 0, config_f)
     expected = {"builder": str, "width": int, "ordered": bool, "watchdog_hops": int,
                 "storage": str, "rate_robust": bool, "experimental_autapse": bool,
-                "ordered_xor_oneshot": bool, "k_max": float, "isolation_weight": float,
+                "ordered_xor_oneshot": bool, "latch_feedback": str, "k_max": float, "isolation_weight": float,
                 "region": str, "restarts": int, "seed": int}
     assert set(meta) == set(expected)
     assert all(type(meta[k]) is t for k, t in expected.items())
     assert meta["builder"] == "build_adder_channel" and meta["width"] == 4
     assert meta["ordered"] and meta["watchdog_hops"] == 100 and meta["storage"] == "flipflop"
     assert meta["k_max"] == 4.0 and meta["isolation_weight"] == 1.0
+    assert meta["latch_feedback"] == "autapse"
     assert all(meta[k] is config_f for k in ("rate_robust", "experimental_autapse", "ordered_xor_oneshot"))
+
+
+def test_mapping_meta_records_dale_feedback_version_only_for_dale_private():
+    dale = mapping_meta("optic_lobe", 1, 4, 0, latch_feedback="dale_private")
+    biased = mapping_meta("optic_lobe", 1, 4, 0, latch_feedback="dale_biased")
+    autapse = mapping_meta("optic_lobe", 1, 4, 0, latch_feedback="autapse")
+    assert dale["dale_feedback_version"] == DALE_FEEDBACK_VERSION
+    assert type(dale["dale_feedback_version"]) is int
+    assert "dale_feedback_version" not in autapse
+    assert biased["dale_biased_version"] == DALE_BIASED_VERSION
+    assert type(biased["dale_biased_version"]) is int
+    assert "dale_biased_version" not in dale and "dale_biased_version" not in autapse
 
 
 def test_exposure_separates_nonhosts_from_outside_region():

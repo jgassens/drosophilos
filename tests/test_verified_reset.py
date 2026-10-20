@@ -7,6 +7,8 @@ experimental and is exercised through its public flag in test_robust_reset.py.
 """
 
 from dataclasses import replace
+import hashlib
+import json
 
 import numpy as np
 import pytest
@@ -23,7 +25,7 @@ from test_robust_reset import (CAPTURES, CORNERS, DRIVE, PARAMS, _extended_domai
                                _observed_run, _path_trials, _primitive, _sparse_strays)
 
 
-def _verified_primitive(case="nominal", controller="nominal"):
+def _verified_primitive(case="nominal", controller="nominal", *, version=1):
     """Keep the captured old nodes/edges; new detector nodes have explicit draws."""
     before, latch, trigger, inh, ready, q0, v0, b0, _ = _primitive(
         case, compact=False, ready=True, controller=controller)
@@ -33,7 +35,8 @@ def _verified_primitive(case="nominal", controller="nominal"):
     add_reset(net, DRIVE, name, [latch])
     add_ready(net, DRIVE, name, trigger, hops=15)
     chain = [i for i, role in enumerate(net.roles) if ".ready_delay" in role]
-    verification = add_reset_verification(net, DRIVE, name, trigger, inh, ready, chain)
+    verification = add_reset_verification(net, DRIVE, name, trigger, inh, ready, chain,
+                                          version=version)
     topo = net.topology()
     old = {(int(s), int(d)): q for s, d, q in zip(before.src, before.dst, q0)}
     q = topo.quanta.astype(np.int64)
@@ -56,8 +59,10 @@ def _verified_primitive(case="nominal", controller="nominal"):
     return net, latch, trigger, inh, ready, verification, q, vth, bias, before.n, new_edges
 
 
-def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=108):
-    net, latch, trigger, inh, ready, v, q, vth, bias, old_n, new_edges = _verified_primitive(case, controller)
+def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=108,
+                         version=1):
+    net, latch, trigger, inh, ready, v, q, vth, bias, old_n, new_edges = _verified_primitive(
+        case, controller, version=version)
     topo = net.topology()
     rng = np.random.default_rng(seed)
     result = dict(case=case, controller=controller, trials=n, ready=0, false_ready=0,
@@ -127,15 +132,18 @@ def _verification_survey(case, n=32, *, controller="nominal", noisy=False, seed=
     return result
 
 
-def test_silence_certificate_and_bounded_terminal_fault():
+@pytest.mark.parametrize("version", [1, 2])
+def test_silence_certificate_and_bounded_terminal_fault(version):
     net = Netlist(PARAMS)
     reg = add_register(net, DRIVE, "R", 1, False)
     fault = add_latch(net, DRIVE, "fault")
     reg.fault_latch = fault
-    verify_register_resets(net, DRIVE, [reg])
+    verify_register_resets(net, DRIVE, [reg], version=version)
     v = reg.verification
+    assert v.version == version
     assert len(v.attempts) == VERIFY_MAX_RETRIES + 1 == 4
-    assert v.added_neurons == 104 and v.added_synapses == len(v.domain) + 153
+    assert v.added_neurons == 104
+    assert v.added_synapses == len(v.domain) + 153 + (109 if version == 2 else 0)
     topo = net.topology()
     q = np.broadcast_to(topo.quanta, (2, topo.nnz)).copy()
     q[1, topo.src == reg.reset_inh] = 0  # a guaranteed survivor must NEVER get READY
@@ -154,9 +162,60 @@ def test_silence_certificate_and_bounded_terminal_fault():
     assert not len(trace.neuron_steps(v.exhausted.u, 0))
 
 
+@pytest.mark.parametrize("options", [{}, {"version": 1}])
+def test_recorded_verification_netlist_is_unchanged(options):
+    net = Netlist(PARAMS)
+    reg = add_register(net, DRIVE, "R", 1, False)
+    verify_register_resets(net, DRIVE, [reg], **options)
+    # Ordered v1 image captured before the correction; includes groups/biases.
+    image = [net.roles, net.src, net.dst, net.quanta, net.delay, net.bias, net.groups]
+    assert hashlib.sha256(json.dumps(image, sort_keys=True).encode()).hexdigest() == (
+        "b9d14d6373ff23444032aa0f4a78600858fb5a2f7b5c7ea6f115a4ea0e4159d5")
+    assert reg.verification.version == 1
+
+
+def test_v2_feedback_is_local_and_keeps_genuine_reset_mirrors():
+    net = Netlist(PARAMS)
+    reg = add_register(net, DRIVE, "R", 1, False)
+    reader = net.neuron("R.ready.reader")
+    net.mirror_inhibition(reg.ready, reader, 16.)
+    verify_register_resets(net, DRIVE, [reg], version=2)
+    assert (reg.ready, reg.ready, -round(4.4 * DRIVE.loop), 0) in zip(
+        net.src, net.dst, net.quanta, net.delay)
+    assert not any(s == reg.ready and d == reader for s, d in zip(net.src, net.dst))
+    net.synapse(reg.reset_inh, reg.ready, -10)
+    assert (reg.reset_inh, reader, -160) in zip(net.src, net.dst, net.quanta)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("burst_at", ["entry", "recovery"])
+def test_doublet_does_not_multiply_into_ready_in_v2(version, burst_at):
+    net, latch, trigger, _, ready, v, q, vth, bias, _, _ = _verified_primitive(
+        "fast3sigma", "fast_bias", version=version)
+    sim = RefSim(net.topology(), PARAMS, quanta=q[None, :], V_th=vth, bias=bias)
+    burst_node = trigger if burst_at == "entry" else next(
+        i for i, role in enumerate(net.roles) if role.endswith(".ready_delay0"))
+    # Drive a second pulse to isolate the amplification seen in the seed-108
+    # noisy survey; the survey itself retains ordinary 150-q strays.
+    sim.add_events(0, [10, 3000, 3105], [latch.u, trigger, burst_node],
+                   [DRIVE.ignite, DRIVE.relay_in, DRIVE.relay_in])
+    sim.run(6500)
+    trace = sim.trace
+    if version == 1:
+        assert len(trace.neuron_steps(burst_node)) > 1
+        assert len(trace.neuron_steps(ready)) > 1  # retained counterexample
+    else:
+        assert len(trace.neuron_steps(ready)) == 1
+        assert all(len(trace.neuron_steps(entry)) <= 1 for entry in v.attempts)
+        live = np.concatenate([trace.neuron_steps(x) for x in latch.members])
+        assert not np.any(live >= trace.neuron_steps(ready)[0] - 100)
+        assert not len(trace.neuron_steps(v.exhausted.u))
+
+
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("case", [*CAPTURES, *CORNERS])
-def test_silence_verification_at_captured_draws_and_corners(case):
-    result = _verification_survey(case)
+def test_silence_verification_at_captured_draws_and_corners(case, version):
+    result = _verification_survey(case, version=version)
     print(result, flush=True)
     assert result["false_ready"] == result["undecided"] == 0, result
     assert result["max_attempt_spikes"] == 1, result
@@ -169,7 +228,7 @@ def test_silence_verification_at_captured_draws_and_corners(case):
 @pytest.mark.parametrize("case,controller", [(c, "nominal") for c in [*CAPTURES, *CORNERS]] +
                          [("fast3sigma", "fast_bias"), ("fast30_bias", "slow_bias")])
 def test_40000_verified_reset_survey(case, controller):
-    result = _verification_survey(case, 40000, controller=controller, noisy=True)
+    result = _verification_survey(case, 40000, controller=controller, noisy=True, version=2)
     print(result, flush=True)
     # This is a safety screen, not a claim of 40,000 successful resets: exhausted
     # trials and survivors at exhaustion are reported separately and fail-stop.
@@ -189,15 +248,17 @@ def test_full_domain_corner_prevents_verified_release(rate):
 
 
 @pytest.mark.parametrize("rate", [False, True])
-def test_verified_actual_reload_is_observed_through_retry_windows(rate):
-    result = _path_trials(10, verified=True, rate=rate)
+@pytest.mark.parametrize("version", [1, 2])
+def test_verified_actual_reload_is_observed_through_retry_windows(rate, version):
+    result = _path_trials(10, verified=True, rate=rate, verification_version=version)
     assert result["failures"] == result["ready_missing"] == result["faults"] == result["survivors"] == 0, result
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("rate", [False, True])
 def test_10000_verified_actual_noisy_reload_paths(rate):
-    result = _path_trials(10000, rate=rate, verified=True, progress=True)
+    result = _path_trials(10000, rate=rate, verified=True, progress=True,
+                          verification_version=2)
     assert result["failures"] == result["ready_missing"] == result["faults"] == result["survivors"] == 0, result
 
 
