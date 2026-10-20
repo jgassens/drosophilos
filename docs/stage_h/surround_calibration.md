@@ -296,15 +296,136 @@ For an uncapped candidate, omit `--surround-input-cap` in the adder command and 
 storage/width to manufacture a different circuit. Match legacy fresh-per-addition
 results first; a separate `--chained` run can test accumulated surround activity.
 
-## Results (pending cluster runs)
+## Results
 
-- Commit / cluster job IDs / output paths: **TBD**
-- Literature comparisons and revised acceptance bounds: **TBD**
-- Baseline P1 / P2 / P3, decay and self-sustained activity: **TBD**
-- P4 baseline versus calibrated MN9 / descending / motor responsiveness: **TBD**
-- Sweep candidates and zeroed-edge counts: **TBD**
-- Selected settings and repeat-seed validation: **TBD**
-- Live adder silent / Poisson accuracy, boundary envelope, and isolated comparison: **TBD**
+The result inventory is [`surround_calibration.json`](surround_calibration.json).  Its
+numbers, and the tables below, were derived with Python's `json` module from the
+supplied JSON/JSONL records.  In the P1 tables, *recruited non-sensory* is the sum of
+active `by_superclass` entries whose name does not contain `sensory`; *drive mean* is
+the mean of the first thirty 10-ms bins; and *tail* is the mean of the final ten bins.
 
-Only synthetic tests were run locally; no whole-brain calibration or adder results are
-claimed here.
+### Published-weight baseline
+
+With the published Shiu et al. weights (`exc=1`, `inh=1`, uncapped), the 2-Hz P1
+drive entered a self-sustained seizure: 25,628 non-sensory neurons were recruited and
+the off-period tail was 34,087.7 spikes per 10-ms bin.  A single 213-Hz point source
+(P2 seed 2) recruited 25,944 active neurons (25,943 excluding the source) and had a
+34,214.1-spike/bin tail.  The other two point-source seeds remained local; this one
+seed is enough to show that the published state is not safely bounded.
+
+### P1 sweep
+
+Only settings with `exc=0.25` decayed to a zero tail; six of those nine configurations
+had an exactly zero measured tail.  The files predate the fixed metrics: their old
+`runaway` flag can fire on Poisson noise and is not used or cited here.
+
+| exc | inh | cap | recruited non-sensory | drive mean (spikes/bin) | tail (spikes/bin) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25 | 1 | 2000 | 1,856 | 3,304.1 | 877.2 |
+| 0.25 | 1 | 500 | 921 | 2,480.0 | 28.2 |
+| 0.25 | 1 | none | 1,331 | 2,535.8 | 876.5 |
+| 0.25 | 2 | 2000 | 865 | 2,734.3 | 369.5 |
+| 0.25 | 2 | 500 | 800 | 2,463.4 | 0.0 |
+| 0.25 | 2 | none | 590 | 2,480.2 | 0.0 |
+| 0.25 | 4 | 2000 | 580 | 2,455.4 | 0.0 |
+| 0.25 | 4 | 500 | 692 | 2,446.7 | 0.0 |
+| 0.25 | 4 | none | 480 | 2,439.5 | 0.0 |
+| 0.35 | 1 | 2000 | 7,437 | 8,047.3 | 6,828.6 |
+| 0.35 | 1 | 500 | 1,509 | 2,536.0 | 123.8 |
+| 0.35 | 1 | none | 2,589 | 3,698.5 | 1,423.8 |
+| 0.35 | 2 | 2000 | 1,689 | 2,951.8 | 557.7 |
+| 0.35 | 2 | 500 | 1,294 | 2,504.4 | 103.1 |
+| 0.35 | 2 | none | 1,625 | 2,562.1 | 849.7 |
+| 0.35 | 4 | 2000 | 1,027 | 2,509.2 | 51.6 |
+| 0.35 | 4 | 500 | 1,093 | 2,482.1 | 38.0 |
+| 0.35 | 4 | none | 915 | 2,482.3 | 54.5 |
+| 0.5 | 1 | 2000 | 10,008 | 13,434.4 | 11,877.1 |
+| 0.5 | 1 | 500 | 2,451 | 2,708.2 | 288.8 |
+| 0.5 | 1 | none | 4,480 | 4,904.1 | 2,530.8 |
+| 0.5 | 2 | 2000 | 7,845 | 6,275.0 | 3,770.5 |
+| 0.5 | 2 | 500 | 2,058 | 2,642.0 | 236.2 |
+| 0.5 | 2 | none | 2,987 | 2,856.9 | 1,437.7 |
+| 0.5 | 4 | 2000 | 2,426 | 2,614.9 | 591.3 |
+| 0.5 | 4 | 500 | 1,708 | 2,586.6 | 125.8 |
+| 0.5 | 4 | none | 2,067 | 2,611.3 | 472.1 |
+| 0.75 | 1 | 2000 | 19,770 | 24,368.4 | 24,776.6 |
+| 0.75 | 1 | 500 | 4,420 | 3,643.4 | 1,260.3 |
+| 0.75 | 1 | none | 17,013 | 20,368.8 | 20,485.0 |
+| 0.75 | 2 | 2000 | 13,153 | 15,179.2 | 15,418.2 |
+| 0.75 | 2 | 500 | 3,227 | 3,384.8 | 985.2 |
+| 0.75 | 2 | none | 6,798 | 5,188.9 | 3,435.6 |
+| 0.75 | 4 | 2000 | 10,367 | 3,516.7 | 10,163.6 |
+| 0.75 | 4 | 500 | 2,695 | 3,196.4 | 845.3 |
+| 0.75 | 4 | none | 3,844 | 3,414.3 | 1,508.1 |
+| 1 | 1 | 2000 | 30,779 | 42,364.9 | 45,885.0 |
+| 1 | 1 | 500 | 11,391 | 6,588.9 | 16,029.4 |
+| 1 | 1 | none | 25,628 | 34,264.8 | 34,087.7 |
+| 1 | 2 | 2000 | 19,333 | 20,693.4 | 22,454.6 |
+| 1 | 2 | 500 | 4,622 | 4,319.4 | 1,884.3 |
+| 1 | 2 | none | 10,629 | 7,821.5 | 5,953.4 |
+| 1 | 4 | 2000 | 11,967 | 7,942.4 | 4,453.5 |
+| 1 | 4 | 500 | 3,660 | 4,113.2 | 1,594.2 |
+| 1 | 4 | none | 7,983 | 4,390.4 | 2,887.5 |
+
+### Chosen candidate and seed checks
+
+The candidate was `exc=0.25`, `inh=2`, with no cap: it reduces the excitatory
+synaptic weight 75%, from 0.275 to about 0.069 mV per synapse, and doubles inhibition.
+Its seed-0 P1 tail was zero.  Seed 1 also had a zero tail (629 recruited non-sensory;
+2,497.4 drive spikes/bin), but seed 2 left a 15.6-spike/bin tail (654; 2,543.7).
+That small tail puts the candidate near the edge of stability.
+
+### P4 responsiveness proxy
+
+P4 is a **proxy**, not a sugar-response reproduction: MCNS lacks sugar labels, and
+Shiu used FlyWire female while MCNS is male CNS.  The specificity rule is: MN9 fires
+and recruited non-sensory neurons are below 1% of the brain (1,667).  Each cell is
+`maximum MN9 drive rate in Hz / recruited non-sensory`; `all` means all labellar
+bristles together.  No configuration satisfies the rule: at published weights MN9
+fires only inside a seizure, and every stable configuration leaves MN9 silent.
+
+| LB type | published 1/1/none | 0.25/1/none | 0.25/2/none | 0.35/4/none | 0.5/4/500 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LB1a | 83.3 / 25,526 | 0 / 17 | 0 / 17 | 0 / 32 | 0 / 22 |
+| LB1b | 286.7 / 25,473 | 0 / 50 | 0 / 39 | 0 / 49 | 0 / 33 |
+| LB1c | 20.0 / 24,594 | 0 / 88 | 0 / 74 | 0 / 113 | 0 / 91 |
+| LB1d | 276.7 / 25,440 | 0 / 2 | 0 / 2 | 0 / 7 | 0 / 3 |
+| LB1e | 290.0 / 24,935 | 0 / 47 | 0 / 39 | 0 / 49 | 0 / 10 |
+| LB2a | 276.7 / 25,639 | 0 / 10 | 0 / 10 | 0 / 22 | 0 / 14 |
+| LB2b | 280.0 / 25,689 | 0 / 6 | 0 / 6 | 0 / 14 | 0 / 16 |
+| LB2c | 23.3 / 24,236 | 0 / 17 | 0 / 15 | 0 / 26 | 0 / 23 |
+| LB2d | 0 / 24,611 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| LB3 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| LB3a | 316.7 / 25,406 | 0 / 18 | 0 / 18 | 0 / 23 | 0 / 26 |
+| LB3b | 366.7 / 25,067 | 0 / 17 | 0 / 14 | 0 / 15 | 0 / 25 |
+| LB3c | 330.0 / 25,310 | 0 / 40 | 0 / 26 | 0 / 26 | 0 / 28 |
+| LB3d | 380.0 / 25,136 | 0 / 41 | 0 / 29 | 0 / 34 | 0 / 52 |
+| LB4a | 370.0 / 25,371 | 0 / 14 | 0 / 11 | 0 / 18 | 0 / 25 |
+| LB4b | 370.0 / 25,903 | 0 / 9 | 0 / 8 | 0 / 14 | 0 / 15 |
+| all | 170.0 / 25,065 | 0 / 189 | 0 / 152 | 0 / 180 | 0 / 208 |
+
+### Placed adder in the calibrated surround
+
+All four live runs were 0/50.  “Entering” is the maximum excitatory spikes entering
+the image in one millisecond.  The failure categories are mutually exclusive outcomes
+except that the summary's fault and timeout counters identify the relevant failures
+within the run.
+
+| placement | surround | correct/n | failure modes | max entering spikes/ms |
+| --- | --- | ---: | --- | ---: |
+| all_w0 | silent | 0/50 | 49 no accept; 1 fault | 1,845 |
+| all_w0 | 2-Hz Poisson | 0/50 | 38 no accept; 5 faults; 7 timeouts | 3,192 |
+| vnc_w2 | silent | 0/50 | 50 no accept | 284 |
+| vnc_w2 | 2-Hz Poisson | 0/50 | 50 incomplete | 809 |
+
+The sealed all_w0 control was 5/5, and the silent outputs-zeroed control was 10/10.
+Thus the live failure is a local echo of the circuit's own output, not global
+over-excitability.
+
+### Conclusion and limits
+
+In this model, stability and responsiveness could not be had together: the published
+weights respond only through seizure, while stable settings silence MN9.  Calibration
+therefore does not rescue the placed adder.  These results cover one placement per
+region, one selected candidate, limited seeds, and a proxy responsiveness benchmark;
+they do not establish a biological calibration.

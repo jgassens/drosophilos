@@ -1,0 +1,1224 @@
+{
+  "schema": "stage_h_surround_calibration_results_v1",
+  "derivation": {
+    "generated_with": "Python json module from supplied JSON/JSONL records",
+    "p1": "recruited_non_sensory sums active by_superclass entries whose name does not contain sensory; drive mean is first 30 10-ms P1 bins; tail is last 10 bins"
+  },
+  "baseline": {
+    "config": {
+      "exc": 1.0,
+      "inh": 1.0,
+      "cap": null
+    },
+    "seed": 0,
+    "recruited_non_sensory": 25628,
+    "mean_drive_spikes_per_10ms_bin": 34264.76666666667,
+    "off_tail_spikes_per_10ms_bin": 34087.7,
+    "active_neurons": 34607,
+    "total_spikes": 2054215,
+    "point_source_213hz": [
+      {
+        "seed": 0,
+        "source_body_id": 533695,
+        "recruited_non_sources": 0,
+        "off_tail_spikes_per_10ms_bin": 0.0
+      },
+      {
+        "seed": 1,
+        "source_body_id": 93870,
+        "recruited_non_sources": 0,
+        "off_tail_spikes_per_10ms_bin": 0.0
+      },
+      {
+        "seed": 2,
+        "source_body_id": 529633,
+        "recruited_non_sources": 25943,
+        "off_tail_spikes_per_10ms_bin": 34197.1
+      }
+    ]
+  },
+  "sweep": [
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 1.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1856,
+      "mean_drive_spikes_per_10ms_bin": 3304.133333333333,
+      "off_tail_spikes_per_10ms_bin": 877.2,
+      "active_neurons": 9995,
+      "total_spikes": 127575
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 1.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 921,
+      "mean_drive_spikes_per_10ms_bin": 2480.0,
+      "off_tail_spikes_per_10ms_bin": 28.2,
+      "active_neurons": 9039,
+      "total_spikes": 77361
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 1.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1331,
+      "mean_drive_spikes_per_10ms_bin": 2535.8333333333335,
+      "off_tail_spikes_per_10ms_bin": 876.5,
+      "active_neurons": 9477,
+      "total_spikes": 103803
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 2.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 865,
+      "mean_drive_spikes_per_10ms_bin": 2734.3333333333335,
+      "off_tail_spikes_per_10ms_bin": 369.5,
+      "active_neurons": 8985,
+      "total_spikes": 95145
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 2.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 800,
+      "mean_drive_spikes_per_10ms_bin": 2463.4333333333334,
+      "off_tail_spikes_per_10ms_bin": 0.0,
+      "active_neurons": 8917,
+      "total_spikes": 75977
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 2.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 590,
+      "mean_drive_spikes_per_10ms_bin": 2480.1666666666665,
+      "off_tail_spikes_per_10ms_bin": 0.0,
+      "active_neurons": 8706,
+      "total_spikes": 76493
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 4.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 580,
+      "mean_drive_spikes_per_10ms_bin": 2455.366666666667,
+      "off_tail_spikes_per_10ms_bin": 0.0,
+      "active_neurons": 8694,
+      "total_spikes": 75714
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 4.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 692,
+      "mean_drive_spikes_per_10ms_bin": 2446.733333333333,
+      "off_tail_spikes_per_10ms_bin": 0.0,
+      "active_neurons": 8810,
+      "total_spikes": 75434
+    },
+    {
+      "config": {
+        "exc": 0.25,
+        "inh": 4.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 480,
+      "mean_drive_spikes_per_10ms_bin": 2439.5,
+      "off_tail_spikes_per_10ms_bin": 0.0,
+      "active_neurons": 8596,
+      "total_spikes": 75213
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 1.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 7437,
+      "mean_drive_spikes_per_10ms_bin": 8047.266666666666,
+      "off_tail_spikes_per_10ms_bin": 6828.6,
+      "active_neurons": 15670,
+      "total_spikes": 449332
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 1.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1509,
+      "mean_drive_spikes_per_10ms_bin": 2535.9666666666667,
+      "off_tail_spikes_per_10ms_bin": 123.8,
+      "active_neurons": 9652,
+      "total_spikes": 81962
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 1.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2589,
+      "mean_drive_spikes_per_10ms_bin": 3698.4666666666667,
+      "off_tail_spikes_per_10ms_bin": 1423.8,
+      "active_neurons": 10759,
+      "total_spikes": 155092
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 2.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1689,
+      "mean_drive_spikes_per_10ms_bin": 2951.8,
+      "off_tail_spikes_per_10ms_bin": 557.7,
+      "active_neurons": 9817,
+      "total_spikes": 107327
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 2.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1294,
+      "mean_drive_spikes_per_10ms_bin": 2504.4,
+      "off_tail_spikes_per_10ms_bin": 103.1,
+      "active_neurons": 9430,
+      "total_spikes": 80350
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 2.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1625,
+      "mean_drive_spikes_per_10ms_bin": 2562.1,
+      "off_tail_spikes_per_10ms_bin": 849.7,
+      "active_neurons": 9783,
+      "total_spikes": 104040
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 4.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1027,
+      "mean_drive_spikes_per_10ms_bin": 2509.233333333333,
+      "off_tail_spikes_per_10ms_bin": 51.6,
+      "active_neurons": 9143,
+      "total_spikes": 78950
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 4.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1093,
+      "mean_drive_spikes_per_10ms_bin": 2482.133333333333,
+      "off_tail_spikes_per_10ms_bin": 38.0,
+      "active_neurons": 9224,
+      "total_spikes": 77709
+    },
+    {
+      "config": {
+        "exc": 0.35,
+        "inh": 4.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 915,
+      "mean_drive_spikes_per_10ms_bin": 2482.3333333333335,
+      "off_tail_spikes_per_10ms_bin": 54.5,
+      "active_neurons": 9035,
+      "total_spikes": 78263
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 1.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 10008,
+      "mean_drive_spikes_per_10ms_bin": 13434.4,
+      "off_tail_spikes_per_10ms_bin": 11877.1,
+      "active_neurons": 18531,
+      "total_spikes": 764760
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 1.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2451,
+      "mean_drive_spikes_per_10ms_bin": 2708.233333333333,
+      "off_tail_spikes_per_10ms_bin": 288.8,
+      "active_neurons": 10701,
+      "total_spikes": 93309
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 1.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 4480,
+      "mean_drive_spikes_per_10ms_bin": 4904.133333333333,
+      "off_tail_spikes_per_10ms_bin": 2530.8,
+      "active_neurons": 12667,
+      "total_spikes": 225338
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 2.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 7845,
+      "mean_drive_spikes_per_10ms_bin": 6274.966666666666,
+      "off_tail_spikes_per_10ms_bin": 3770.5,
+      "active_neurons": 16009,
+      "total_spikes": 317467
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 2.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2058,
+      "mean_drive_spikes_per_10ms_bin": 2642.0,
+      "off_tail_spikes_per_10ms_bin": 236.2,
+      "active_neurons": 10296,
+      "total_spikes": 89217
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 2.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2987,
+      "mean_drive_spikes_per_10ms_bin": 2856.9,
+      "off_tail_spikes_per_10ms_bin": 1437.7,
+      "active_neurons": 11177,
+      "total_spikes": 131004
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 4.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2426,
+      "mean_drive_spikes_per_10ms_bin": 2614.9,
+      "off_tail_spikes_per_10ms_bin": 591.3,
+      "active_neurons": 10575,
+      "total_spikes": 93934
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 4.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 1708,
+      "mean_drive_spikes_per_10ms_bin": 2586.633333333333,
+      "off_tail_spikes_per_10ms_bin": 125.8,
+      "active_neurons": 9923,
+      "total_spikes": 83774
+    },
+    {
+      "config": {
+        "exc": 0.5,
+        "inh": 4.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2067,
+      "mean_drive_spikes_per_10ms_bin": 2611.3333333333335,
+      "off_tail_spikes_per_10ms_bin": 472.1,
+      "active_neurons": 10228,
+      "total_spikes": 95102
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 1.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 19770,
+      "mean_drive_spikes_per_10ms_bin": 24368.366666666665,
+      "off_tail_spikes_per_10ms_bin": 24776.6,
+      "active_neurons": 29001,
+      "total_spikes": 1478968
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 1.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 4420,
+      "mean_drive_spikes_per_10ms_bin": 3643.4,
+      "off_tail_spikes_per_10ms_bin": 1260.3,
+      "active_neurons": 12935,
+      "total_spikes": 150233
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 1.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 17013,
+      "mean_drive_spikes_per_10ms_bin": 20368.8,
+      "off_tail_spikes_per_10ms_bin": 20485.0,
+      "active_neurons": 25384,
+      "total_spikes": 1228261
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 2.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 13153,
+      "mean_drive_spikes_per_10ms_bin": 15179.233333333334,
+      "off_tail_spikes_per_10ms_bin": 15418.2,
+      "active_neurons": 21476,
+      "total_spikes": 923111
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 2.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 3227,
+      "mean_drive_spikes_per_10ms_bin": 3384.8333333333335,
+      "off_tail_spikes_per_10ms_bin": 985.2,
+      "active_neurons": 11693,
+      "total_spikes": 133922
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 2.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 6798,
+      "mean_drive_spikes_per_10ms_bin": 5188.866666666667,
+      "off_tail_spikes_per_10ms_bin": 3435.6,
+      "active_neurons": 15018,
+      "total_spikes": 260670
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 4.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 10367,
+      "mean_drive_spikes_per_10ms_bin": 3516.733333333333,
+      "off_tail_spikes_per_10ms_bin": 10163.6,
+      "active_neurons": 18663,
+      "total_spikes": 261190
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 4.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 2695,
+      "mean_drive_spikes_per_10ms_bin": 3196.366666666667,
+      "off_tail_spikes_per_10ms_bin": 845.3,
+      "active_neurons": 11143,
+      "total_spikes": 123747
+    },
+    {
+      "config": {
+        "exc": 0.75,
+        "inh": 4.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 3844,
+      "mean_drive_spikes_per_10ms_bin": 3414.266666666667,
+      "off_tail_spikes_per_10ms_bin": 1508.1,
+      "active_neurons": 12070,
+      "total_spikes": 149777
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 1.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 30779,
+      "mean_drive_spikes_per_10ms_bin": 42364.86666666667,
+      "off_tail_spikes_per_10ms_bin": 45885.0,
+      "active_neurons": 40375,
+      "total_spikes": 2642561
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 1.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 11391,
+      "mean_drive_spikes_per_10ms_bin": 6588.9,
+      "off_tail_spikes_per_10ms_bin": 16029.4,
+      "active_neurons": 20433,
+      "total_spikes": 686826
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 1.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 25628,
+      "mean_drive_spikes_per_10ms_bin": 34264.76666666667,
+      "off_tail_spikes_per_10ms_bin": 34087.7,
+      "active_neurons": 34607,
+      "total_spikes": 2054215
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 2.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 19333,
+      "mean_drive_spikes_per_10ms_bin": 20693.4,
+      "off_tail_spikes_per_10ms_bin": 22454.6,
+      "active_neurons": 27870,
+      "total_spikes": 1290298
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 2.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 4622,
+      "mean_drive_spikes_per_10ms_bin": 4319.366666666667,
+      "off_tail_spikes_per_10ms_bin": 1884.3,
+      "active_neurons": 13586,
+      "total_spikes": 189709
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 2.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 10629,
+      "mean_drive_spikes_per_10ms_bin": 7821.533333333334,
+      "off_tail_spikes_per_10ms_bin": 5953.4,
+      "active_neurons": 18893,
+      "total_spikes": 412445
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 4.0,
+        "cap": 2000.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 11967,
+      "mean_drive_spikes_per_10ms_bin": 7942.366666666667,
+      "off_tail_spikes_per_10ms_bin": 4453.5,
+      "active_neurons": 20411,
+      "total_spikes": 385712
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 4.0,
+        "cap": 500.0
+      },
+      "seed": 0,
+      "recruited_non_sensory": 3660,
+      "mean_drive_spikes_per_10ms_bin": 4113.233333333334,
+      "off_tail_spikes_per_10ms_bin": 1594.2,
+      "active_neurons": 12605,
+      "total_spikes": 176566
+    },
+    {
+      "config": {
+        "exc": 1.0,
+        "inh": 4.0,
+        "cap": null
+      },
+      "seed": 0,
+      "recruited_non_sensory": 7983,
+      "mean_drive_spikes_per_10ms_bin": 4390.366666666667,
+      "off_tail_spikes_per_10ms_bin": 2887.5,
+      "active_neurons": 16269,
+      "total_spikes": 219924
+    }
+  ],
+  "candidate": {
+    "config": {
+      "exc": 0.25,
+      "inh": 2.0,
+      "cap": null
+    },
+    "p1_seed_checks": [
+      {
+        "config": {
+          "exc": 0.25,
+          "inh": 2.0,
+          "cap": null
+        },
+        "seed": 0,
+        "recruited_non_sensory": 590,
+        "mean_drive_spikes_per_10ms_bin": 2480.1666666666665,
+        "off_tail_spikes_per_10ms_bin": 0.0,
+        "active_neurons": 8706,
+        "total_spikes": 76493
+      },
+      {
+        "config": {
+          "exc": 0.25,
+          "inh": 2.0,
+          "cap": null
+        },
+        "seed": 1,
+        "recruited_non_sensory": 629,
+        "mean_drive_spikes_per_10ms_bin": 2497.366666666667,
+        "off_tail_spikes_per_10ms_bin": 0.0,
+        "active_neurons": 8658,
+        "total_spikes": 76973
+      },
+      {
+        "config": {
+          "exc": 0.25,
+          "inh": 2.0,
+          "cap": null
+        },
+        "seed": 2,
+        "recruited_non_sensory": 654,
+        "mean_drive_spikes_per_10ms_bin": 2543.6666666666665,
+        "off_tail_spikes_per_10ms_bin": 15.6,
+        "active_neurons": 8791,
+        "total_spikes": 79013
+      }
+    ]
+  },
+  "p4": {
+    "specificity_rule": "MN9 fires and recruited_non_sensory < 1667",
+    "rows": [
+      {
+        "config": {
+          "exc": 0.25,
+          "inh": 1.0,
+          "cap": null
+        },
+        "drives": [
+          {
+            "type": "LB1a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 17
+          },
+          {
+            "type": "LB1b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 50
+          },
+          {
+            "type": "LB1c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 88
+          },
+          {
+            "type": "LB1d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 2
+          },
+          {
+            "type": "LB1e",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 47
+          },
+          {
+            "type": "LB2a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 10
+          },
+          {
+            "type": "LB2b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 6
+          },
+          {
+            "type": "LB2c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 17
+          },
+          {
+            "type": "LB2d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 18
+          },
+          {
+            "type": "LB3b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 17
+          },
+          {
+            "type": "LB3c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 40
+          },
+          {
+            "type": "LB3d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 41
+          },
+          {
+            "type": "LB4a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 14
+          },
+          {
+            "type": "LB4b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 9
+          },
+          {
+            "type": "all",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 189
+          }
+        ]
+      },
+      {
+        "config": {
+          "exc": 0.25,
+          "inh": 2.0,
+          "cap": null
+        },
+        "drives": [
+          {
+            "type": "LB1a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 17
+          },
+          {
+            "type": "LB1b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 39
+          },
+          {
+            "type": "LB1c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 74
+          },
+          {
+            "type": "LB1d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 2
+          },
+          {
+            "type": "LB1e",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 39
+          },
+          {
+            "type": "LB2a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 10
+          },
+          {
+            "type": "LB2b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 6
+          },
+          {
+            "type": "LB2c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 15
+          },
+          {
+            "type": "LB2d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 18
+          },
+          {
+            "type": "LB3b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 14
+          },
+          {
+            "type": "LB3c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 26
+          },
+          {
+            "type": "LB3d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 29
+          },
+          {
+            "type": "LB4a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 11
+          },
+          {
+            "type": "LB4b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 8
+          },
+          {
+            "type": "all",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 152
+          }
+        ]
+      },
+      {
+        "config": {
+          "exc": 0.35,
+          "inh": 4.0,
+          "cap": null
+        },
+        "drives": [
+          {
+            "type": "LB1a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 32
+          },
+          {
+            "type": "LB1b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 49
+          },
+          {
+            "type": "LB1c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 113
+          },
+          {
+            "type": "LB1d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 7
+          },
+          {
+            "type": "LB1e",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 49
+          },
+          {
+            "type": "LB2a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 22
+          },
+          {
+            "type": "LB2b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 14
+          },
+          {
+            "type": "LB2c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 26
+          },
+          {
+            "type": "LB2d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 23
+          },
+          {
+            "type": "LB3b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 15
+          },
+          {
+            "type": "LB3c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 26
+          },
+          {
+            "type": "LB3d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 34
+          },
+          {
+            "type": "LB4a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 18
+          },
+          {
+            "type": "LB4b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 14
+          },
+          {
+            "type": "all",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 180
+          }
+        ]
+      },
+      {
+        "config": {
+          "exc": 0.5,
+          "inh": 4.0,
+          "cap": 500.0
+        },
+        "drives": [
+          {
+            "type": "LB1a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 22
+          },
+          {
+            "type": "LB1b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 33
+          },
+          {
+            "type": "LB1c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 91
+          },
+          {
+            "type": "LB1d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 3
+          },
+          {
+            "type": "LB1e",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 10
+          },
+          {
+            "type": "LB2a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 14
+          },
+          {
+            "type": "LB2b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 16
+          },
+          {
+            "type": "LB2c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 23
+          },
+          {
+            "type": "LB2d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 26
+          },
+          {
+            "type": "LB3b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 25
+          },
+          {
+            "type": "LB3c",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 28
+          },
+          {
+            "type": "LB3d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 52
+          },
+          {
+            "type": "LB4a",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 25
+          },
+          {
+            "type": "LB4b",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 15
+          },
+          {
+            "type": "all",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 208
+          }
+        ]
+      },
+      {
+        "config": {
+          "exc": 1.0,
+          "inh": 1.0,
+          "cap": null
+        },
+        "drives": [
+          {
+            "type": "LB1a",
+            "mn9_max_drive_hz": 83.33333333333333,
+            "recruited_non_sensory": 25526
+          },
+          {
+            "type": "LB1b",
+            "mn9_max_drive_hz": 286.6666666666667,
+            "recruited_non_sensory": 25473
+          },
+          {
+            "type": "LB1c",
+            "mn9_max_drive_hz": 20.0,
+            "recruited_non_sensory": 24594
+          },
+          {
+            "type": "LB1d",
+            "mn9_max_drive_hz": 276.6666666666667,
+            "recruited_non_sensory": 25440
+          },
+          {
+            "type": "LB1e",
+            "mn9_max_drive_hz": 290.0,
+            "recruited_non_sensory": 24935
+          },
+          {
+            "type": "LB2a",
+            "mn9_max_drive_hz": 276.6666666666667,
+            "recruited_non_sensory": 25639
+          },
+          {
+            "type": "LB2b",
+            "mn9_max_drive_hz": 280.0,
+            "recruited_non_sensory": 25689
+          },
+          {
+            "type": "LB2c",
+            "mn9_max_drive_hz": 23.333333333333332,
+            "recruited_non_sensory": 24236
+          },
+          {
+            "type": "LB2d",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 24611
+          },
+          {
+            "type": "LB3",
+            "mn9_max_drive_hz": 0.0,
+            "recruited_non_sensory": 0
+          },
+          {
+            "type": "LB3a",
+            "mn9_max_drive_hz": 316.6666666666667,
+            "recruited_non_sensory": 25406
+          },
+          {
+            "type": "LB3b",
+            "mn9_max_drive_hz": 366.6666666666667,
+            "recruited_non_sensory": 25067
+          },
+          {
+            "type": "LB3c",
+            "mn9_max_drive_hz": 330.0,
+            "recruited_non_sensory": 25310
+          },
+          {
+            "type": "LB3d",
+            "mn9_max_drive_hz": 380.0,
+            "recruited_non_sensory": 25136
+          },
+          {
+            "type": "LB4a",
+            "mn9_max_drive_hz": 370.0,
+            "recruited_non_sensory": 25371
+          },
+          {
+            "type": "LB4b",
+            "mn9_max_drive_hz": 370.0,
+            "recruited_non_sensory": 25903
+          },
+          {
+            "type": "all",
+            "mn9_max_drive_hz": 170.0,
+            "recruited_non_sensory": 25065
+          }
+        ]
+      }
+    ]
+  },
+  "adder": [
+    {
+      "file": "all_w0_calib_e025_i2_live_silent.json",
+      "placement": "all_w0.0",
+      "surround": "silent",
+      "n": 50,
+      "correct": 0,
+      "faults": 1,
+      "timeouts": 0,
+      "no_accept": 50,
+      "incomplete": 0,
+      "max_excitatory_spikes_entering_per_ms": 1845
+    },
+    {
+      "file": "all_w0_calib_e025_i2_live_poisson.json",
+      "placement": "all_w0.0",
+      "surround": "poisson",
+      "n": 50,
+      "correct": 0,
+      "faults": 5,
+      "timeouts": 7,
+      "no_accept": 50,
+      "incomplete": 0,
+      "max_excitatory_spikes_entering_per_ms": 3192
+    },
+    {
+      "file": "vnc_w2_calib_e025_i2_live_silent.json",
+      "placement": "vnc_w2.0",
+      "surround": "silent",
+      "n": 50,
+      "correct": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "no_accept": 50,
+      "incomplete": 0,
+      "max_excitatory_spikes_entering_per_ms": 284
+    },
+    {
+      "file": "vnc_w2_calib_e025_i2_live_poisson.json",
+      "placement": "vnc_w2.0",
+      "surround": "poisson",
+      "n": 50,
+      "correct": 0,
+      "faults": 0,
+      "timeouts": 0,
+      "no_accept": 0,
+      "incomplete": 50,
+      "max_excitatory_spikes_entering_per_ms": 809
+    },
+    {
+      "file": "all_w0_calib_e025_i2_sealed.json",
+      "placement": "all_w0.0",
+      "surround": "silent",
+      "n": 5,
+      "correct": 5,
+      "faults": 0,
+      "timeouts": 0,
+      "no_accept": 0,
+      "incomplete": 0,
+      "max_excitatory_spikes_entering_per_ms": 0
+    },
+    {
+      "file": "all_w0_calib_e025_i2_outzero_silent.json",
+      "placement": "all_w0.0",
+      "surround": "silent",
+      "n": 10,
+      "correct": 10,
+      "faults": 0,
+      "timeouts": 0,
+      "no_accept": 0,
+      "incomplete": 0,
+      "max_excitatory_spikes_entering_per_ms": 0
+    }
+  ]
+}
