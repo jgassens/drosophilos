@@ -310,12 +310,12 @@ With the published Shiu et al. weights (`exc=1`, `inh=1`, uncapped), the 2-Hz P1
 drive entered a self-sustained seizure: 25,628 non-sensory neurons were recruited and
 the off-period tail was 34,087.7 spikes per 10-ms bin.  A single 213-Hz point source
 (P2 seed 2) recruited 25,944 active neurons (25,943 excluding the source) and had a
-34,214.1-spike/bin tail.  The other two point-source seeds remained local; this one
+34,197.1-spike/bin tail.  The other two point-source seeds remained local; this one
 seed is enough to show that the published state is not safely bounded.
 
 ### P1 sweep
 
-Only settings with `exc=0.25` decayed to a zero tail; six of those nine configurations
+Only settings with `exc=0.25` decayed to a zero tail; five of those nine configurations
 had an exactly zero measured tail.  The files predate the fixed metrics: their old
 `runaway` flag can fire on Poisson noise and is not used or cited here.
 
@@ -372,8 +372,9 @@ had an exactly zero measured tail.  The files predate the fixed metrics: their o
 The candidate was `exc=0.25`, `inh=2`, with no cap: it reduces the excitatory
 synaptic weight 75%, from 0.275 to about 0.069 mV per synapse, and doubles inhibition.
 Its seed-0 P1 tail was zero.  Seed 1 also had a zero tail (629 recruited non-sensory;
-2,497.4 drive spikes/bin), but seed 2 left a 15.6-spike/bin tail (654; 2,543.7).
-That small tail puts the candidate near the edge of stability.
+2,497.4 drive spikes/bin), but seed 2 left an off-tail of about 16 spikes per 10 ms
+(15.6; 654 recruited non-sensory; 2,543.7 drive spikes/bin).  That small tail puts
+the candidate at the edge of stability.
 
 ### P4 responsiveness proxy
 
@@ -418,9 +419,12 @@ within the run.
 | vnc_w2 | silent | 0/50 | 50 no accept | 284 |
 | vnc_w2 | 2-Hz Poisson | 0/50 | 50 incomplete | 809 |
 
-The sealed all_w0 control was 5/5, and the silent outputs-zeroed control was 10/10.
-Thus the live failure is a local echo of the circuit's own output, not global
-over-excitability.
+The sealed all_w0 control was 5/5, and the outputs-zeroed control, run in the
+**silent** surround only, was 10/10.  Thus, for the silent surround, the live failure
+is explained by a local echo of the circuit's own output rather than global
+over-excitability.  Under 2-Hz drive the adder also fails (0/50), with about 3,200
+(w0) and about 800 (VNC) excitatory spikes/ms entering; the contribution of incoming
+sensory activity there was not separated.
 
 ### Conclusion and limits
 
