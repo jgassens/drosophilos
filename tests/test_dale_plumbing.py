@@ -40,8 +40,9 @@ def test_dale_private_campaign_replays_identically():
     assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
 
 
-def test_dale_biased_campaign_replays_identically():
-    pl, record = _record("dale_biased")
+@pytest.mark.parametrize("policy", ["dale_biased", "dale_refractory"])
+def test_versioned_dale_campaign_replays_identically(policy):
+    pl, record = _record(policy)
     assert circuit_hash(kernel_campaign.rebuild_record(record)[1]) == circuit_hash(pl)
     assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
 
@@ -59,16 +60,19 @@ def test_dale_private_replay_refuses_unknown_policy_or_version(change):
         build_tick_pipeline(record)
 
 
-@pytest.mark.parametrize("version", [0, None])
-def test_dale_biased_replay_refuses_missing_or_wrong_version(version):
-    _pl, record = _record("dale_biased")
-    if version is None:
-        del record["dale_biased_version"]
+@pytest.mark.parametrize("policy,label", [("dale_biased", "Dale-biased"),
+                                          ("dale_refractory", "Dale-refractory")])
+@pytest.mark.parametrize("version", [0, 2, None, "1", True, "missing"])
+def test_versioned_dale_replay_refuses_missing_or_wrong_version(policy, label, version):
+    _pl, record = _record(policy)
+    key = policy + "_version"
+    if version == "missing":
+        del record[key]
     else:
-        record["dale_biased_version"] = version
-    with pytest.raises(ValueError, match="latch_feedback|Dale-biased"):
+        record[key] = version
+    with pytest.raises(ValueError, match=label):
         kernel_campaign.rebuild_record(record)
-    with pytest.raises(ValueError, match="latch_feedback|Dale-biased"):
+    with pytest.raises(ValueError, match=label):
         build_tick_pipeline(record)
 
 
@@ -82,17 +86,20 @@ def test_h_stage_mapping_rebuilds_dale_private_adder():
                             **F, latch_feedback="dale_private"))
 
 
-def test_h_stage_mapping_rebuilds_dale_biased_adder():
-    meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_biased")
+@pytest.mark.parametrize("policy", ["dale_biased", "dale_refractory"])
+def test_h_stage_mapping_rebuilds_versioned_dale_adder(policy):
+    meta = mapping_meta("all", 0, 1, 0, latch_feedback=policy)
     options = adder_build_kwargs(meta)
-    assert options["latch_feedback"] == "dale_biased"
-    assert options["dale_biased_version"] == meta["dale_biased_version"]
-    assert _adder_digest(build_adder_channel(Params(), **options)) == _adder_digest(
-        build_adder_channel(Params(), width=4, ordered=True, watchdog_hops=100, storage="flipflop",
-                            **F, latch_feedback="dale_biased"))
+    assert options["latch_feedback"] == policy
+    assert options[policy + "_version"] == meta[policy + "_version"]
+    rebuilt = build_adder_channel(Params(), **options)
+    original = build_adder_channel(Params(), width=4, ordered=True, watchdog_hops=100,
+                                   storage="flipflop", **F, latch_feedback=policy)
+    assert _adder_digest(rebuilt) == _adder_digest(original)
+    assert rebuilt.net.bias == original.net.bias
 
 
-@pytest.mark.parametrize("latch_feedback", ("autapse", "dale_private", "dale_biased"))
+@pytest.mark.parametrize("latch_feedback", ("autapse", "dale_private", "dale_biased", "dale_refractory"))
 def test_saved_h_stage_mapping_rebuilds_its_exact_roles(tmp_path, latch_feedback):
     """The Stage-H file round trip keeps optional feedback metadata in its builder contract."""
     params = Params()
@@ -101,7 +108,9 @@ def test_saved_h_stage_mapping_rebuilds_its_exact_roles(tmp_path, latch_feedback
         {"dale_feedback_version": meta["dale_feedback_version"]}
         if latch_feedback == "dale_private" else
         {"dale_biased_version": meta["dale_biased_version"]}
-        if latch_feedback == "dale_biased" else {})
+        if latch_feedback == "dale_biased" else
+        {"dale_refractory_version": meta["dale_refractory_version"]}
+        if latch_feedback == "dale_refractory" else {})
     saved_channel = build_adder_channel(
         params, 4, ordered=True, watchdog_hops=100, storage="flipflop", **F,
         latch_feedback=latch_feedback, **feedback_version)
@@ -120,6 +129,9 @@ def test_saved_h_stage_mapping_rebuilds_its_exact_roles(tmp_path, latch_feedback
     saved = json.loads(path.read_text())
     assert set(rebuilt.roles) == set(saved["mapping"]) | set(saved["unplaced"])
     assert rebuilt.n == net.n
+    assert rebuilt.bias == net.bias
+    assert (rebuilt.src, rebuilt.dst, rebuilt.quanta, rebuilt.delay, rebuilt.roles) == (
+        net.src, net.dst, net.quanta, net.delay, net.roles)
     if latch_feedback == "autapse":
         assert rebuilt.n == 740
     else:
@@ -137,22 +149,25 @@ def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_feedback(version):
         adder_build_kwargs(meta)
 
 
-@pytest.mark.parametrize("version", [999, None])
-def test_h_stage_mapping_refuses_unversioned_or_wrong_dale_biased(version):
-    meta = mapping_meta("all", 0, 1, 0, latch_feedback="dale_biased")
-    if version is None:
-        del meta["dale_biased_version"]
+@pytest.mark.parametrize("policy,label", [("dale_biased", "Dale-biased"),
+                                          ("dale_refractory", "Dale-refractory")])
+@pytest.mark.parametrize("version", [999, None, "1", True, "missing"])
+def test_h_stage_mapping_refuses_unversioned_or_wrong_dale(policy, label, version):
+    meta = mapping_meta("all", 0, 1, 0, latch_feedback=policy)
+    if version == "missing":
+        del meta[policy + "_version"]
     else:
-        meta["dale_biased_version"] = version
-    with pytest.raises(ValueError, match="Dale-biased"):
+        meta[policy + "_version"] = version
+    with pytest.raises(ValueError, match=label):
         adder_build_kwargs(meta)
 
 
+@pytest.mark.parametrize("policy", ["dale_private", "dale_biased", "dale_refractory"])
 @pytest.mark.parametrize("option", ["master_ignition", "operand_xor_oneshot", "f_width16_experimental"])
-def test_dale_private_rejects_unsurveyed_kernel_options(option):
-    kwargs = dict(F, latch_feedback="dale_private")
+def test_dale_rejects_unsurveyed_kernel_options(policy, option):
+    kwargs = dict(F, latch_feedback=policy)
     kwargs[option] = True
-    with pytest.raises(ValueError, match="not surveyed with dale_private"):
+    with pytest.raises(ValueError, match="not surveyed with " + policy):
         build_pipeline(Params(), 1, [{"name": "x", "op": "MOV", "a": "input"}], **kwargs)
 
 
@@ -161,3 +176,46 @@ def test_missing_feedback_policy_rebuilds_historical_autapse():
     record = {"block": "tick", **pl.build_options}
     assert circuit_hash(kernel_campaign.rebuild_record(record)[1]) == circuit_hash(pl)
     assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
+
+
+def test_refractory_nested_stage_d_replay_and_recheck():
+    from drosophilos.bench import stage_d
+
+    pl = stage_d.build(stage_d.load_kernel(), Params(), **F, latch_feedback="dale_refractory")
+    record = {"stage": "D", "build_options": dict(pl.build_options)}
+    assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
+    stage_d.recheck_record(record)
+    for version in (0, 2, None, "1", True, "missing"):
+        if version == "missing":
+            record["build_options"].pop("dale_refractory_version")
+        else:
+            record["build_options"]["dale_refractory_version"] = version
+        with pytest.raises(ValueError, match="Dale-refractory"):
+            build_tick_pipeline(record)
+        if version != "missing":
+            with pytest.raises(ValueError, match="Dale-refractory"):
+                stage_d.recheck_record(record)
+
+
+def test_refractory_non_tick_campaign_replays():
+    _ks, pl, _tokens, _reference = kernel_campaign.block(
+        "fanout", Params(), **F, latch_feedback="dale_refractory")
+    record = {"block": "fanout", **pl.build_options}
+    assert circuit_hash(kernel_campaign.rebuild_record(record)[1]) == circuit_hash(pl)
+    assert circuit_hash(build_tick_pipeline(record)[2]) == circuit_hash(pl)
+
+
+def test_refractory_campaign_cli_and_help():
+    parser = kernel_campaign.parser()
+    args = parser.parse_args(["fanout", "--latch-feedback", "dale_refractory"])
+    assert args.latch_feedback == "dale_refractory"
+    help_text = " ".join(parser.format_help().split())
+    assert "dale_refractory is REJECTED" in help_text
+    assert "4/11/15" in help_text and "33 < 44" in help_text
+
+
+def test_refractory_mapping_requires_f():
+    with pytest.raises(ValueError, match="requires configuration F"):
+        mapping_meta("all", 0, 1, 0, config_f=False, latch_feedback="dale_refractory")
+    with pytest.raises(ValueError, match="legacy mapping"):
+        adder_build_kwargs({"latch_feedback": "dale_refractory"})

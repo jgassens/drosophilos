@@ -7,7 +7,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..protocol.handshake import Channel, add_liveness, add_register, wire_fault_path
-from ..protocol.latch import (DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION,
+from ..protocol.latch import (DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION,
+                              EXPERIMENTAL_AUTAPSE_VERSION,
                               add_dale_latch_feedback, add_edge_relay,
                               add_experimental_autapses, connect_trigger,
                               validate_latch_feedback)
@@ -38,7 +39,8 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
                         rate_robust: bool = False, experimental_autapse: bool = False,
                         ordered_xor_oneshot: bool = False, latch_feedback: str = "autapse",
                         dale_feedback_version: int = DALE_FEEDBACK_VERSION,
-                        dale_biased_version: int = DALE_BIASED_VERSION) -> Channel:
+                        dale_biased_version: int = DALE_BIASED_VERSION,
+                        dale_refractory_version: int = DALE_REFRACTORY_VERSION) -> Channel:
     """`ordered=True`: the veto-relay adder (operand gate on A driven by the carry-in rails,
     B delayed 6 hops, carries delayed 5 hops per stage); `False`: the rate-mode M1 adder.
     `storage` is the output register's rail storage ("latch" or "flipflop", see add_register;
@@ -50,9 +52,11 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     `latch_feedback='dale_private'` replaces only the experimental latch self-edges
     with versioned private inhibitory relays; 'dale_biased' uses biased relays
     with sparser feedback (not autapse-equivalent timing). The one-shot self-edge
-    remains. Each relay circuit has independent replay version metadata."""
+    remains. dale_refractory retains ordinary refractory dynamics and is
+    rejected on sampled corners and the rate floor. Each relay circuit has
+    independent replay version metadata."""
     validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version,
-                            dale_biased_version)
+                            dale_biased_version, dale_refractory_version)
     if ordered_xor_oneshot and not (rate_robust and experimental_autapse):
         raise ValueError("ordered_xor_oneshot requires rate_robust=True and experimental_autapse=True")
     if ordered_xor_oneshot and not ordered:
@@ -107,4 +111,7 @@ def build_adder_channel(params: Params, width: int, drive: Drive | None = None, 
     elif latch_feedback == "dale_biased":
         channel.build_options.update(latch_feedback=latch_feedback,
                                      dale_biased_version=DALE_BIASED_VERSION)
+    elif latch_feedback == "dale_refractory":
+        channel.build_options.update(latch_feedback=latch_feedback,
+                                     dale_refractory_version=DALE_REFRACTORY_VERSION)
     return channel

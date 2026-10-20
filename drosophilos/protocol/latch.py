@@ -33,6 +33,17 @@ DALE_BIASED_GAIN = 0.2
 DALE_BIASED_INPUT_DELAY_STEPS = 0
 DALE_BIASED_DELAY_STEPS = 0
 
+# Bounded refractory/bias round's least-failing setting. REJECTED: 4/11/15
+# corner failures and 33-step minimum interval; +700 reload is 114/128.
+# The netlist has no per-neuron refractory override: this variant changes bias
+# and drive only, retaining the model's ordinary refractory law.
+DALE_REFRACTORY_VERSION = 1
+DALE_REFRACTORY_BIAS_MV = 5.0
+DALE_REFRACTORY_DRIVE_GAIN = 0.4
+DALE_REFRACTORY_GAIN = 0.2
+DALE_REFRACTORY_INPUT_DELAY_STEPS = 0
+DALE_REFRACTORY_DELAY_STEPS = 0
+
 # Version 1 (rejected): simultaneous u/v ignition admits fast reset survivors.
 # Version 2: keep u at delay 18, assist v 60 steps later from the SAME COPY arm.
 MASTER_IGNITION_VERSION = 2
@@ -100,9 +111,11 @@ def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private"
     delays still incur the relay's membrane integration and spike delivery time.
     ``biased`` reduces the relay's resting gap and input drive together. It won
     the bounded holding/reload score but does not reproduce autapse timing.
+    ``refractory`` is the rejected bias/gain follow-up, with ordinary model
+    refractory dynamics; it fails both sampled holding corners and rate floor.
     This changes latch feedback only, not other mixed-sign circuit elements.
     """
-    if variant not in ("private", "biased"):
+    if variant not in ("private", "biased", "refractory"):
         raise ValueError(f"unsupported Dale latch feedback variant: {variant!r}")
     edges = {(s, d): q for s, d, q in zip(net.src, net.dst, net.quanta)}
     members = [m for (u, v), q in edges.items()
@@ -122,25 +135,32 @@ def add_dale_latch_feedback(net: Netlist, drive: Drive, variant: str = "private"
                             DALE_FEEDBACK_INPUT_DELAY_STEPS)
                 net.synapse(inh, member, -round(drive.loop * DALE_FEEDBACK_GAIN),
                             DALE_FEEDBACK_DELAY_STEPS)
-            else:
+            elif variant == "biased":
                 inh = net.neuron(net.roles[member] + ".fb", bias=DALE_BIASED_BIAS_MV)
                 net.synapse(member, inh, round(drive.loop * DALE_BIASED_DRIVE_GAIN),
                             DALE_BIASED_INPUT_DELAY_STEPS)
                 net.synapse(inh, member, -round(drive.loop * DALE_BIASED_GAIN),
                             DALE_BIASED_DELAY_STEPS)
+            else:
+                inh = net.neuron(net.roles[member] + ".fb", bias=DALE_REFRACTORY_BIAS_MV)
+                net.synapse(member, inh, round(drive.loop * DALE_REFRACTORY_DRIVE_GAIN),
+                            DALE_REFRACTORY_INPUT_DELAY_STEPS)
+                net.synapse(inh, member, -round(drive.loop * DALE_REFRACTORY_GAIN),
+                            DALE_REFRACTORY_DELAY_STEPS)
     finally:
         net.inhibition_mirrors = mirrors
 
 
 def validate_latch_feedback(latch_feedback: str, experimental_autapse: bool,
                             dale_feedback_version: int = DALE_FEEDBACK_VERSION,
-                            dale_biased_version: int = DALE_BIASED_VERSION) -> None:
+                            dale_biased_version: int = DALE_BIASED_VERSION,
+                            dale_refractory_version: int = DALE_REFRACTORY_VERSION) -> None:
     """Validate builder options, including version metadata forwarded on replay.
 
     Missing policy means the historical autapse. Versions matter only when the
     corresponding circuit is selected; old autapse records remain unchanged.
     """
-    if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
+    if latch_feedback not in ("autapse", "dale_private", "dale_biased", "dale_refractory"):
         raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
     if latch_feedback != "autapse":
         if not experimental_autapse:
@@ -151,6 +171,9 @@ def validate_latch_feedback(latch_feedback: str, experimental_autapse: bool,
         if latch_feedback == "dale_biased" and (
                 type(dale_biased_version) is not int or dale_biased_version != DALE_BIASED_VERSION):
             raise ValueError("unsupported Dale-biased circuit version")
+        if latch_feedback == "dale_refractory" and (
+                type(dale_refractory_version) is not int or dale_refractory_version != DALE_REFRACTORY_VERSION):
+            raise ValueError("unsupported Dale-refractory circuit version")
 
 
 def add_reset(net: Netlist, drive: Drive, name: str, latches: list[Latch], gates: list[int] = (),

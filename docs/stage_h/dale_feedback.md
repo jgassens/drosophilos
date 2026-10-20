@@ -427,3 +427,169 @@ private surveys remain unchanged. Local invocation also sets
 `UV_NO_SYNC=1`, and a writable `UV_CACHE_DIR` under the task's temporary directory.
 The original 2,000-copy / multi-seed slow survey was not rerun. No larger
 qualification or further tuning is claimed by this bounded round.
+
+## Downstream fanout evidence and bounded bias round, 2026-10-20
+
+**Verdict: no setting meets all three bars. Stop tuning after these three
+settings.** The least-failing candidate is available only for reproduction as
+`latch_feedback='dale_refractory'`, version 1. It has **4 non-ignitions / 11
+holding losses / 15 terminal-dark copies** on the same 512 corners, **114/128**
+noisy +700 reloads, and a **33-step** corner minimum interval. It fails both
+the zero-corner-failure bar and the >=44-step rate floor. It is a rejected
+experimental circuit, not a qualified replacement for F or an improvement on
+dale_biased v1. No fourth setting or further tuning was attempted.
+
+### G2 fanout result supplied by the conductor
+
+The downstream G2 run on **2026-10-16** used the 8-bit `kernel_campaign` block
+`fanout`, `--copies 100 --mix B --seed 110 --repeats 40 --max-ms 500000
+--rate-robust --experimental-autapse --ordered-xor-oneshot`. The two builds
+produced:
+
+| Build | G2 job | OK outputs / expected | Wrong | Missing | Faults | Timeouts | Copies stopped |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Autapse | 4023612 | 32,000 / 32,000 | 0 | 0 | 0 | 0 | 0 / 100 |
+| dale_biased v1 | 4023613 | 27,336 / 32,000 | 0 | 4,664 | 1 | 7 | 8 / 100 |
+
+Source files (reported evidence, not rerun in this laptop round):
+
+```
+/Users/jeremiahgassensmith/programming/drosophilos/data/stage_h/dale/fanout_autapse_s110_r40.json
+/Users/jeremiahgassensmith/programming/drosophilos/data/stage_h/dale/fanout_dale_biased_s110_r40.json
+```
+
+The local holding/reload score did not predict downstream liveness. In this
+run the problem manifests as stalled copies and missing outputs, with no wrong
+answers among delivered outputs. This is consistent with a rate/timing
+problem; the aggregate counts alone do not isolate a causal circuit path.
+
+### Exactly three measured settings
+
+The owned netlist API carries per-neuron bias but no per-neuron refractory
+override. All three settings therefore retain the unchanged simulator's
+ordinary **22-step refractory period**, with one private inhibitory relay per
+member, zero input/return delays, a lower **5.0-mV bias**, and an increased
+**0.4-loop excitatory drive**. Only the inhibitory gain differs. The three
+settings were fixed before measurement. The aim was to make inhibition more
+frequent and increase slowing without adding a simulator feature or changing
+any member, loop edge, reader, controller, or other policy.
+
+Measurements call the original `corner_probe` and `noisy_reload_probe` from
+`tests/test_dale_feedback.py`: seed 109, 256 independent sign vectors repeated
+under two ignition regimes (512 cases), 6,000 steps and the same kick/holding
+estimator; full mix B, seed 108, 128 copies, original clear phases, 6,200 steps
+for reload. Added relays receive independent membrane/edge corners and the
+same noise law, including strays. Different topology sizes change RNG draw
+assignment. Intervals use the original settled estimator starting at step
+2,000, including the step-2,520 kick. These are sampled, not exhaustive corners.
+
+| Circuit / inhibitory gain | Corner non-ignition / holding loss / terminal dark (512) | Corner interval min / median / max | +700 reload (128) | +1000 reload (128) | No-reload survivors (128) | All three bars |
+|---|---:|---:|---:|---:|---:|---|
+| Autapse control | 0 / 0 / 0 | 36 / 54 / 98 | 114 | 128 | 0 | Fail rate floor |
+| dale_biased v1 control | 0 / 0 / 0 | 33 / 50 / 91 | 118 | 128 | 0 | Fail rate floor |
+| **Candidate 1, .2 (dale_refractory v1)** | **4 / 11 / 15** | **33 / 54 / 143** | **114** | **128** | **0** | **Fail corners and rate floor** |
+| Candidate 2, .3 | 76 / 83 / 159 | 35 / 58 / 139 | 108 | 128 | 0 | Fail all three |
+| Candidate 3, .4 | 217 / 70 / 287 | 37 / 62 / 176 | 37 | 65 | 0 | Fail all three |
+
+The selection prioritizes corner survival and then reload, with interval as
+the remaining criterion: candidate 1 loses the fewest copies and alone meets
+the reload bar. It is the least-failing of these three, not a passing design.
+Increasing inhibition raised the minimum interval only modestly while greatly
+worsening holding and reload. Silent copies remain in the holding denominator;
+15, 152 and 277 copies respectively have no settled interval samples. Silence
+must not be counted as satisfying a rate floor.
+
+### What sets the 33-step interval
+
+A local run of `corner_probe('dale_biased')` reproduced the 33-step minimum measured for latch member `u` by `_periods`, but attributing it to a specific corner or to relay latency, member refractory time, or loop delay requires new instrumentation code because the existing survey returns only aggregate intervals and does not retain the corner identity or relay spikes.
+
+### Opt-in circuit, replay and frozen baselines
+
+The new constants are `DALE_REFRACTORY_VERSION=1`,
+`DALE_REFRACTORY_BIAS_MV=5.0`, `DALE_REFRACTORY_DRIVE_GAIN=.4`,
+`DALE_REFRACTORY_GAIN=.2`, and
+`DALE_REFRACTORY_INPUT_DELAY_STEPS=DALE_REFRACTORY_DELAY_STEPS=0`.
+The name identifies this bounded refractory/bias investigation; it does **not**
+claim a longer refractory period. `add_dale_latch_feedback(...,
+variant='refractory')` retains the private Dale-compatible structure and bypasses
+feedback mirroring while preserving genuine later clears. Unignited nominal
+latches and relays remain dark for the tested 6,000 steps.
+
+Both builders record `latch_feedback='dale_refractory'` and
+`dale_refractory_version=1`. Explicit versions must be integer 1, excluding
+booleans. Other policies ignore this version. New builds may omit the version;
+campaign and diagnostic replay and saved mapping contracts require it. The
+kernel refuses `master_ignition`, `operand_xor_oneshot`, and
+`f_width16_experimental` with this policy, as with dale_biased. Existing
+experimental-autapse/rate-robust/F shape restrictions still apply.
+
+The policy/version are forwarded through `kernel_campaign` CLI, records and
+`rebuild_record`, `stall_diag` (tick, non-tick and nested Stage D),
+`h_stage_place` CLI/metadata/building, `h1_fullgraph` builder metadata and
+`embed_image.MAPPING_META_KEYS`. CLI help states the measured rejection.
+Tests save and reload a complete mapping, then compare ordered roles, edges
+and biases with the original channel. Nested Stage D diagnostics reject a
+missing version, and both diagnostics and `stage_d.recheck_record` reject
+explicit malformed/changed versions. As with dale_biased, direct
+`stage_d.recheck_record` still defaults a missing nested version to v1 through
+the builder; that entry point is outside this round's owned files.
+
+Default, autapse, private v1 and biased v1 circuits remain unchanged. Existing
+frozen autapse/default/private digests are retained verbatim. New biased v1
+digests were independently captured by executing HEAD's unedited latch
+transform; these include ordered `(src,dst,quanta,delay,roles,bias)`:
+
+| Biased v1 build | SHA256 including bias |
+|---|---|
+| Two-cell 2-bit ADD → XOR F kernel | `88eab29d4e817312ead92ede0560c6cb4103d312bc6d22be04b17eb922cf1078` |
+| 4-bit ordered F flip-flop adder, watchdog 100 | `847e799023d3ba993a8c36cd21d048bf978ba56886e83c09473fdc5b9479e5fe` |
+
+### Isolated arithmetic and fanout smoke
+
+The original H1 isolated F flip-flop adder fixture, `adder_cases(4,8,seed=110)`,
+was run fresh and chained. The new variant completed **8/8 correct** in each
+mode, with zero wrong answers, faults, timeouts, no-accept or missing completion
+events. Fresh accept times were `[413,379,378,355,414,372,355,372]` ms; chained
+times were `[413,384,383,357,414,376,358,375]` ms. Total spikes were **171,307**
+fresh and **171,491** chained. These nominal isolated successes do not qualify
+noisy kernels or erase the failed holding/rate bars.
+
+The 8-bit `kernel_campaign.block('fanout')` smoke used full mix B with
+`_NoisyRefSim`, seed 110, **2 copies × 2 repeats**, the same F flags and
+`max_ms=50000`. Both copies completed: **32/32 outputs correct, 0 wrong,
+0 missing, 0 bad decodes, 0 faults and 0 timeouts**. A preliminary 15,000-ms
+observation ended with nine correct outputs per copy; increasing only the
+observation ceiling allowed completion. This uses the same noise law as the
+campaign, not its CUDA random stream. Passing this tiny smoke does not predict
+the 100-copy × 40-repeat liveness result or reverse the failed corner/rate bars.
+
+### Reproduction and full cluster command
+
+Run from this worktree, selecting its sources and the shared environment:
+
+```sh
+export PYTHONPATH=$PWD
+export UV_NO_SYNC=1
+export UV_PROJECT_ENVIRONMENT=/Users/jeremiahgassensmith/programming/drosophilos/.venv
+export UV_CACHE_DIR=/Users/jeremiahgassensmith/.agentctl/runs/dale-refr-20261020/tasks/dale-refractory/tmp/uv-cache
+uv run pytest -q -o addopts='' tests/test_dale_refractory.py tests/test_dale_plumbing.py tests/test_dale_fast.py tests/test_dale_feedback.py
+DROSO_DALE_REFRACTORY_SURVEY=1 uv run pytest -s -q -o addopts='' -m slow tests/test_dale_refractory.py
+```
+
+The default new suite measures all 512 corners and 128 reloads side by side
+for autapse, dale_biased and the selected variant. The gated slow test reruns
+the complete three-setting screen and both controls; it was run in this round.
+The existing larger private and fast-feedback surveys were not rerun.
+Validation: the combined required suite passed **96 tests, 3 skipped** in
+187.29 seconds; the gated three-setting screen passed in 8.88 seconds.
+All existing frozen default/autapse/private digests and both new frozen
+biased-v1 digests passed. `git diff --check` was clean.
+
+For the conductor on G2, the exact full fanout command from the repository
+root is below. It is supplied for reproduction of this rejected candidate,
+not as a recommendation to promote it. **The 100-copy × 40-repeat run was
+not run on this laptop.**
+
+```sh
+PYTHONPATH=$PWD UV_NO_SYNC=1 uv run python -m drosophilos.bench.kernel_campaign fanout --copies 100 --mix B --seed 110 --repeats 40 --max-ms 500000 --rate-robust --experimental-autapse --ordered-xor-oneshot --latch-feedback dale_refractory --device cuda --out data/stage_h/dale/fanout_dale_refractory_s110_r40.json
+```

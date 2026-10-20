@@ -51,7 +51,8 @@ import numpy as np
 from ..protocol.celement import add_delay_chain, add_or_latched, add_veto_relay
 from ..protocol.handshake import Register, add_liveness, add_register, compact_register_resets, wire_fault_path
 from ..protocol.latch import (
-    DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
+    DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION,
+    EXPERIMENTAL_AUTAPSE_VERSION, MASTER_IGNITION_VERSION,
     Latch, add_dale_latch_feedback, add_edge_relay, add_experimental_autapses,
     validate_latch_feedback,
     add_latch, connect_trigger,
@@ -296,7 +297,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
                    master_ignition: bool = False, operand_xor_oneshot: bool = False,
                    latch_feedback: str = "autapse",
                    dale_feedback_version: int = DALE_FEEDBACK_VERSION,
-                   dale_biased_version: int = DALE_BIASED_VERSION) -> Pipeline:
+                   dale_biased_version: int = DALE_BIASED_VERSION,
+                   dale_refractory_version: int = DALE_REFRACTORY_VERSION) -> Pipeline:
     """`spec`: cells in order, each {"name", "op", "a", "b", "c", "mem", "init", "trigger"} (see
     the module docstring). `consts`: name -> value. `mems`: name -> (n_words, contents dict).
     `outputs`: names of the cells the host decodes (default: the last). `streams`: the input
@@ -362,6 +364,8 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     replay validation; omitted policy/version retain historical circuits.
     'dale_biased' uses biased relays with sparser feedback and independent
     `dale_biased_version` metadata; it does not reproduce autapse timing.
+    dale_refractory is a versioned bias/gain follow-up rejected on sampled
+    holding corners and the 44-step rate floor; it retains model refractory dynamics.
     Memories/RAM, phases/pacing, multiple streams and multipliers require the
     complete configuration F (also ordered_xor_oneshot); autapse alone remains
     rejected on those shapes. Generic and specialized datapaths are allowed.
@@ -399,7 +403,7 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     if type(operand_xor_oneshot) is not bool:
         raise ValueError("operand_xor_oneshot requires a bool")
     validate_latch_feedback(latch_feedback, experimental_autapse, dale_feedback_version,
-                            dale_biased_version)
+                            dale_biased_version, dale_refractory_version)
     if latch_feedback != "autapse" and (master_ignition or operand_xor_oneshot or f_width16_experimental):
         raise ValueError("master_ignition, operand_xor_oneshot, and f_width16_experimental "
                          f"are not surveyed with {latch_feedback}")
@@ -1088,6 +1092,9 @@ def build_pipeline(params: Params, n: int, spec: list[dict], consts: dict | None
     elif latch_feedback == "dale_biased":
         pl.build_options.update(latch_feedback=latch_feedback,
                                 dale_biased_version=DALE_BIASED_VERSION)
+    elif latch_feedback == "dale_refractory":
+        pl.build_options.update(latch_feedback=latch_feedback,
+                                dale_refractory_version=DALE_REFRACTORY_VERSION)
     if master_ignition:
         pl.build_options.update(master_ignition=True, master_ignition_version=MASTER_IGNITION_VERSION)
     if operand_xor_oneshot:
