@@ -1,9 +1,11 @@
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from types import SimpleNamespace
 
@@ -324,8 +326,66 @@ def run_sbatch_job(sbatch_exit_job, script, *, python_status=0, fail_remove=Fals
         env=env,
         text=True,
         capture_output=True,
+        timeout=10,
     )
     return result, sbatch_exit_job.home / "drosophilos-jobs" / env["SLURM_JOB_ID"]
+
+
+def wait_for_sbatch_file(job, path, expected=None):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if path.exists():
+            content = path.read_text()
+            if content and (expected is None or content == expected):
+                return content
+        assert job.poll() is None, f"sbatch exited {job.returncode} waiting for {path}"
+        time.sleep(0.01)
+    pytest.fail(f"timed out waiting for {path}")
+
+
+@pytest.fixture
+def sbatch_signal_job(sbatch_exit_job):
+    @contextmanager
+    def launch(script, setup, body, *, python_status=0):
+        started = sbatch_exit_job.home / "python-started"
+        finish = sbatch_exit_job.home / "python-finish"
+        fake_python = sbatch_exit_job.bin_dir / "python"
+        # Use the real interpreter and time.sleep, never the harness's fake sleep.
+        fake_python.write_text(
+            f"#!{sys.executable}\n"
+            "import os, signal, time\n"
+            "from pathlib import Path\n"
+            "status = int(os.environ['FAKE_PYTHON_STATUS'])\n"
+            + setup + "\n"
+            "Path(os.environ['FAKE_PYTHON_STARTED']).write_text(str(os.getpid()))\n"
+            + body + "\n"
+        )
+        env = {
+            **sbatch_exit_job.env,
+            "FAKE_PYTHON_STATUS": str(python_status),
+            "FAKE_PYTHON_STARTED": str(started),
+            "FAKE_PYTHON_FINISH": str(finish),
+        }
+        wt = sbatch_exit_job.home / "drosophilos-jobs" / env["SLURM_JOB_ID"]
+        job = subprocess.Popen(
+            ["/bin/bash", str(SLURM / script), "example.module"],
+            cwd=sbatch_exit_job.checkout, env=env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            python_pid = int(wait_for_sbatch_file(job, started))
+            yield SimpleNamespace(
+                job=job, python_pid=python_pid, wt=wt, finish=finish,
+                data=sbatch_exit_job.checkout / "data",
+            )
+        finally:
+            try:
+                os.killpg(job.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            job.communicate(timeout=5)
+
+    return launch
 
 
 @pytest.mark.parametrize("script",SBATCH_SCRIPTS)
@@ -344,53 +404,118 @@ def test_sbatch_python_failure_is_preserved_and_worktree_removed(sbatch_exit_job
 
 @pytest.mark.parametrize("script", SBATCH_SCRIPTS)
 @pytest.mark.parametrize("python_status", [0, 7])
-def test_sbatch_sigterm_waits_for_python_final_write(sbatch_exit_job, script, python_status):
-    started = sbatch_exit_job.home / "python-started"
-    fake_python = sbatch_exit_job.bin_dir / "python"
-    fake_python.write_text(
-        "#!/bin/bash\n"
-        "finish() {\n"
-        "  /bin/sleep 0.2\n"
-        "  printf 'final\\n' > data/final.txt || exit 99\n"
-        '  exit "$FAKE_PYTHON_STATUS"\n'
-        "}\n"
-        "trap finish TERM\n"
-        'printf "%s\\n" "$$" > "$FAKE_PYTHON_STARTED"\n'
-        "while :; do /bin/sleep 0.1; done\n"
+def test_sbatch_sigterm_waits_for_python_final_write(sbatch_signal_job, script, python_status):
+    setup = (
+        "def finish(signum, frame):\n"
+        "    with open('data/signals.txt', 'a') as log:\n"
+        "        log.write('TERM\\n')\n"
+        "    while not Path(os.environ['FAKE_PYTHON_FINISH']).exists(): time.sleep(0.01)\n"
+        "    Path('data/final.txt').write_text('final\\n')\n"
+        "    raise SystemExit(status)\n"
+        "signal.signal(signal.SIGTERM, finish)\n"
     )
-    env = {
-        **sbatch_exit_job.env,
-        "FAKE_PYTHON_STATUS": str(python_status),
-        "FAKE_PYTHON_STARTED": str(started),
-    }
-    wt = sbatch_exit_job.home / "drosophilos-jobs" / env["SLURM_JOB_ID"]
-    job = subprocess.Popen(
-        ["/bin/bash", str(SLURM / script), "example.module"],
-        cwd=sbatch_exit_job.checkout, env=env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-    )
-    try:
-        deadline = time.monotonic() + 10
-        python_pid = None
-        while job.poll() is None and time.monotonic() < deadline:
-            if started.exists() and (pid := started.read_text().strip()):
-                python_pid = int(pid)
-                break
-            time.sleep(0.01)
-        assert python_pid is not None, "fake Python did not start within 10 seconds"
+    with sbatch_signal_job(
+        script, setup, "while True: time.sleep(0.01)", python_status=python_status,
+    ) as run:
         # Signal the shell alone first; Slurm delivers Python's signal separately.
-        job.send_signal(signal.SIGTERM)
-        os.kill(python_pid, signal.SIGTERM)
-        stdout, stderr = job.communicate(timeout=10)
-        assert job.returncode == python_status, stdout + stderr
-        assert (sbatch_exit_job.checkout / "data/final.txt").read_text() == "final\n"
-        assert not wt.exists()
-    finally:
-        try:
-            os.killpg(job.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        job.communicate(timeout=5)
+        os.kill(run.job.pid, signal.SIGTERM)
+        os.kill(run.python_pid, signal.SIGTERM)
+        wait_for_sbatch_file(run.job, run.data / "signals.txt", "TERM\n")
+        assert run.job.poll() is None
+        assert run.wt.is_dir()
+        run.finish.touch()
+        stdout, stderr = run.job.communicate(timeout=10)
+        assert run.job.returncode == python_status, stdout + stderr
+        assert (run.data / "signals.txt").read_text() == "TERM\n"
+        assert (run.data / "final.txt").read_text() == "final\n"
+        assert not run.wt.exists()
+
+
+@pytest.mark.parametrize("script", SBATCH_SCRIPTS)
+def test_sbatch_usr1_checkpoints_before_worktree_cleanup(sbatch_signal_job, script):
+    setup = (
+        "def checkpoint(signum, frame):\n"
+        "    Path('data/checkpoint-started.txt').write_text('saving\\n')\n"
+        "    while not Path(os.environ['FAKE_PYTHON_FINISH']).exists(): time.sleep(0.01)\n"
+        "    Path('data/checkpoint.txt').write_text('checkpoint\\n')\n"
+        "    raise SystemExit(75)\n"
+        "signal.signal(signal.SIGUSR1, checkpoint)\n"
+    )
+    with sbatch_signal_job(script, setup, "while True: time.sleep(0.01)") as run:
+        # B:USR1 signals only the batch shell, never the process group.
+        os.kill(run.job.pid, signal.SIGUSR1)
+        wait_for_sbatch_file(run.job, run.data / "checkpoint-started.txt")
+        assert run.job.poll() is None
+        assert run.wt.is_dir()
+        run.finish.touch()
+        stdout, stderr = run.job.communicate(timeout=10)
+        assert run.job.returncode == 75, stdout + stderr
+        assert (run.data / "checkpoint.txt").read_text() == "checkpoint\n"
+        assert not run.wt.exists()
+
+
+@pytest.mark.parametrize("script", SBATCH_SCRIPTS)
+@pytest.mark.parametrize("shell_signal", [signal.SIGTERM, signal.SIGHUP, signal.SIGINT])
+def test_sbatch_shell_signal_keeps_waiting(sbatch_signal_job, script, shell_signal):
+    setup = (
+        "def unexpected_signal(signum, frame):\n"
+        "    Path('data/unexpected-signal.txt').write_text(str(signum))\n"
+        "    raise SystemExit(99)\n"
+        "for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):\n"
+        "    signal.signal(sig, unexpected_signal)\n"
+    )
+    body = (
+        "while not Path(os.environ['FAKE_PYTHON_FINISH']).exists(): time.sleep(0.01)\n"
+        "Path('data/final.txt').write_text('final\\n')\n"
+    )
+    with sbatch_signal_job(script, setup, body) as run:
+        os.kill(run.job.pid, shell_signal)
+        time.sleep(0.1)
+        assert run.job.poll() is None
+        assert run.wt.is_dir()
+        run.finish.touch()
+        stdout, stderr = run.job.communicate(timeout=10)
+        assert run.job.returncode == 0, stdout + stderr
+        assert (run.data / "final.txt").read_text() == "final\n"
+        assert not (run.data / "unexpected-signal.txt").exists()
+        assert not run.wt.exists()
+
+
+@pytest.mark.parametrize("script", SBATCH_SCRIPTS)
+def test_sbatch_forwards_each_usr_signal(sbatch_signal_job, script):
+    setup = (
+        "def record(signum, frame):\n"
+        "    with open('data/signals.txt', 'a') as log:\n"
+        "        log.write(signal.Signals(signum).name + '\\n')\n"
+        "signal.signal(signal.SIGUSR1, record)\n"
+        "signal.signal(signal.SIGUSR2, record)\n"
+    )
+    body = (
+        "while not Path(os.environ['FAKE_PYTHON_FINISH']).exists(): time.sleep(0.01)\n"
+        "raise SystemExit(status)\n"
+    )
+    with sbatch_signal_job(script, setup, body, python_status=7) as run:
+        expected = ""
+        for sig in (signal.SIGUSR1, signal.SIGUSR1, signal.SIGUSR2):
+            os.kill(run.job.pid, sig)
+            expected += sig.name + "\n"
+            # Acknowledge each signal so standard signals cannot coalesce.
+            wait_for_sbatch_file(run.job, run.data / "signals.txt", expected)
+            assert run.wt.is_dir()
+        run.finish.touch()
+        stdout, stderr = run.job.communicate(timeout=10)
+        assert run.job.returncode == 7, stdout + stderr
+        assert (run.data / "signals.txt").read_text() == expected
+        assert not run.wt.exists()
+
+
+@pytest.mark.parametrize("script", SBATCH_SCRIPTS)
+def test_sbatch_preserves_python_signal_exit_status(sbatch_signal_job, script):
+    with sbatch_signal_job(script, "", "while True: time.sleep(0.01)") as run:
+        os.kill(run.python_pid, signal.SIGKILL)
+        stdout, stderr = run.job.communicate(timeout=10)
+        assert run.job.returncode == 128 + signal.SIGKILL, stdout + stderr
+        assert not run.wt.exists()
 
 
 @pytest.mark.parametrize("script",SBATCH_SCRIPTS)

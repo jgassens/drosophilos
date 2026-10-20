@@ -43,6 +43,17 @@ source ~/miniforge3/etc/profile.d/conda.sh
 conda activate drosophilos
 echo "job $SLURM_JOB_ID on $(hostname), commit $(git rev-parse --short HEAD), $(date -Is)"
 nvidia-smi -L || true
-# Keep the worktree until Python finishes its signal handler and exits.
+# Forward USR1/USR2 only; Slurm sends TERM/HUP/INT directly. Wait through traps before cleanup.
+# Non-interactive background jobs inherit ignored INT/QUIT; Slurm stops with TERM, and Python can set an INT handler.
+child=
+trap '[ -z "${child:-}" ] || kill -USR1 "$child" 2>/dev/null || true' USR1
+trap '[ -z "${child:-}" ] || kill -USR2 "$child" 2>/dev/null || true' USR2
 trap ':' TERM HUP INT
-python -m "$@"
+python -m "$@" &
+child=$!
+while kill -0 "$child" 2>/dev/null; do
+  wait "$child" || true
+done
+status=0
+wait "$child" || status=$? # Repeated wait returns Python's status, even if already reaped.
+exit "$status"
