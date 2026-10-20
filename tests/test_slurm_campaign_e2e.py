@@ -113,19 +113,44 @@ def _wait_exit(process, log, *, timeout):
         pytest.fail(f"timed out waiting for sbatch exit:\n{log.read_text()}")
 
 
-def _validated_checkpoint(path):
-    """Use the campaign's validator with an independently rebuilt fingerprint."""
-    import numpy as np
-    from drosophilos.bench import kernel_campaign as kc
-    from drosophilos.lib.campaign import CampaignCheckpoint
-    from drosophilos.sim.model import Params
+def _validated_checkpoint(path, checkout):
+    """Validate with the job clone's source, independently rebuilding its fingerprint."""
+    helper = r'''
+import json
+from pathlib import Path
+import numpy as np
+import drosophilos
+from drosophilos.bench import kernel_campaign as kc
+from drosophilos.lib.campaign import CampaignCheckpoint
+from drosophilos.sim.model import Params
 
-    args = kc.parser().parse_args(CAMPAIGN_ARGS)
-    params = Params()
-    _, pipeline, _, _ = kc.block(args.block, params)
-    checkpoint = CampaignCheckpoint(path)
-    checkpoint.configure(kc._fingerprint(args, pipeline, params), vars(args),
-                         np.random.default_rng(args.seed))
+args = kc.parser().parse_args(json.loads(__import__("sys").argv[2]))
+params = Params()
+_, pipeline, _, _ = kc.block(args.block, params)
+checkpoint = CampaignCheckpoint(__import__("sys").argv[1])
+checkpoint.configure(kc._fingerprint(args, pipeline, params), vars(args),
+                     np.random.default_rng(args.seed))
+print(json.dumps({
+    "module_file": str(Path(drosophilos.__file__).resolve()),
+    "finished": checkpoint.saved["finished"],
+    "record": checkpoint.saved.get("record"),
+    "step_index": (checkpoint.resume_state["simulator"]["step_index"]
+                   if checkpoint.resume_state is not None else None),
+    "host": ({key: checkpoint.resume_state["host"][key]
+              for key in ("settle", "t_start", "load_events")}
+             if checkpoint.resume_state is not None else None),
+    "fingerprint": checkpoint.fingerprint,
+}))
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", helper, str(path), json.dumps(CAMPAIGN_ARGS)],
+        cwd=checkout,
+        env={**os.environ, "PYTHONPATH": str(checkout)},
+        check=False, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    checkpoint = json.loads(result.stdout)
+    assert Path(checkpoint["module_file"]).is_relative_to(checkout.resolve())
     return checkpoint
 
 
@@ -169,10 +194,10 @@ def test_batch_usr1_checkpoints_and_next_job_resumes(campaign_home, script):
         assert not result_path.exists(), interrupted_output
         _assert_cleanup(interrupted_output, worktree)
 
-    interrupted = _validated_checkpoint(checkpoint_path)
-    assert interrupted.saved["finished"] is False
-    run = interrupted.resume_state
-    saved_step = run["simulator"]["step_index"]
+    interrupted = _validated_checkpoint(checkpoint_path, checkout)
+    assert interrupted["finished"] is False
+    run = {"host": interrupted["host"]}
+    saved_step = interrupted["step_index"]
     assert saved_step > ready_step
     assert saved_step == int(list(CHECKPOINT_LINE.finditer(interrupted_output))[-1][1])
     assert run["host"]["settle"] == 0
@@ -181,13 +206,13 @@ def test_batch_usr1_checkpoints_and_next_job_resumes(campaign_home, script):
 
     with _job(script, home, checkout, env, job_prefix + "-2") as (process, log, worktree):
         _wait_for(process, log, lambda text: CHECKPOINT_LINE.search(text), timeout=30)
-        resumed = _validated_checkpoint(checkpoint_path)
-        assert resumed.saved["finished"] is False
-        assert resumed.resume_state["simulator"]["step_index"] >= saved_step
+        resumed = _validated_checkpoint(checkpoint_path, checkout)
+        assert resumed["finished"] is False
+        assert resumed["step_index"] >= saved_step
         # The runner has no resume log. Its original start time and injected
         # event records survive only when the saved host state is restored;
         # mere checkpoint existence or a successful fresh run cannot pass this.
-        resumed_host = resumed.resume_state["host"]
+        resumed_host = resumed["host"]
         assert resumed_host["t_start"] == run["host"]["t_start"]
         events = run["host"]["load_events"][0]
         assert resumed_host["load_events"][0][:len(events)] == events
@@ -197,13 +222,13 @@ def test_batch_usr1_checkpoints_and_next_job_resumes(campaign_home, script):
         _assert_cleanup(resumed_output, worktree)
 
     record = json.loads(result_path.read_text())
-    finished = _validated_checkpoint(checkpoint_path)
-    assert finished.saved["finished"] is True
-    assert finished.resume_state is None
+    finished = _validated_checkpoint(checkpoint_path, checkout)
+    assert finished["finished"] is True
+    assert finished["step_index"] is None
     # Confidence limits can be NaN when all outputs are missing; compare their
     # canonical JSON encoding rather than Python's NaN != NaN semantics.
-    assert json.dumps(finished.saved["record"], sort_keys=True) == json.dumps(record, sort_keys=True)
-    assert record["checkpoint_fingerprint"] == interrupted.fingerprint
+    assert json.dumps(finished["record"], sort_keys=True) == json.dumps(record, sort_keys=True)
+    assert record["checkpoint_fingerprint"] == interrupted["fingerprint"]
     assert record["block"] == "fanout" and record["simulator"] == "TorchSim"
     assert record["tokens_list"] == [0, 5, 9, 14, 14, 200, 77, 3]
     assert record["reference"] == [[((v + 1) & 7) + ((v + 1) ^ 3)]
