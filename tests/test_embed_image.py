@@ -40,6 +40,119 @@ def _placed_latch_relay():
     return net, drive, ids, policy, m, idx, pl
 
 
+def test_full_graph_defaults_frozen_before_surround_calibration():
+    """Digest captured from pre-change full_graph_topology, including legacy counts JSON."""
+    import hashlib
+    import json
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    net, _, _, policy, m, _, real = synthetic_autapses(False)
+    pl = Placement(dict(enumerate(real.tolist())), [], 0, [], 0, 0)
+    image = build_image(net, m, pl, policy)
+    for kwargs in ({}, {"surround_scale_exc": 1, "surround_scale_inh": 1, "surround_input_cap": None}):
+        fg = full_graph_topology(m, Params(), image, **kwargs)
+        digest = hashlib.sha256()
+        for arr in (fg.topology.src, fg.topology.dst, fg.topology.quanta, fg.topology.delay,
+                    fg.topology.indptr, fg.index_map):
+            digest.update(arr.astype(arr.dtype.newbyteorder("<")).tobytes())
+        digest.update(b"none" if fg.topology.bias is None else fg.topology.bias.astype("<f8").tobytes())
+        digest.update(json.dumps(fg.counts, sort_keys=True, separators=(",", ":")).encode())
+        assert digest.hexdigest() == "f9e2d09cd9a66ea6591763e3a0d4d06f81165029b5824ad28f48c114eb0b34f4"
+
+
+def _surround_fixture():
+    import pandas as pd
+    from drosophilos.connectome.mcns import MCNS
+    from drosophilos.lib.netlist import Netlist
+
+    neurons = pd.DataFrame({"bodyId": np.arange(10, 16), "type": "test", "superclass": "central",
+                            "nt": ["acetylcholine", "gaba", "acetylcholine", "histamine",
+                                   "acetylcholine", "glutamate"],
+                            "sign": np.array([1, -1, 1, -1, 1, -1], np.int8)})
+    pre = np.array([0, 1, 0, 2, 2, 3, 4, 4, 5], np.int32)
+    post = np.array([1, 0, 2, 0, 3, 2, 0, 3, 0], np.int32)
+    count = np.array([3, 1, 4, 2, 6, 3, 6, 2, 1], np.int32)
+    m = MCNS(neurons, pre, post, count, min_syn=1)
+    net = Netlist(Params())
+    for role in ("host_e", "host_i", "synthetic"):
+        net.neuron(role)
+    net.synapse(0, 1, 32, 5)  # carried
+    net.synapse(1, 2, -7, 3)  # Profile 3 to a synthetic neuron
+    net.synapse(2, 0, 9, 2)  # Profile 3 from a synthetic neuron
+    image = build_image(net, m, Placement({0: 0, 1: 1}, [2], 0, [], 0, 0), Policy(zero_parasitic=False))
+    return m, image
+
+
+def _edge_weights(topo):
+    return {(int(s), int(d)): int(q) for s, d, q in zip(topo.src, topo.dst, topo.quanta)}
+
+
+def test_surround_gains_cap_and_image_exclusion():
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    m, image = _surround_fixture()
+    base = m.topology()
+    frozen_base = base.quanta.copy()
+    before = full_graph_topology(m, Params(), image, base=base)
+    fg = full_graph_topology(m, Params(), image, base=base, surround_scale_exc=.5,
+                             surround_scale_inh=2, surround_input_cap=2)
+    q = _edge_weights(fg.topology)
+    # Two eligible excitatory inputs to host 0: 2*.5 + 6*.5 = 4, capped to 2 synapse weights.
+    assert q[2, 0] == 8 and q[4, 0] == 24
+    # The same cap includes outgoing host edges to surround and surround-to-surround anatomy.
+    assert q[0, 2] == 32 and q[2, 3] == 24 and q[4, 3] == 8
+    assert q[3, 2] == -96 and q[5, 0] == -32
+    # Carried, kept parasitic, and Profile 3 edges (including synthetic endpoints) are immutable.
+    old = _edge_weights(before.topology)
+    for pair in ((0, 1), (1, 0), (1, 6), (6, 0)):
+        assert q[pair] == old[pair]
+    assert fg.topology.delay.tolist() == before.topology.delay.tolist()
+    assert np.array_equal(base.quanta, frozen_base)
+    assert image.carried_syn == [(0, 1, 32, 5)]
+    assert fg.counts["surround_capped_neurons"] == 2
+    assert fg.counts["surround_eligible_edges"] == 7
+    assert fg.counts["surround_scale_exc"] == .5 and fg.counts["surround_scale_inh"] == 2
+    # A boundary cut is applied AFTER scaling and still ranks original anatomical counts.
+    cut = full_graph_topology(m, Params(), image, base=base, surround_scale_exc=.5,
+                              surround_input_cap=2, cut_inputs_frac=.2)
+    assert _edge_weights(cut.topology)[4, 0] == 0
+    assert _edge_weights(cut.topology)[2, 0] == 8
+
+
+def test_surround_rounds_once_ties_to_even_and_reports_zeroes():
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    m, image = _surround_fixture()
+    fg = full_graph_topology(m, Params(), image, surround_scale_exc=1 / 64, surround_scale_inh=1 / 32)
+    q = _edge_weights(fg.topology)
+    assert q[0, 2] == 1  # 64 / 64
+    assert q[2, 0] == 0  # +.5 -> 0
+    assert q[4, 0] == 2  # +1.5 -> 2
+    assert q[5, 0] == 0  # -.5 -> 0
+    assert q[3, 2] == -2  # -1.5 -> -2
+    assert q[4, 3] == 0  # another +.5 -> 0
+    assert fg.counts["surround_zeroed_by_rounding"] == 3
+    zero = full_graph_topology(m, Params(), image, surround_scale_exc=0, surround_scale_inh=0)
+    assert zero.counts["surround_zeroed_edges"] == 7
+    assert zero.counts["surround_zeroed_by_rounding"] == 0
+    # Gain gives .75 and 2.25 quanta into host 0; cap at 2 quanta gives .5, 1.5 -> 0, 2.
+    # Rounding gains first would instead cap [1, 2] to [2/3, 4/3] and wrongly yield [1, 1].
+    capped = full_graph_topology(m, Params(), image, surround_scale_exc=3 / 128, surround_input_cap=1 / 8)
+    assert _edge_weights(capped.topology)[2, 0] == 0
+    assert _edge_weights(capped.topology)[4, 0] == 2
+
+
+@pytest.mark.parametrize("kwargs", [{"surround_scale_exc": -1}, {"surround_scale_inh": np.nan},
+                                     {"surround_input_cap": np.inf}, {"surround_input_cap": -1},
+                                     {"surround_scale_exc": 1e300}])
+def test_surround_rejects_invalid_settings_and_overflow(kwargs):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    m, image = _surround_fixture()
+    with pytest.raises(ValueError, match="surround"):
+        full_graph_topology(m, Params(), image, **kwargs)
+
+
 @pytest.mark.parametrize("too_weak", [False, True])
 def test_autapses_in_conditions_and_whole_graph(too_weak):
     from drosophilos.connectome.embed_image import full_graph_topology, h1_conditions

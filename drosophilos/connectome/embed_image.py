@@ -384,11 +384,65 @@ def _locate(base: Topology, pre: int, post: int) -> range:
     return range(lo + a, lo + b)
 
 
+def validate_surround_settings(surround_scale_exc: float = 1.0, surround_scale_inh: float = 1.0,
+                               surround_input_cap: float | None = None) -> None:
+    """Gains and the optional cap (synapse-equivalent weights) are finite and nonnegative."""
+    for name, value in (("surround_scale_exc", surround_scale_exc),
+                        ("surround_scale_inh", surround_scale_inh),
+                        ("surround_input_cap", surround_input_cap)):
+        if value is None and name == "surround_input_cap":
+            continue
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"{name} must be finite and nonnegative")
+
+
+def _scale_surround(base: Topology, quanta: np.ndarray, eligible: np.ndarray,
+                    exc: float, inh: float, cap: float | None) -> dict:
+    """Scale non-image anatomy, cap gain-scaled excitation, then round once (ties to even).
+
+    Host-to-host anatomy is excluded, even if parasitic edges were kept. The cap sums only
+    eligible excitation; designed inputs never consume it. Boundary cuts are applied later.
+    """
+    edges = np.flatnonzero(eligible)
+    original = quanta[edges]
+    positive = original > 0
+    with np.errstate(over="ignore", invalid="ignore"):
+        weights = original.astype(np.float64) * np.where(positive, exc, inh)
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("surround weight overflow")
+    capped_neurons = 0
+    if cap is not None:
+        posts = base.dst[edges[positive]]
+        # Divide before summing to express the cap in single-synapse weights, not quanta.
+        totals = np.bincount(posts, weights=weights[positive] / QUANTA_PER_SYNAPSE, minlength=base.n)
+        if not np.all(np.isfinite(totals)):
+            raise ValueError("surround input total overflow")
+        over = totals > cap
+        capped_neurons = int(over.sum())
+        factors = np.ones(base.n, np.float64)
+        factors[over] = cap / totals[over]
+        weights[positive] *= factors[posts]
+    rounded = np.rint(weights)
+    if np.any(np.abs(rounded) > np.iinfo(np.int32).max):
+        raise ValueError("surround quanta overflow")
+    quanta[edges] = rounded.astype(np.int64)
+    return {"surround_scale_exc": float(exc), "surround_scale_inh": float(inh),
+            "surround_input_cap": None if cap is None else float(cap),
+            "surround_eligible_edges": int(len(edges)),
+            "surround_changed_edges": int(np.count_nonzero(quanta[edges] != original)),
+            "surround_capped_neurons": capped_neurons,
+            "surround_zeroed_edges": int(np.count_nonzero((original != 0) & (rounded == 0))),
+            "surround_zeroed_by_rounding": int(np.count_nonzero((weights != 0) & (rounded == 0))),
+            "surround_rounding": "nearest integer quantum, ties to even"}
+
+
 def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: bool = False, zero_inputs: bool = False,
                         base: Topology | None = None, cut_outputs_frac: float = 0.0,
                         cut_inputs_frac: float = 0.0, cut_inputs_by: str = "synapses",
                         attribution_in: Path | None = None,
-                        cut_inputs_from_types: Collection[str] | None = None) -> FullGraph:
+                        cut_inputs_from_types: Collection[str] | None = None,
+                        surround_scale_exc: float = 1.0, surround_scale_inh: float = 1.0,
+                        surround_input_cap: float | None = None) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
 
@@ -412,9 +466,17 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
       cut_inputs_from_types  zero every incoming anatomical edge whose outside presynaptic
                  MCNS neuron has one of these exact ``type`` strings.  This is exclusive with
                  input fractions and ``zero_inputs``.
+      surround_scale_exc / surround_scale_inh  multiply positive / negative anatomical weights
+                 only when at least one endpoint is outside the image. All host-to-host edges,
+                 carried and Profile 3 edges are untouched. After gains, surround_input_cap
+                 proportionally caps eligible positive input per destination, in synapse-weight
+                 units (quanta / QUANTA_PER_SYNAPSE). Round once to nearest quantum, ties to even;
+                 boundary cuts follow. Non-default settings and rounding counts appear in counts;
+                 defaults (1, 1, None) preserve the legacy topology AND counts byte for byte.
     `base` must be the anatomical topology from `MCNS.topology` (quanta = sign * synapse count * QUANTA_PER_SYNAPSE), because the cut fractions recover synapse counts from it.
 
     Returns the topology, the index map designed -> full-graph, and the counts of each edit."""
+    validate_surround_settings(surround_scale_exc, surround_scale_inh, surround_input_cap)
     for name, fraction in (("cut_outputs_frac", cut_outputs_frac), ("cut_inputs_frac", cut_inputs_frac)):
         if not np.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
             raise ValueError(f"{name} must be a finite float in [0, 1], got {fraction!r}")
@@ -477,6 +539,11 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
     in_circuit[index_map] = True
     output_sel = np.isin(base.src, hosts) & ~in_circuit[base.dst]
     input_sel = in_circuit[base.dst] & ~in_circuit[base.src]
+    surround_report = None
+    if surround_scale_exc != 1 or surround_scale_inh != 1 or surround_input_cap is not None:
+        eligible = ~(in_circuit[base.src] & in_circuit[base.dst])
+        surround_report = _scale_surround(base, quanta, eligible, surround_scale_exc,
+                                          surround_scale_inh, surround_input_cap)
 
     def cut_boundary(sel: np.ndarray, fraction: float, zero: bool, attribution: bool = False) -> dict:
         """Zero all or a strongest deterministic prefix of one anatomical boundary."""
@@ -562,7 +629,7 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
         dst = np.concatenate([dst, index_map[[e.dst for e in image.profile3]].astype(np.int32)])
         quanta = np.concatenate([quanta, np.array([e.quanta for e in image.profile3], np.int64)])
         delay = np.concatenate([delay, np.array([e.delay for e in image.profile3], np.int32)])
-    if abs(quanta).max() > np.iinfo(np.int32).max:
+    if len(quanta) and abs(quanta).max() > np.iinfo(np.int32).max:
         raise ValueError("quanta overflow")
     bias = None
     n_bias = n_bias_syn = 0
@@ -595,6 +662,8 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
               "nonzero_edges": int((topo.quanta != 0).sum())}
     if cut_inputs_by == "attribution":
         counts["cut_inputs_by"] = cut_inputs_by
+    if surround_report is not None:
+        counts.update(surround_report)
     if type_cut_report is not None:
         counts.update(type_cut_report)
         if type_cut_report["cut_inputs_from_types_unmatched"]:
