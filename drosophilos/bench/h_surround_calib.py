@@ -205,8 +205,8 @@ def simulate_protocol(topology: Topology, params: Params, *, drive_ms: int, tota
     return result
 
 
-def p4_populations(m: MCNS) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, np.ndarray]]:
-    """Resolve annotations by body ID, including caches predating subclass retention."""
+def p4_populations(m: MCNS) -> tuple[dict[str | None, np.ndarray], np.ndarray, dict[str, np.ndarray]]:
+    """Resolve typed drives and the all-bristle drive (None), aligning annotations by body ID."""
     neurons = m.neurons.copy()
     missing = [column for column in ("type", "subclass") if column not in neurons]
     if missing:
@@ -222,11 +222,11 @@ def p4_populations(m: MCNS) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str
     labellar = neurons["subclass"].eq("labellar bristle").fillna(False).to_numpy(bool)
     if not labellar.any():
         raise ValueError("P4 requires neurons with subclass 'labellar bristle'")
-    if neurons.loc[labellar, "type"].isna().any():
-        raise ValueError("P4 labellar-bristle neurons must have type annotations")
     types = neurons["type"]
-    populations = {str(label): np.flatnonzero(labellar & types.eq(label).fillna(False).to_numpy(bool))
-                   for label in sorted(types[labellar].unique())}
+    populations: dict[str | None, np.ndarray] = {
+        str(label): np.flatnonzero(labellar & types.eq(label).fillna(False).to_numpy(bool))
+        for label in sorted(types[labellar].dropna().unique())}
+    populations[None] = np.flatnonzero(labellar)
     mn9 = np.flatnonzero(types.eq("MN9").fillna(False).to_numpy(bool))
     if not len(mn9):
         raise ValueError("P4 requires type 'MN9' readout neurons")
@@ -240,9 +240,8 @@ def responsiveness_protocol(m: MCNS, topology: Topology, params: Params, *,
                             rate: float = 100, drive_ms: int = 300) -> dict:
     """P4: each labellar-bristle type, then all together; no other external drive."""
     populations, mn9, groups = p4_populations(m)
-    all_labellar = np.sort(np.concatenate(list(populations.values())))
     drives = []
-    for label, sensory in [*populations.items(), (None, all_labellar)]:
+    for label, sensory in populations.items():
         events = surround_events("poisson", sensory, params, 0, int(round(drive_ms / params.dt)),
                                  np.random.default_rng(P4_SEED), rate_hz=rate)
         result = simulate_protocol(topology, params, drive_ms=drive_ms,
@@ -258,7 +257,10 @@ def responsiveness_protocol(m: MCNS, topology: Topology, params: Params, *,
                        **{key: result[key] for key in ("recruited_nonsensory", "decays_to_zero",
                                                        "off_tail_spikes_per_bin", "self_sustained")}})
     return {"seed": P4_SEED, "rate_hz": rate, "drive_ms": drive_ms, "off_ms": P4_OFF_MS,
-            "driven_type_counts": {label: int(len(indices)) for label, indices in populations.items()},
+            "driven_type_counts": {label: int(len(indices)) for label, indices in populations.items()
+                                   if label is not None},
+            "untyped_labellar_neurons": int(len(populations[None]) - sum(
+                len(indices) for label, indices in populations.items() if label is not None)),
             "mn9_neurons": int(len(mn9)),
             **{f"{label}_neurons": int(len(indices)) for label, indices in groups.items()},
             "drives": drives}

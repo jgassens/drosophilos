@@ -97,6 +97,9 @@ pathways that work under the published weights still work under a calibration**.
 Compare each calibrated response with `(exc=1, inh=1, cap=none)` using identical drive.
 An absent baseline MN9 response for a type cannot establish loss under calibration,
 and passing this proxy does not reproduce sugar-specific biological validation.
+Shiu et al. (2024) used FlyWire, a female brain; this benchmark uses MCNS, a male
+central nervous system (CNS). These different connectomes are another reason P4 is
+a proxy, not a reproduction of that study.
 
 `--p4` adds `P4_responsiveness` to the usual P1/P2/P3 record. `--p4-only` runs just P4
 and retains configuration/model/topology metadata, for small comparison outputs.
@@ -109,8 +112,10 @@ Selection uses exact `subclass == 'labellar bristle'` and exact `type` equality.
 current `load_mcns` preserves both columns when available; if a cached neuron table
 lacks either, P4 reads the missing columns from the annotations feather at
 `mcns_download.path_of('annotations')`, aligned by `bodyId`, without rewriting the cache.
-Missing drive types or MN9 readouts fail explicitly. `driven_type_counts` records exact
-neuron counts for every selected type; each trial also records `driven_neurons`.
+Missing labellar-bristle populations or MN9 readouts fail explicitly. Neurons with a
+missing `type` participate only in the all-together drive; `untyped_labellar_neurons`
+reports their count. `driven_type_counts` records exact neuron counts for every selected
+typed group; each trial also records `driven_neurons`.
 Types are sorted; the final trial has `type: null` to mean all labellar bristles together.
 
 Per drive, compact output reports each exact `type == 'MN9'` neuron's body ID, `spikes`
@@ -203,33 +208,44 @@ P4 comparison: submit exactly one job for each of the five configurations below.
 Each output contains one compact configuration record and one small summary per drive.
 These commands are for G2; do not execute whole-brain trials locally.
 
+The real MCNS table contains 16 typed labellar-bristle groups (161 neurons) plus
+2 untyped bristles, giving **17 drives per configuration**, including the all-together
+drive of 163 neurons. At the default duration this is
+`17 × (300 + 200) = 8,500 ms` of whole-brain simulation per job. The earlier
+circuit-free measurement was about 12 minutes for `600 ms × 9 configurations`;
+linear scaling gives `12 × 8,500 / (600 × 9) ≈ 19 minutes` per P4 configuration.
+This is only a rough estimate: 100 Hz drive, recruitment, fresh-simulator overhead,
+and cluster throughput can change the runtime. Even conservatively budgeting
+12 minutes for each 600 ms gives `17 × 500 / 600 × 12 = 170 minutes` per job.
+Use **8:00:00** for these first P4 jobs to allow headroom while throughput is uncertain.
+
 ```bash
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
-  --cpus-per-task=4 --mem=64G --time=24:00:00 \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
   -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
   --grid 'exc=1;inh=1;cap=none' \
   --out data/stage_h/surround_calibration/p4_exc1_inh1_capnone_seed0.jsonl
 
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
-  --cpus-per-task=4 --mem=64G --time=24:00:00 \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
   -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
   --grid 'exc=0.25;inh=2;cap=none' \
   --out data/stage_h/surround_calibration/p4_exc0.25_inh2_capnone_seed0.jsonl
 
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
-  --cpus-per-task=4 --mem=64G --time=24:00:00 \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
   -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
   --grid 'exc=0.35;inh=4;cap=none' \
   --out data/stage_h/surround_calibration/p4_exc0.35_inh4_capnone_seed0.jsonl
 
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
-  --cpus-per-task=4 --mem=64G --time=24:00:00 \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
   -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
   --grid 'exc=0.25;inh=1;cap=none' \
   --out data/stage_h/surround_calibration/p4_exc0.25_inh1_capnone_seed0.jsonl
 
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
-  --cpus-per-task=4 --mem=64G --time=24:00:00 \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
   -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
   --grid 'exc=0.5;inh=4;cap=500' \
   --out data/stage_h/surround_calibration/p4_exc0.5_inh4_cap500_seed0.jsonl

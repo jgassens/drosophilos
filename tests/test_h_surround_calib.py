@@ -206,6 +206,7 @@ def test_p4_exact_drive_selection_readouts_and_reproducibility(monkeypatch):
     assert all(call[2] == 100 for call in calls)
     assert result["seed"] == 0 and result["drive_ms"] == 300 and result["off_ms"] == 200
     assert result["driven_type_counts"] == {"LB1e": 2, "LB3c": 1}
+    assert result["untyped_labellar_neurons"] == 0
     assert result["mn9_neurons"] == 2 and result["descending_neurons"] == 1
     assert result["motor_neurons"] == 4
     for drive, mask, dn, motors, recruited in zip(result["drives"], [(True, False), (False, True), (True, True)],
@@ -244,11 +245,36 @@ def test_p4_annotation_fallback_aligns_by_body_id(tmp_path, monkeypatch, missing
     assert all(column not in m.neurons for column in missing)
 
 
+@pytest.mark.parametrize("all_untyped", [False, True])
+def test_p4_nan_types_only_driven_with_all_labellar(monkeypatch, all_untyped):
+    m = p4_mcns()
+    # Add two untyped bristles without changing any existing typed group.
+    m.neurons.loc[[3, 9], "subclass"] = "labellar bristle"
+    m.neurons.loc[[3, 9], "type"] = np.nan
+    if all_untyped:
+        m.neurons.loc[:2, "type"] = np.nan
+    populations, _, _ = bench.p4_populations(m)
+    expected = {} if all_untyped else {"LB1e": [0, 1], "LB3c": [2]}
+    assert {label: indices.tolist() for label, indices in populations.items()} == {
+        **expected, None: [0, 1, 2, 3, 9]}
+    calls = []
+    original = bench.surround_events
+
+    def capture(kind, neurons, *args, **kwargs):
+        calls.append(neurons.tolist())
+        return original(kind, neurons, *args, **kwargs)
+
+    monkeypatch.setattr(bench, "surround_events", capture)
+    result = bench.responsiveness_protocol(m, m.topology(), Params(), drive_ms=20)
+    assert calls == [*expected.values(), [0, 1, 2, 3, 9]]
+    assert result["driven_type_counts"] == {label: len(indices) for label, indices in expected.items()}
+    assert result["untyped_labellar_neurons"] == (5 if all_untyped else 2)
+    assert [drive["type"] for drive in result["drives"]] == [*expected, None]
+    assert result["drives"][-1]["driven_neurons"] == 5
+
+
 def test_p4_requires_labeled_drive_and_readout_populations():
     m = p4_mcns()
-    m.neurons.loc[0, "type"] = None
-    with pytest.raises(ValueError, match="type annotations"):
-        bench.p4_populations(m)
     m.neurons["subclass"] = "other"
     with pytest.raises(ValueError, match="labellar bristle"):
         bench.p4_populations(m)
