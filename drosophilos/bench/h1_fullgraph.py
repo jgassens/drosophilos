@@ -81,7 +81,7 @@ import numpy as np
 from ..connectome.embed_h0 import Policy
 from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelope_ms, build_image, circuit_sim,
                                       full_graph_topology, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
-                                      tally, trace_since, underlying, power_on)
+                                      tally, trace_since, underlying, power_on, validate_surround_settings)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
@@ -191,7 +191,10 @@ def run(args) -> dict:
                              cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac,
                              cut_inputs_by=getattr(args, "cut_inputs_by", "synapses"),
                              attribution_in=getattr(args, "attribution_in", None),
-                             cut_inputs_from_types=getattr(args, "cut_inputs_from_types", None))
+                             cut_inputs_from_types=getattr(args, "cut_inputs_from_types", None),
+                             surround_scale_exc=getattr(args, "surround_scale_exc", 1.0),
+                             surround_scale_inh=getattr(args, "surround_scale_inh", 1.0),
+                             surround_input_cap=getattr(args, "surround_input_cap", None))
     attr_window = getattr(args, "attribute", None)
     attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params) if attr_window is not None else None
     hosts = fg.index_map[img.real >= 0]
@@ -312,6 +315,12 @@ def parse(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--surround", choices=("silent", "poisson", "burst"), default="silent")
     ap.add_argument("--rate", type=float, default=2.0, help="Hz per sensory neuron for --surround poisson (H0: 2)")
+    ap.add_argument("--surround-scale-exc", type=float, default=argparse.SUPPRESS,
+                    help="gain on excitatory anatomy outside image (default: 1)")
+    ap.add_argument("--surround-scale-inh", type=float, default=argparse.SUPPRESS,
+                    help="gain on inhibitory anatomy outside image (default: 1)")
+    ap.add_argument("--surround-input-cap", type=float, default=argparse.SUPPRESS,
+                    help="cap gain-scaled excitatory anatomical input outside image, in synapse weights")
     ap.add_argument("--inputs-zeroed", action="store_true", help="zero every edge from the brain into a host")
     ap.add_argument("--outputs-zeroed", action="store_true", help="zero every edge from a host into the brain")
     ap.add_argument("--cut-inputs-frac", type=float, default=0.0,
@@ -344,6 +353,12 @@ def parse(argv=None):
     ap.add_argument("--mapping", type=Path, default=DEFAULT_MAPPING)
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)
+    try:
+        validate_surround_settings(getattr(args, "surround_scale_exc", 1.0),
+                                   getattr(args, "surround_scale_inh", 1.0),
+                                   getattr(args, "surround_input_cap", None))
+    except ValueError as exc:
+        ap.error(str(exc))
     if hasattr(args, "attribute") and (not np.isfinite(args.attribute) or args.attribute <= 0):
         ap.error("--attribute must be finite and positive")
     if (hasattr(args, "attribution_out") or hasattr(args, "attribution_top")) and not hasattr(args, "attribute"):

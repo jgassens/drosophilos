@@ -133,6 +133,56 @@ def test_cli_defaults_omit_attribution_and_validate_opt_in():
             parse(flags)
 
 
+def test_cli_surround_knobs_are_opt_in_and_validated():
+    from drosophilos.bench.h1_fullgraph import parse
+
+    defaults = vars(parse([]))
+    assert not any(key in defaults for key in ("surround_scale_exc", "surround_scale_inh", "surround_input_cap"))
+    selected = parse(["--surround-scale-exc", ".35", "--surround-scale-inh", "4", "--surround-input-cap", "500"])
+    assert (selected.surround_scale_exc, selected.surround_scale_inh, selected.surround_input_cap) == (.35, 4, 500)
+    for flags in (["--surround-scale-exc", "-1"], ["--surround-scale-inh", "nan"],
+                  ["--surround-input-cap", "inf"], ["--surround-input-cap", "-1"]):
+        with pytest.raises(SystemExit):
+            parse(flags)
+
+
+def test_h1_records_and_applies_selected_surround_knobs(tmp_path, monkeypatch):
+    from drosophilos.bench import h1_fullgraph as bench
+    from drosophilos.connectome.embed_image import save_mapping
+
+    params = Params()
+    channel = build_adder_channel(params, **adder_build_kwargs({}, width_override=1))
+    n = channel.net.n
+    neurons = pd.DataFrame({"bodyId": 10_000 + np.arange(n + 2), "type": "synthetic",
+                            "superclass": "central", "nt": "acetylcholine",
+                            "sign": np.ones(n + 2, np.int8)})
+    neurons.loc[n + 1, ["nt", "sign"]] = ["gaba", -1]
+    m = MCNS(neurons, np.array([0, n, n + 1], np.int32), np.array([n, 0, n], np.int32),
+             np.array([4, 6, 3], np.int32), min_syn=1)
+    mapping = tmp_path / "mapping.json"
+    save_mapping(mapping, channel.net, m, Placement(dict(enumerate(range(n))), [], 0, [], 0, 0))
+    monkeypatch.setattr(bench, "load_mcns", lambda: m)
+    original = bench.full_graph_topology
+    topologies = []
+
+    def capture(*args, **kwargs):
+        fg = original(*args, **kwargs)
+        topologies.append(fg.topology)
+        return fg
+
+    monkeypatch.setattr(bench, "full_graph_topology", capture)
+    path = tmp_path / "result.json"
+    result = bench.run(bench.parse(["--mapping", str(mapping), "--width", "1", "--n-cases", "1", "--max-ms", "1",
+                                    "--surround-scale-exc", ".5", "--surround-scale-inh", "2",
+                                    "--surround-input-cap", "2", "--out", str(path)]))
+    saved = json.loads(path.read_text())
+    for key, value in (("surround_scale_exc", .5), ("surround_scale_inh", 2), ("surround_input_cap", 2)):
+        assert result["args"][key] == saved["full_graph_counts"][key] == value
+    topo = topologies[0]
+    weights = {(int(s), int(d)): int(q) for s, d, q in zip(topo.src, topo.dst, topo.quanta)}
+    assert weights[0, n] == 32 and weights[n, 0] == 32 and weights[n + 1, n] == -96
+
+
 def test_bench_attribution_is_opt_in_and_can_feed_cut_on_synthetic_mcns(tmp_path, monkeypatch):
     from drosophilos.bench import h1_fullgraph as bench
     from drosophilos.connectome.embed_image import save_mapping
