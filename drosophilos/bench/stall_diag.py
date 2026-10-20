@@ -182,9 +182,10 @@ def build_tick_pipeline(campaign: dict[str, Any]):
     latch_feedback = campaign.get("latch_feedback", "autapse")
     dale_feedback_version = campaign.get("dale_feedback_version", DALE_FEEDBACK_VERSION)
     dale_biased_version = campaign.get("dale_biased_version")
+    dale_refractory_version = campaign.get("dale_refractory_version")
     try:
         validate_latch_feedback(latch_feedback, campaign.get("experimental_autapse", False),
-                                dale_feedback_version, dale_biased_version)
+                                dale_feedback_version, dale_biased_version, dale_refractory_version)
     except ValueError as exc:
         raise ValueError(f"unsupported campaign latch_feedback: {exc}") from exc
 
@@ -217,6 +218,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
         latch_feedback = options.pop("latch_feedback", latch_feedback)
         dale_feedback_version = options.pop("dale_feedback_version", dale_feedback_version)
         dale_biased_version = options.pop("dale_biased_version", dale_biased_version)
+        dale_refractory_version = options.pop("dale_refractory_version", dale_refractory_version)
         operand_xor_oneshot = options.pop("operand_xor_oneshot", campaign.get("operand_xor_oneshot", False))
         master_ignition = options.pop("master_ignition", campaign.get("master_ignition", False))
         strength = options.pop("kill_strength", None)
@@ -230,7 +232,8 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                    experimental_autapse=experimental_autapse, ordered_xor_oneshot=ordered_xor_oneshot,
                    master_ignition=master_ignition, operand_xor_oneshot=operand_xor_oneshot,
                    latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
-                   dale_biased_version=dale_biased_version, **options)
+                   dale_biased_version=dale_biased_version,
+                   dale_refractory_version=dale_refractory_version, **options)
         ks = replace(k.ks, outputs=[cell.name for cell in pl.outputs])
         if campaign.get("state_cells", k.cells) != k.cells:
             raise AssertionError("Stage D state-cell mapping differs from the rebuilt program")
@@ -248,6 +251,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                 campaign["block"], params, datapath=campaign.get("datapath", "generic"),
                 latch_feedback=latch_feedback, dale_feedback_version=dale_feedback_version,
                 dale_biased_version=dale_biased_version,
+                dale_refractory_version=dale_refractory_version,
                 **{key: campaign.get(key, False) for key in flags},
             )
         options = {key: campaign.get(key, value) for key, value in pl.build_options.items()
@@ -264,6 +268,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
                                 drive=replace(Drive.from_params(params), kill_strength=float(strength)),
                                 dale_feedback_version=dale_feedback_version,
                                 dale_biased_version=dale_biased_version,
+                                dale_refractory_version=dale_refractory_version,
                                 **options)
         # Refuse metadata/option drift rather than silently reading a different netlist.
         for key, value in pl.build_options.items():
@@ -321,6 +326,7 @@ def build_tick_pipeline(campaign: dict[str, Any]):
             latch_feedback=latch_feedback,
             dale_feedback_version=dale_feedback_version,
             dale_biased_version=dale_biased_version,
+            dale_refractory_version=dale_refractory_version,
             request_clear_pulses=campaign.get("request_clear_pulses", legacy["request_clear_pulses"]),
             kernel_kill_pulses=campaign.get("kernel_kill_pulses", legacy["kernel_kill_pulses"]),
         )

@@ -26,7 +26,7 @@ from ..connectome.embed_image import (adder_cases, build_image, h1_conditions, r
 from ..connectome.embed_netlist import Policy, _Anatomy, exposure_of, place_netlist
 from ..connectome.mcns import MCNS, load_mcns
 from ..lib.adder import build_adder_channel
-from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION
+from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
 from ..sim.model import Params
 
 REGIONS = {
@@ -53,7 +53,7 @@ def region_mask(neurons, region: str) -> np.ndarray:
 def mapping_meta(region: str, isolation_weight: float, restarts: int, seed: int,
                  config_f: bool = True, width: int = 4, latch_feedback: str = "autapse") -> dict:
     """Top-level save_mapping contract shared with the whole-brain bench."""
-    if latch_feedback not in ("autapse", "dale_private", "dale_biased"):
+    if latch_feedback not in ("autapse", "dale_private", "dale_biased", "dale_refractory"):
         raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
     if latch_feedback != "autapse" and not config_f:
         raise ValueError(f"{latch_feedback} latch_feedback requires configuration F")
@@ -67,6 +67,8 @@ def mapping_meta(region: str, isolation_weight: float, restarts: int, seed: int,
         meta["dale_feedback_version"] = DALE_FEEDBACK_VERSION
     elif latch_feedback == "dale_biased":
         meta["dale_biased_version"] = DALE_BIASED_VERSION
+    elif latch_feedback == "dale_refractory":
+        meta["dale_refractory_version"] = DALE_REFRACTORY_VERSION
     return meta
 
 
@@ -128,7 +130,9 @@ def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, re
         {"dale_feedback_version": meta["dale_feedback_version"]}
         if latch_feedback == "dale_private" else
         {"dale_biased_version": meta["dale_biased_version"]}
-        if latch_feedback == "dale_biased" else {})
+        if latch_feedback == "dale_biased" else
+        {"dale_refractory_version": meta["dale_refractory_version"]}
+        if latch_feedback == "dale_refractory" else {})
     ch = build_adder_channel(Params(), width, ordered=True, watchdog_hops=100, storage="flipflop",
                              rate_robust=config_f, experimental_autapse=config_f, ordered_xor_oneshot=config_f,
                              latch_feedback=latch_feedback, **feedback_version)
@@ -257,11 +261,12 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--conditions", default="AB")
     ap.add_argument("--no-config-f", action="store_true")
-    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private", "dale_biased"), default="autapse",
+    ap.add_argument("--latch-feedback", choices=("autapse", "dale_private", "dale_biased", "dale_refractory"), default="autapse",
                     help=("dale_private and dale_biased are EXPERIMENTAL and NOT autapse replacements: "
                           "dale_private fails the three-sigma corners and reload; dale_biased passes the "
                           "512-corner and reload bar (0/0/0, 118/128) but FAILS the separate 44-step "
-                          "rate floor (corner minimum interval 33 steps)"))
+                          "rate floor (corner minimum interval 33 steps); dale_refractory is REJECTED: "
+                          "corner failures 4/11/15, +700 reload 114/128, minimum interval 33 < 44"))
     ap.add_argument("--summarize", nargs="+", metavar="JSON")
     ap.add_argument("--table-out", type=Path)
     a = ap.parse_args()
