@@ -68,6 +68,7 @@ drive. The same seeds and source choices are reused across settings for paired c
 | P1 sensory | All neurons selected by `surround_populations(m)['sensory']`, independently driven with H0/H1's Bernoulli-per-step approximation to Poisson events at `--rate` Hz (default 2), for 300 ms; then 300 ms off. `--sensory-seed` defaults to 0. |
 | P2 point source | `--n-sources` (default 1) non-sensory neurons selected uniformly without replacement, forced at 213 Hz for 300 ms; then 300 ms off. Repeat for `--seeds` (default `0,1,2`). No sensory drive. |
 | P3 rest | No drive for 200 ms. Report any activity. |
+| P4 responsiveness (opt-in) | Each `type` within subclass `labellar bristle`, then all labellar-bristle neurons together, independently driven at `--p4-rate` Hz (default 100) for `--p4-ms` ms (default 300), then 200 ms off. No other population is driven. Fixed event seed 0 for every trial/configuration. |
 
 P1 deliberately uses the same `surround_events` mechanism as the adder bench: external
 events deliver 100,000 quanta. This is a forcing-current pulse, so the requested event
@@ -86,14 +87,61 @@ sidecar traces. Spike batches are accumulated and discarded every simulator step
 runaway trial does not retain its event history in memory. Do not append a rerun to the
 same output when comparing different job commits; use distinct filenames.
 
+### P4: a responsiveness proxy
+
+P4 is a **PROXY for Shiu et al. (2024)'s validated sugar-GRN → MN9 feeding motor
+response**, because MCNS lacks sugar labels. Labellar-bristle gustatory neurons include
+types such as LB1e, LB3c, and LB3d; P4 discovers the actual types from the neuron table
+rather than assuming which ones detect sugar. The question P4 answers is **whether
+pathways that work under the published weights still work under a calibration**.
+Compare each calibrated response with `(exc=1, inh=1, cap=none)` using identical drive.
+An absent baseline MN9 response for a type cannot establish loss under calibration,
+and passing this proxy does not reproduce sugar-specific biological validation.
+Shiu et al. (2024) used FlyWire, a female brain; this benchmark uses MCNS, a male
+central nervous system (CNS). These different connectomes are another reason P4 is
+a proxy, not a reproduction of that study.
+
+`--p4` adds `P4_responsiveness` to the usual P1/P2/P3 record. `--p4-only` runs just P4
+and retains configuration/model/topology metadata, for small comparison outputs.
+`--p4-ms` must be a positive multiple of 10 ms so drive/off boundaries align with bins.
+P4 uses the same independent Bernoulli-per-step Poisson approximation and forcing-current
+events as P1; 100 Hz is the **input event rate**, not a clamped neuronal firing rate
+(Shiu used 100–200 Hz stimulation). Each drive starts a fresh simulator.
+
+Selection uses exact `subclass == 'labellar bristle'` and exact `type` equality. The
+current `load_mcns` preserves both columns when available; if a cached neuron table
+lacks either, P4 reads the missing columns from the annotations feather at
+`mcns_download.path_of('annotations')`, aligned by `bodyId`, without rewriting the cache.
+Missing labellar-bristle populations or MN9 readouts fail explicitly. Neurons with a
+missing `type` participate only in the all-together drive; `untyped_labellar_neurons`
+reports their count. `driven_type_counts` records exact neuron counts for every selected
+typed group; each trial also records `driven_neurons`.
+Types are sorted; the final trial has `type: null` to mean all labellar bristles together.
+
+Per drive, compact output reports each exact `type == 'MN9'` neuron's body ID, `spikes`
+and `rate_hz` over the full drive-plus-off trial, and `drive_spikes` and `drive_rate_hz`
+over the drive alone (two MN9 neurons expected in MCNS). It also reports unique spiking
+descending neurons (`superclass == 'descending_neuron'`) and motor neurons
+(`superclass` in `cb_motor`, `vnc_motor`), including MN9 where applicable, over the full
+trial. Population denominators are recorded once. Each trial includes forcing-event
+count, `recruited_nonsensory`, `off_tail_spikes_per_bin`, `decays_to_zero`, and
+`self_sustained`, with no time series or per-neuron dumps beyond MN9.
+
 ## Metrics and screening definitions
 
 Every interval is left-inclusive and right-exclusive. Counts include forced source
-spikes; P2 additionally gives `recruited_non_sources`. Each trial reports:
+spikes; P2 additionally gives `recruited_non_sources`. Existing JSON keys are preserved.
+P1/P2/P3 report the full metrics below; P4 keeps the compact subset described above.
 
 - Neurons spiking at least once over the complete trial, their fraction of **166,700**
   (`active_fraction_mcns`), and fraction of the simulated population. P1 also breaks
   activity down by superclass, with each class's population denominator.
+- `recruited_nonsensory`: unique neurons spiking anywhere in the trial **excluding the
+  entire driven sensory set**, even selected cells that received no random event.
+  `active_neurons` still includes those cells. For P4, only the selected type (or the
+  all-labellar group) is excluded; other sensory cells recruited through the graph count.
+  P2/P3 have no driven sensory set, so this equals total active neurons; use P2's
+  `recruited_non_sources` to exclude the point sources.
 - `spikes_per_bin`: total population spikes in consecutive 10 ms bins (60 driven-trial
   bins or 20 rest bins). Multiply by 100 for total population spikes/s; divide that by
   population size for the population-average per-neuron rate.
@@ -101,15 +149,29 @@ spikes; P2 additionally gives `recruited_non_sources`. Each trial reports:
   **drive-period** spike. Off-only cells are excluded. Empty/no-drive rates are null.
 - `last_100ms`: spike count, active cell count, population spikes/s, and mean per-neuron
   rate during the last 100 ms (500–600 ms in P1/P2, 100–200 ms at rest).
+- `off_tail_spikes_per_bin`: mean total-population spikes per 10 ms bin over the last
+  100 ms of the **off period** (500–600 ms in P1/P2, 400–500 ms in default P4).
+- `decays_to_zero`: off-tail mean **< 1 spike/bin**. This tolerates a few residual
+  spikes; it does not require literal silence or imply that signals propagated.
+- `self_sustained`: off-tail mean **>= 10% of the mean drive-period spikes/bin**.
+  This replaces `runaway` for persistence screening; it averages the off tail rather
+  than comparing noisy end-of-drive Poisson bins. Both rates use all population spikes,
+  including driven cells. A completely silent trial is false (the zero-reference
+  exception); a positive off tail with zero drive spikes is true. At very low rates,
+  `decays_to_zero` and `self_sustained` can both be true. P3 has no drive/off reference:
+  its off-tail mean and `decays_to_zero` are null, and `self_sustained` is false;
+  `any_activity` remains the rest check.
 - `decay_ms`: first off-period bin start from which all remaining observed bins are
   strictly below 1% of the **drive-period** peak bin count. This sustained criterion
   rejects a transient dip followed by a rebound. Resolution is 10 ms; a null value
   means no sustained crossing was observed. Completely silent driven trials give zero;
   rest has no drive reference and gives null.
-- `runaway`: true if the least-squares slope of the final five drive bins (250–300 ms)
+- **Deprecated** `runaway` / `rising_end_drive`: still emitted with their original
+  definitions for compatibility. `runaway` is true if the least-squares slope of the final five drive bins (250–300 ms)
   is positive, **or** if the 400–410 ms bin (100 ms after drive off) exceeds 10% of the
-  drive peak. Both component flags are recorded. This is a screening flag: short noisy
-  trials can have a positive slope by chance, so inspect paired seeds/time courses.
+  drive peak. Both component flags are recorded (`rising_end_drive` and
+  `above_10pct_peak_at_100ms_off`). Noisy Poisson bins can flag a trial that becomes
+  silent within 20 ms of drive off; do not use these legacy flags to select calibrations.
   Rest has no drive-related runaway flag; `any_activity` and total spikes are its check.
 
 ## Proposed acceptance targets — to check against literature
@@ -121,12 +183,13 @@ candidate across all P2 seeds and additional P1 seeds before selecting it.
 
 | Check | Proposed target |
 | --- | --- |
-| Bounded P1 response | No sustained rise or runaway flag across repeated seeds; at most 10% of all neurons active across the trial, with non-sensory recruitment at most 1% of the brain. |
+| Bounded P1 response | No `self_sustained` flag across repeated seeds; at most 10% of all neurons active across the trial, with `recruited_nonsensory` at most 1% of the brain. |
 | Plausible sensory sparsity | Separate directly driven sensory cells from recruited central/output cells. At 2 Hz over 300 ms, about 45% of sensory cells receive an event: roughly 8,100 of 17,937, already about 4.9% of the brain. A total-activity target below that would reject the drive itself. |
 | Evoked firing rates | Initially screen for mean active drive rate below 20 Hz and median below 10 Hz; validate per superclass against recordings and assess the H0 forcing-current contribution. |
-| Decay and persistence | Sustained decay below 1% of drive peak within 100 ms; last 100 ms off-period mean bin count below 1% of peak, ideally no spikes. No above-10%-at-100-ms flag. |
-| Single 213 Hz source | At most 100 non-source neurons recruited per trial, no runaway flag, and zero last-100-ms activity after release, across all source-selection seeds. |
+| Decay and persistence | Sustained decay below 1% of drive peak within 100 ms; `decays_to_zero` true and `self_sustained` false, ideally no off-tail spikes. |
+| Single 213 Hz source | At most 100 non-source neurons recruited per trial, no `self_sustained` flag, and zero last-100-ms activity after release, across all source-selection seeds. |
 | Rest | Exactly zero spikes in 200 ms. This check alone cannot distinguish a quiescent useful surround from a silenced one. |
+| Responsiveness | Compare P4 MN9 drive rates and descending/motor recruitment against the published-weight baseline for every driven type and all together. A quiet surround with lost baseline responses is insufficient; no numeric biological acceptance threshold is claimed. |
 
 Avoid selecting a trivially disconnected graph solely because it passes decay and rest:
 confirm a nonzero evoked response and quantify zeroed edges and recruited superclasses.
@@ -140,6 +203,55 @@ changes**: `submit.sh` requires a clean committed checkout and pushes/submits th
 Its options (`--cluster`, `--script`, `--ref`, `--dry-run`) must come **before** sbatch
 options. These commands select G2 CPU preempt nodes and disable GPU resources. Outputs
 live under `data/` so they survive the job worktree cleanup.
+
+P4 comparison: submit exactly one job for each of the five configurations below.
+Each output contains one compact configuration record and one small summary per drive.
+These commands are for G2; do not execute whole-brain trials locally.
+
+The real MCNS table contains 16 typed labellar-bristle groups (161 neurons) plus
+2 untyped bristles, giving **17 drives per configuration**, including the all-together
+drive of 163 neurons. At the default duration this is
+`17 × (300 + 200) = 8,500 ms` of whole-brain simulation per job. The earlier
+circuit-free measurement was about 12 minutes for `600 ms × 9 configurations`;
+linear scaling gives `12 × 8,500 / (600 × 9) ≈ 19 minutes` per P4 configuration.
+This is only a rough estimate: 100 Hz drive, recruitment, fresh-simulator overhead,
+and cluster throughput can change the runtime. Even conservatively budgeting
+12 minutes for each 600 ms gives `17 × 500 / 600 × 12 = 170 minutes` per job.
+Use **8:00:00** for these first P4 jobs to allow headroom while throughput is uncertain.
+
+```bash
+slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
+  -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
+  --grid 'exc=1;inh=1;cap=none' \
+  --out data/stage_h/surround_calibration/p4_exc1_inh1_capnone_seed0.jsonl
+
+slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
+  -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
+  --grid 'exc=0.25;inh=2;cap=none' \
+  --out data/stage_h/surround_calibration/p4_exc0.25_inh2_capnone_seed0.jsonl
+
+slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
+  -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
+  --grid 'exc=0.35;inh=4;cap=none' \
+  --out data/stage_h/surround_calibration/p4_exc0.35_inh4_capnone_seed0.jsonl
+
+slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
+  -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
+  --grid 'exc=0.25;inh=1;cap=none' \
+  --out data/stage_h/surround_calibration/p4_exc0.25_inh1_capnone_seed0.jsonl
+
+slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+  --cpus-per-task=4 --mem=64G --time=8:00:00 \
+  -- drosophilos.bench.h_surround_calib --p4-only --p4-rate 100 --p4-ms 300 \
+  --grid 'exc=0.5;inh=4;cap=500' \
+  --out data/stage_h/surround_calibration/p4_exc0.5_inh4_cap500_seed0.jsonl
+```
+
+Original P1/P2/P3 sweep:
 
 ```bash
 slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
@@ -184,14 +296,140 @@ For an uncapped candidate, omit `--surround-input-cap` in the adder command and 
 storage/width to manufacture a different circuit. Match legacy fresh-per-addition
 results first; a separate `--chained` run can test accumulated surround activity.
 
-## Results (pending cluster runs)
+## Results
 
-- Commit / cluster job IDs / output paths: **TBD**
-- Literature comparisons and revised acceptance bounds: **TBD**
-- Baseline P1 / P2 / P3, decay and runaway: **TBD**
-- Sweep candidates and zeroed-edge counts: **TBD**
-- Selected settings and repeat-seed validation: **TBD**
-- Live adder silent / Poisson accuracy, boundary envelope, and isolated comparison: **TBD**
+The result inventory is [`surround_calibration.json`](surround_calibration.json).  Its
+numbers, and the tables below, were derived with Python's `json` module from the
+supplied JSON/JSONL records.  In the P1 tables, *recruited non-sensory* is the sum of
+active `by_superclass` entries whose name does not contain `sensory`; *drive mean* is
+the mean of the first thirty 10-ms bins; and *tail* is the mean of the final ten bins.
 
-Only synthetic tests were run locally; no whole-brain calibration or adder results are
-claimed here.
+### Published-weight baseline
+
+With the published Shiu et al. weights (`exc=1`, `inh=1`, uncapped), the 2-Hz P1
+drive entered a self-sustained seizure: 25,628 non-sensory neurons were recruited and
+the off-period tail was 34,087.7 spikes per 10-ms bin.  A single 213-Hz point source
+(P2 seed 2) recruited 25,944 active neurons (25,943 excluding the source) and had a
+34,197.1-spike/bin tail.  The other two point-source seeds remained local; this one
+seed is enough to show that the published state is not safely bounded.
+
+### P1 sweep
+
+Only settings with `exc=0.25` decayed to a zero tail; five of those nine configurations
+had an exactly zero measured tail.  The files predate the fixed metrics: their old
+`runaway` flag can fire on Poisson noise and is not used or cited here.
+
+| exc | inh | cap | recruited non-sensory | drive mean (spikes/bin) | tail (spikes/bin) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.25 | 1 | 2000 | 1,856 | 3,304.1 | 877.2 |
+| 0.25 | 1 | 500 | 921 | 2,480.0 | 28.2 |
+| 0.25 | 1 | none | 1,331 | 2,535.8 | 876.5 |
+| 0.25 | 2 | 2000 | 865 | 2,734.3 | 369.5 |
+| 0.25 | 2 | 500 | 800 | 2,463.4 | 0.0 |
+| 0.25 | 2 | none | 590 | 2,480.2 | 0.0 |
+| 0.25 | 4 | 2000 | 580 | 2,455.4 | 0.0 |
+| 0.25 | 4 | 500 | 692 | 2,446.7 | 0.0 |
+| 0.25 | 4 | none | 480 | 2,439.5 | 0.0 |
+| 0.35 | 1 | 2000 | 7,437 | 8,047.3 | 6,828.6 |
+| 0.35 | 1 | 500 | 1,509 | 2,536.0 | 123.8 |
+| 0.35 | 1 | none | 2,589 | 3,698.5 | 1,423.8 |
+| 0.35 | 2 | 2000 | 1,689 | 2,951.8 | 557.7 |
+| 0.35 | 2 | 500 | 1,294 | 2,504.4 | 103.1 |
+| 0.35 | 2 | none | 1,625 | 2,562.1 | 849.7 |
+| 0.35 | 4 | 2000 | 1,027 | 2,509.2 | 51.6 |
+| 0.35 | 4 | 500 | 1,093 | 2,482.1 | 38.0 |
+| 0.35 | 4 | none | 915 | 2,482.3 | 54.5 |
+| 0.5 | 1 | 2000 | 10,008 | 13,434.4 | 11,877.1 |
+| 0.5 | 1 | 500 | 2,451 | 2,708.2 | 288.8 |
+| 0.5 | 1 | none | 4,480 | 4,904.1 | 2,530.8 |
+| 0.5 | 2 | 2000 | 7,845 | 6,275.0 | 3,770.5 |
+| 0.5 | 2 | 500 | 2,058 | 2,642.0 | 236.2 |
+| 0.5 | 2 | none | 2,987 | 2,856.9 | 1,437.7 |
+| 0.5 | 4 | 2000 | 2,426 | 2,614.9 | 591.3 |
+| 0.5 | 4 | 500 | 1,708 | 2,586.6 | 125.8 |
+| 0.5 | 4 | none | 2,067 | 2,611.3 | 472.1 |
+| 0.75 | 1 | 2000 | 19,770 | 24,368.4 | 24,776.6 |
+| 0.75 | 1 | 500 | 4,420 | 3,643.4 | 1,260.3 |
+| 0.75 | 1 | none | 17,013 | 20,368.8 | 20,485.0 |
+| 0.75 | 2 | 2000 | 13,153 | 15,179.2 | 15,418.2 |
+| 0.75 | 2 | 500 | 3,227 | 3,384.8 | 985.2 |
+| 0.75 | 2 | none | 6,798 | 5,188.9 | 3,435.6 |
+| 0.75 | 4 | 2000 | 10,367 | 3,516.7 | 10,163.6 |
+| 0.75 | 4 | 500 | 2,695 | 3,196.4 | 845.3 |
+| 0.75 | 4 | none | 3,844 | 3,414.3 | 1,508.1 |
+| 1 | 1 | 2000 | 30,779 | 42,364.9 | 45,885.0 |
+| 1 | 1 | 500 | 11,391 | 6,588.9 | 16,029.4 |
+| 1 | 1 | none | 25,628 | 34,264.8 | 34,087.7 |
+| 1 | 2 | 2000 | 19,333 | 20,693.4 | 22,454.6 |
+| 1 | 2 | 500 | 4,622 | 4,319.4 | 1,884.3 |
+| 1 | 2 | none | 10,629 | 7,821.5 | 5,953.4 |
+| 1 | 4 | 2000 | 11,967 | 7,942.4 | 4,453.5 |
+| 1 | 4 | 500 | 3,660 | 4,113.2 | 1,594.2 |
+| 1 | 4 | none | 7,983 | 4,390.4 | 2,887.5 |
+
+### Chosen candidate and seed checks
+
+The candidate was `exc=0.25`, `inh=2`, with no cap: it reduces the excitatory
+synaptic weight 75%, from 0.275 to about 0.069 mV per synapse, and doubles inhibition.
+Its seed-0 P1 tail was zero.  Seed 1 also had a zero tail (629 recruited non-sensory;
+2,497.4 drive spikes/bin), but seed 2 left an off-tail of about 16 spikes per 10 ms
+(15.6; 654 recruited non-sensory; 2,543.7 drive spikes/bin).  That small tail puts
+the candidate at the edge of stability.
+
+### P4 responsiveness proxy
+
+P4 is a **proxy**, not a sugar-response reproduction: MCNS lacks sugar labels, and
+Shiu used FlyWire female while MCNS is male CNS.  The specificity rule is: MN9 fires
+and recruited non-sensory neurons are below 1% of the brain (1,667).  Each cell is
+`maximum MN9 drive rate in Hz / recruited non-sensory`; `all` means all labellar
+bristles together.  No configuration satisfies the rule: at published weights MN9
+fires only inside a seizure, and every stable configuration leaves MN9 silent.
+
+| LB type | published 1/1/none | 0.25/1/none | 0.25/2/none | 0.35/4/none | 0.5/4/500 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| LB1a | 83.3 / 25,526 | 0 / 17 | 0 / 17 | 0 / 32 | 0 / 22 |
+| LB1b | 286.7 / 25,473 | 0 / 50 | 0 / 39 | 0 / 49 | 0 / 33 |
+| LB1c | 20.0 / 24,594 | 0 / 88 | 0 / 74 | 0 / 113 | 0 / 91 |
+| LB1d | 276.7 / 25,440 | 0 / 2 | 0 / 2 | 0 / 7 | 0 / 3 |
+| LB1e | 290.0 / 24,935 | 0 / 47 | 0 / 39 | 0 / 49 | 0 / 10 |
+| LB2a | 276.7 / 25,639 | 0 / 10 | 0 / 10 | 0 / 22 | 0 / 14 |
+| LB2b | 280.0 / 25,689 | 0 / 6 | 0 / 6 | 0 / 14 | 0 / 16 |
+| LB2c | 23.3 / 24,236 | 0 / 17 | 0 / 15 | 0 / 26 | 0 / 23 |
+| LB2d | 0 / 24,611 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| LB3 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| LB3a | 316.7 / 25,406 | 0 / 18 | 0 / 18 | 0 / 23 | 0 / 26 |
+| LB3b | 366.7 / 25,067 | 0 / 17 | 0 / 14 | 0 / 15 | 0 / 25 |
+| LB3c | 330.0 / 25,310 | 0 / 40 | 0 / 26 | 0 / 26 | 0 / 28 |
+| LB3d | 380.0 / 25,136 | 0 / 41 | 0 / 29 | 0 / 34 | 0 / 52 |
+| LB4a | 370.0 / 25,371 | 0 / 14 | 0 / 11 | 0 / 18 | 0 / 25 |
+| LB4b | 370.0 / 25,903 | 0 / 9 | 0 / 8 | 0 / 14 | 0 / 15 |
+| all | 170.0 / 25,065 | 0 / 189 | 0 / 152 | 0 / 180 | 0 / 208 |
+
+### Placed adder in the calibrated surround
+
+All four live runs were 0/50.  “Entering” is the maximum excitatory spikes entering
+the image in one millisecond.  The failure categories are mutually exclusive outcomes
+except that the summary's fault and timeout counters identify the relevant failures
+within the run.
+
+| placement | surround | correct/n | failure modes | max entering spikes/ms |
+| --- | --- | ---: | --- | ---: |
+| all_w0 | silent | 0/50 | 49 no accept; 1 fault | 1,845 |
+| all_w0 | 2-Hz Poisson | 0/50 | 38 no accept; 5 faults; 7 timeouts | 3,192 |
+| vnc_w2 | silent | 0/50 | 50 no accept | 284 |
+| vnc_w2 | 2-Hz Poisson | 0/50 | 50 incomplete | 809 |
+
+The sealed all_w0 control was 5/5, and the outputs-zeroed control, run in the
+**silent** surround only, was 10/10.  Thus, for the silent surround, the live failure
+is explained by a local echo of the circuit's own output rather than global
+over-excitability.  Under 2-Hz drive the adder also fails (0/50), with about 3,200
+(w0) and about 800 (VNC) excitatory spikes/ms entering; the contribution of incoming
+sensory activity there was not separated.
+
+### Conclusion and limits
+
+In this model, stability and responsiveness could not be had together: the published
+weights respond only through seizure, while stable settings silence MN9.  Calibration
+therefore does not rescue the placed adder.  These results cover one placement per
+region, one selected candidate, limited seeds, and a proxy responsiveness benchmark;
+they do not establish a biological calibration.

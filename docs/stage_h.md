@@ -191,6 +191,8 @@ Result files under `data/stage_h/fullgraph/`: `all_w0_cutin0.90_poisson_n50_s0.j
 
 The Dale, attribution, and type-cut measurements use one seed and one placement.  The shielding threshold replication used two seeds (all_w0) and two placements (all_w0, central_brain_w0).  The shielding ladders use 10 additions at every rung below the minima; they are not 50-addition confirmations.
 
+The [whole-brain surround calibration](stage_h/surround_calibration.md) separately finds that the selected stable surround does not restore the placed adder: all four live placement/surround runs were 0/50, while sealed and outputs-zeroed controls pass.  It also documents the stability-versus-responsiveness tradeoff and its proxy limits.
+
 ## Limits
 
 The Dale, attribution, and type-cut measurements use one seed and one placement.  Ladder rungs use 10 additions, with minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); the 0.95 all_w0 input rung was confirmed 50/50 on seeds 0 and 1 in the replication.  Unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
