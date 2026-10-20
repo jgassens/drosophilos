@@ -499,6 +499,10 @@ worsening holding and reload. Silent copies remain in the holding denominator;
 15, 152 and 277 copies respectively have no settled interval samples. Silence
 must not be counted as satisfying a rate floor.
 
+### What sets the 33-step interval
+
+A local run of `corner_probe('dale_biased')` reproduced the 33-step minimum measured for latch member `u` by `_periods`, but attributing it to a specific corner or to relay latency, member refractory time, or loop delay requires new instrumentation code because the existing survey returns only aggregate intervals and does not retain the corner identity or relay spikes.
+
 ### Opt-in circuit, replay and frozen baselines
 
 The new constants are `DALE_REFRACTORY_VERSION=1`,
