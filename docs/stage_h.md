@@ -193,6 +193,8 @@ The Dale, attribution, and type-cut measurements use one seed and one placement.
 
 The [whole-brain surround calibration](stage_h/surround_calibration.md) separately finds that the selected stable surround does not restore the placed adder: all four live placement/surround runs were 0/50, while sealed and outputs-zeroed controls pass.  It also documents the stability-versus-responsiveness tradeoff and its proxy limits.
 
+The [LOCAL ECHO placement study](stage_h/echo_placement.md) finds that penalizing output exposure reduces two-step echo by sacrificing carried real wiring, but every finished live trial still fails; passing sealed and outputs-zeroed controls on the tested echo1 and out8 hosts identify circuit-driven echo as the cause in the silent calibrated surround.
+
 ## Limits
 
 The Dale, attribution, and type-cut measurements use one seed and one placement.  Ladder rungs use 10 additions, with minimal confirmed rungs checked at 50 (and extra non-minimal VNC confirmations reported above); the 0.95 all_w0 input rung was confirmed 50/50 on seeds 0 and 1 in the replication.  Unconfirmed rungs should not be read as failures.  Configuration F itself was qualified only on 8+8 isolated additions plus one noisy probe, not the separate 50+50 isolated suite.  The LIF surround's excitability is a model property, as `docs/h1_placement.md` already notes.  In several cut runs the spike-identical-to-isolated count is below the correct count: spikes still enter but are harmless (for example, all_w0 output-cut 50% is 25/50 identical while 50/50 correct; VNC output-cut 40% is 3/50 identical while 50/50 correct).
