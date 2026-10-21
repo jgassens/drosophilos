@@ -118,7 +118,8 @@ def test_cli_defaults_omit_attribution_and_validate_opt_in():
 
     defaults = vars(parse([]))
     assert not any(key in defaults for key in ("attribute", "attribution_in", "attribution_out",
-                                                "attribution_top", "cut_inputs_by", "cut_inputs_from_types"))
+                                                "attribution_top", "cut_inputs_by", "cut_inputs_from_types", "echo_trace"))
+    assert parse(["--echo-trace"]).echo_trace is True
     assert defaults["cut_inputs_frac"] == defaults["cut_outputs_frac"] == 0
     args = parse(["--attribute", "20", "--attribution-out", "scores.npz", "--attribution-top", "10"])
     assert args.attribute == 20 and args.attribution_out == Path("scores.npz") and args.attribution_top == 10
@@ -202,6 +203,13 @@ def test_bench_attribution_is_opt_in_and_can_feed_cut_on_synthetic_mcns(tmp_path
     monkeypatch.setattr(bench.time, "time", lambda: 1.0)  # exact JSON comparison excludes wall noise
     common = ["--mapping", str(mapping), "--width", "1", "--n-cases", "2", "--max-ms", "10", "--chained"]
     plain = bench.run(bench.parse(common))
+    # The measured metric is observational, with no default JSON or simulation changes.
+    measured = bench.run(bench.parse(common + ["--echo-trace"]))
+    assert measured.pop("echo_trace")["out"]["count"] >= 0
+    for row in measured["additions"]:
+        assert len(row.pop("echo_trace")["per_ms"]["out"]["count"]) == 10
+    measured["args"].pop("echo_trace")
+    assert json.dumps(measured, default=str) == json.dumps(plain, default=str)
     path = tmp_path / "score.npz"
     attributed = bench.run(bench.parse(common + ["--attribute", "20", "--attribution-out", str(path)]))
     assert attributed["attribution"]["failures"] == 2 and path.exists()
@@ -218,3 +226,79 @@ def test_bench_attribution_is_opt_in_and_can_feed_cut_on_synthetic_mcns(tmp_path
     assert cut["full_graph_counts"]["inputs_cut_edges"] == 2
     assert cut["full_graph_counts"]["inputs_cut_synapses"] == 5
     assert "attribution" not in cut
+
+
+@pytest.mark.parametrize("hops, expected_lag", [(2, 2), (3, 4)])
+@pytest.mark.parametrize("return_sign", [1, -1])
+def test_measured_echo_on_known_anatomical_loops(hops, expected_lag, return_sign):
+    """One forced host spike returns through two/three anatomical edges in silence."""
+    from drosophilos.bench.h1_fullgraph import EchoTrace
+    from drosophilos.sim.model import Topology
+    from drosophilos.sim.ref64 import RefSim
+
+    params = Params(default_delay_ms=2, t_ref=100)
+    neurons = pd.DataFrame({"bodyId": np.arange(hops), "sign": np.ones(hops, np.int8)})
+    neurons.loc[hops - 1, "sign"] = return_sign
+    m = MCNS(neurons, np.arange(hops, dtype=np.int32),
+             np.roll(np.arange(hops, dtype=np.int32), -1),
+             np.full(hops, 10_000, np.int32), min_syn=1)
+    topo = m.topology(params)
+    for outputs_zeroed in (False, True):
+        q = topo.quanta.copy()
+        if outputs_zeroed:
+            q[topo.src == 0] = 0
+        active = Topology.from_edges(hops, topo.src, topo.dst, q, topo.delay)
+        sim = RefSim(active, params)
+        sim.add_events(0, [0], [0], [100_000])
+        sim.run(150)  # 15 ms, tiny synthetic graph only
+        metric = EchoTrace(active, [0], m.n, params)
+        result = metric.observe(sim.trace, 0, 150)
+        incoming = result["in"]
+        if outputs_zeroed:
+            assert incoming == result["out"] == {"count": 0, "abs_quanta": 0}
+            assert result["metrics"]["count"] == {
+                "return_ratio": 0, "within_20_ms_fraction": 0, "peak_lag_ms": None}
+        else:
+            assert incoming == result["out"] == {"count": 1, "abs_quanta": 160_000}
+            assert result["in_exc" if return_sign > 0 else "in_inh"] == incoming
+            for unit in ("count", "abs_quanta"):
+                assert result["metrics"][unit] == {
+                    "return_ratio": 1, "within_20_ms_fraction": 1, "peak_lag_ms": expected_lag}
+                assert metric.report()["metrics"][unit] == result["metrics"][unit]
+
+
+def test_echo_arrival_window_pending_deliveries_and_synthetic_exclusion():
+    from drosophilos.bench.h1_fullgraph import EchoTrace
+    from drosophilos.sim.model import Topology
+    from drosophilos.sim.trace import SpikeTrace
+
+    # 0 is a host, 1 a real surround neuron, 2 a synthetic circuit neuron.
+    topo = Topology.from_edges(3, [0, 1, 0, 2], [1, 0, 2, 0], [16, -32, 99, 99], [20] * 4)
+    metric = EchoTrace(topo, [0], 2, Params())
+    trace = SpikeTrace.from_arrays([9, 9, 9], [0] * 3, [0, 1, 2])
+    first = metric.observe(trace, 0, 20)
+    assert first["out"]["count"] == first["in"]["count"] == 0  # arrivals at 29, not clipped
+    second = metric.observe(SpikeTrace.empty(), 20, 40, fresh=False)
+    assert second["out"] == {"count": 1, "abs_quanta": 16}
+    assert second["in_inh"] == {"count": 1, "abs_quanta": 32}
+    assert second["per_ms"]["out"]["count"] == [1, 0]
+    third = metric.observe(SpikeTrace.empty(), 40, 60, fresh=False)
+    assert third["out"]["count"] == third["in"]["count"] == 0
+
+
+def test_echo_lags_span_chained_windows_and_exclude_out_at_20_ms():
+    from drosophilos.bench.h1_fullgraph import EchoTrace
+    from drosophilos.sim.model import Topology
+    from drosophilos.sim.trace import SpikeTrace
+
+    topo = Topology.from_edges(2, [0, 1], [1, 0], [16, 32], [0, 0])
+    metric = EchoTrace(topo, [0], 2, Params())
+    metric.observe(SpikeTrace.from_arrays([10], [0], [0]), 0, 20)
+    second = metric.observe(SpikeTrace.from_arrays([30, 210], [0, 0], [1, 1]), 20, 220, fresh=False)
+    for unit in ("count", "abs_quanta"):
+        assert second["metrics"][unit]["within_20_ms_fraction"] == .5
+        assert second["metrics"][unit]["peak_lag_ms"] == 2  # ties at 2 and 20 ms choose earliest
+    # Fresh runs must not associate IN with OUT from an earlier simulator.
+    fresh = metric.observe(SpikeTrace.from_arrays([30], [0], [1]), 20, 40, fresh=True)
+    assert fresh["metrics"]["count"]["within_20_ms_fraction"] == 0
+    assert fresh["metrics"]["count"]["peak_lag_ms"] is None

@@ -103,6 +103,8 @@ def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
     Pre-contract mappings retain the original H1 build (4-bit ordered latch, watchdog 100),
     except that the older flip-flop mapping's top-level ``storage`` is intentionally honoured.
     An explicit CLI value can only confirm, never silently replace, a saved contract.
+    Optional isolation_in/isolation_out/echo_weight describe placement only; the explicit
+    builder-key whitelist below keeps them out of the rebuilt netlist, as for legacy weights.
     """
     meta = dict(mapping_meta)
     contract = "builder" in meta
@@ -176,6 +178,122 @@ def make_sims(ch, isolated_topology, full_topology, full_index_map, params: Para
     return sim_iso, sim_full
 
 
+class EchoTrace:
+    """Measured anatomical boundary deliveries, binned by arrival in [start, end).
+
+    Counts are edge deliveries; weights are absolute embedded integer quanta (16 per
+    unit synapse weight). Only real non-host neurons are the surround: Profile 3
+    edges to synthetic circuit neurons are excluded. No path-length approximation.
+    Source/delay groups avoid materialising individual synaptic deliveries.
+    """
+
+    def __init__(self, topo, hosts, anatomical_n: int, params: Params):
+        self.dt = params.dt
+        host = np.zeros(topo.n, bool)
+        host[hosts] = True
+        outside = ~host & (np.arange(topo.n) < anatomical_n)
+        self.groups = []
+        self.sources = np.zeros(topo.n, bool)
+        self.max_delay = 0
+        for name, mask in (
+            ("out", host[topo.src] & outside[topo.dst]),
+            ("in_exc", outside[topo.src] & host[topo.dst] & (topo.quanta > 0)),
+            ("in_inh", outside[topo.src] & host[topo.dst] & (topo.quanta < 0)),
+        ):
+            edges = np.flatnonzero(mask & (topo.quanta != 0))
+            self.sources[topo.src[edges]] = True
+            for delay in np.unique(topo.delay[edges]):
+                take = edges[topo.delay[edges] == delay]
+                src, first, count = np.unique(topo.src[take], return_index=True, return_counts=True)
+                weight = np.add.reduceat(np.abs(topo.quanta[take].astype(np.int64)), first)
+                self.groups.append((name, int(delay), src, count, weight))
+                self.max_delay = max(self.max_delay, int(delay))
+        self.tail = None
+        self.out_history = None
+        self.history_end = None
+        self.totals = {name: {unit: 0 for unit in ("count", "abs_quanta")}
+                       for name in ("out", "in_exc", "in_inh")}
+        self.near = dict.fromkeys(("count", "abs_quanta"), 0)
+        self.correlation = {unit: np.zeros(51) for unit in self.near}
+
+    @staticmethod
+    def _report(totals, near, correlation):
+        result = {name: dict(values) for name, values in totals.items()}
+        result["in"] = {unit: totals["in_exc"][unit] + totals["in_inh"][unit] for unit in near}
+        for unit in near:
+            incoming, outgoing = result["in"][unit], result["out"][unit]
+            result.setdefault("metrics", {})[unit] = {
+                "return_ratio": incoming / outgoing if outgoing else 0.0,
+                "within_20_ms_fraction": near[unit] / incoming if incoming else 0.0,
+                "peak_lag_ms": int(np.argmax(correlation[unit])) if np.any(correlation[unit]) else None,
+            }
+        return result
+
+    def observe(self, trace, start: int, end: int, *, fresh: bool = True):
+        n_ms = int(np.ceil((end - start) * self.dt))
+        arrays = {name: {unit: np.zeros(n_ms, np.int64) for unit in self.near} for name in self.totals}
+        # Keep only 50 ms of per-step OUT totals, so lag statistics also span chained
+        # addition boundaries, even when a load does not fall on a whole millisecond.
+        history_steps = int(np.ceil(50 / self.dt))
+        history = self.out_history if not fresh and self.history_end == start else None
+        prior = {unit: np.zeros(50, np.int64) for unit in self.near}
+        current_out = {unit: np.zeros(end - start, np.int64) for unit in self.near}
+        if history is not None:
+            for unit, values in history.items():
+                ms = np.floor(np.arange(-len(values), 0) * self.dt).astype(np.int64) + 50
+                valid = ms >= 0
+                np.add.at(prior[unit], ms[valid], values[valid])
+        ev = trace.events
+        ev = ev[self.sources[ev["neuron"]]]
+        if not fresh and self.tail is not None:
+            ev = np.concatenate((self.tail, ev))
+        self.tail = ev[ev["step"] >= end - self.max_delay].copy()
+        for name, delay, src, count, weight in self.groups:
+            pos = np.searchsorted(src, ev["neuron"])
+            valid = pos < len(src)
+            valid[valid] &= src[pos[valid]] == ev["neuron"][valid]
+            arrival = ev["step"] + delay
+            valid &= (arrival >= start) & (arrival < end)
+            ms = np.floor((arrival[valid] - start) * self.dt).astype(np.int64)
+            for unit, values in (("count", count), ("abs_quanta", weight)):
+                np.add.at(arrays[name][unit], ms, values[pos[valid]])
+                if name == "out":
+                    np.add.at(current_out[unit], arrival[valid] - start, values[pos[valid]])
+        self.out_history = {
+            unit: np.concatenate((history[unit], values))[-history_steps:] if history is not None
+            else values[-history_steps:].copy() for unit, values in current_out.items()}
+        self.history_end = end
+        totals = {name: {unit: int(a.sum()) for unit, a in units.items()} for name, units in arrays.items()}
+        near, correlation = {}, {}
+        for unit in self.near:
+            outgoing = np.concatenate((prior[unit], arrays["out"][unit]))
+            incoming = arrays["in_exc"][unit] + arrays["in_inh"][unit]
+            # 1 ms bins: any OUT in bins [t-19, t], i.e. (t-20, t].
+            prefix = np.concatenate(([0], np.cumsum(outgoing > 0)))
+            active = prefix[51:] - prefix[np.arange(n_ms) + 31] > 0
+            near[unit] = int(incoming[active].sum())
+            # Raw, uncentred cross-correlation; positive lag means IN follows OUT.
+            # Earliest lag wins ties; no overlapping activity gives null.
+            correlation[unit] = np.array([
+                np.dot(outgoing[50 - lag:50 + n_ms - lag].astype(float), incoming.astype(float))
+                for lag in range(51)])
+            self.near[unit] += near[unit]
+            self.correlation[unit] += correlation[unit]
+        for name in totals:
+            for unit in self.near:
+                self.totals[name][unit] += totals[name][unit]
+        return {"start_step": int(start), "end_step_exclusive": int(end), "bin_ms": 1,
+                "per_ms": {name: {unit: a.tolist() for unit, a in units.items()} for name, units in arrays.items()},
+                **self._report(totals, near, correlation)}
+
+    def report(self):
+        """Sum totals and correlations over addition windows, never across fresh resets."""
+        return {"weight_units": "absolute embedded quanta (16 per unit synapse weight)",
+                "lag_convention": "IN after OUT; raw correlation over 0..50 ms; earliest tie; null if zero",
+                "window_convention": "1 ms bins per addition; chained lags include preceding OUT; fresh resets independent",
+                **self._report(self.totals, self.near, self.correlation)}
+
+
 def run(args) -> dict:
     params = Params()
     max_steps = int(round(args.max_ms / params.dt))
@@ -198,6 +316,7 @@ def run(args) -> dict:
     attr_window = getattr(args, "attribute", None)
     attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params) if attr_window is not None else None
     hosts = fg.index_map[img.real >= 0]
+    echo = EchoTrace(fg.topology, hosts, m.n, params) if getattr(args, "echo_trace", False) else None
     pops = surround_populations(m, exclude=hosts)
     driven = {"silent": np.empty(0, np.int64), "poisson": pops["sensory"], "burst": pops["cholinergic"]}[args.surround]
     print(f"[h1fg] image: {img.counts['carried']} carried, {img.counts['profile3_edges']} Profile 3, "
@@ -266,6 +385,9 @@ def run(args) -> dict:
                                                      fresh=not args.chained or k == 0)
             if failure is not None:
                 row["attribution"]["ms_since_load"] = (failure["step"] - rec.load_step) * params.dt
+        if echo is not None:
+            row["echo_trace"] = echo.observe(tr_full, rec.load_step, sim_full.step_index,
+                                             fresh=not args.chained or k == 0)
         additions.append(row)
         recs.append(rec); reached.append(re_full[0]); spikes += st["total_spikes"]
         print(f"[h1fg] {k + 1:3d}/{args.n_cases} {a:2d}+{b:2d}+{c} = {x:2d}: {outcome:9s} decoded {rec.decoded} "
@@ -291,6 +413,8 @@ def run(args) -> dict:
                         "burst_n": BURST_N, "burst_at_steps": BURST_AT, "excluded_hosts": pops["excluded_hosts"],
                         "sensory_neurons": int(len(pops["sensory"])), "cholinergic_neurons": int(len(pops["cholinergic"]))},
            "additions": additions, "summary": summary}
+    if echo is not None:
+        out["echo_trace"] = echo.report()
     if attribution is not None:
         out["attribution"] = attribution.report(getattr(args, "attribution_top", 50))
         if getattr(args, "attribution_out", None) is not None:
@@ -323,6 +447,8 @@ def parse(argv=None):
                     help="cap gain-scaled excitatory anatomical input outside image, in synapse weights")
     ap.add_argument("--inputs-zeroed", action="store_true", help="zero every edge from the brain into a host")
     ap.add_argument("--outputs-zeroed", action="store_true", help="zero every edge from a host into the brain")
+    ap.add_argument("--echo-trace", action="store_true", default=argparse.SUPPRESS,
+                    help="measure per-ms anatomical OUT/IN deliveries and lagged return (compact arrays, no spike dump)")
     ap.add_argument("--cut-inputs-frac", type=float, default=0.0,
                     help="cut strongest fraction [0, 1] of anatomical edges into hosts")
     ap.add_argument("--cut-outputs-frac", type=float, default=0.0,

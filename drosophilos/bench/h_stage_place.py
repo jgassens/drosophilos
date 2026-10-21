@@ -1,4 +1,4 @@
-"""Stage H: place and simulate one regional configuration of the ordered flip-flop adder.
+r"""Stage H: place and simulate one regional configuration of the ordered flip-flop adder.
 
 Reproduce with `python -m drosophilos.bench.h_stage_place --region optic_lobe
 --isolation-weight 1 --cases 50 --out data/stage_h/place/optic_lobe_w1.json
@@ -7,6 +7,42 @@ Configuration F is the default; --no-config-f builds the earlier flip-flop adder
 Writes placement, Profile 3, whole-brain/regional exposure and isolated A/B simulation
 results to JSON, plus a mapping with the builder metadata needed for whole-brain runs.
 `--summarize data/stage_h/place/*.json --table-out ranking.md` ranks saved configurations.
+
+Output/echo experiment: exact G2 commands, from the repository root after review/commit
+(submit.sh requires a clean committed checkout). Configuration F, width 4, k_max 4 and
+autapse feedback are defaults. Each placement runs 50 fresh isolated additions per A/B
+condition, plus the bench's existing chained suite. No local real placement is needed.
+
+    for w in 1 2 4 8; do
+      slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+        --cpus-per-task=4 --mem=64G --time=8:00:00 \
+        -- drosophilos.bench.h_stage_place --region all \
+        --isolation-in 0 --isolation-out "$w" --echo-weight 0 \
+        --cases 50 --conditions AB --restarts 4 --time-limit 600 --seed 0 \
+        --out "data/stage_h/place/all_out${w}.json" \
+        --mapping-out "data/stage_h/place/all_out${w}_mapping.json"
+    done
+    for w in 1 2 4; do
+      slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+        --cpus-per-task=4 --mem=64G --time=8:00:00 \
+        -- drosophilos.bench.h_stage_place --region all \
+        --isolation-in 0 --isolation-out 0 --echo-weight "$w" \
+        --cases 50 --conditions AB --restarts 4 --time-limit 600 --seed 0 \
+        --out "data/stage_h/place/all_echo${w}.json" \
+        --mapping-out "data/stage_h/place/all_echo${w}_mapping.json"
+    done
+
+After all seven placement jobs finish and their mappings are available on G2, submit
+the seven live runs: published weights, silent surround, 50 fresh additions, no cuts.
+
+    for tag in out1 out2 out4 out8 echo1 echo2 echo4; do
+      slurm/submit.sh --cluster g2 --partition=cpu-preempt --gres=none \
+        --cpus-per-task=4 --mem=64G --time=12:00:00 \
+        -- drosophilos.bench.h1_fullgraph \
+        --mapping "data/stage_h/place/all_${tag}_mapping.json" \
+        --n-cases 50 --seed 0 --surround silent --max-ms 1200 \
+        --out "data/stage_h/fullgraph/all_${tag}_silent_n50.json"
+    done
 """
 
 from __future__ import annotations
@@ -23,7 +59,7 @@ import numpy as np
 
 from ..connectome.embed_image import (adder_cases, build_image, h1_conditions, run_h1_conditions,
                                      save_mapping, simulate_channel)
-from ..connectome.embed_netlist import Policy, _Anatomy, exposure_of, place_netlist
+from ..connectome.embed_netlist import Policy, _Anatomy, exposure_of, host_echo, isolation_weights, place_netlist
 from ..connectome.mcns import MCNS, load_mcns
 from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
@@ -50,18 +86,24 @@ def region_mask(neurons, region: str) -> np.ndarray:
     return np.ones(len(neurons), bool) if region == "all" else neurons["superclass"].isin(REGIONS[region]).to_numpy()
 
 
-def mapping_meta(region: str, isolation_weight: float, restarts: int, seed: int,
-                 config_f: bool = True, width: int = 4, latch_feedback: str = "autapse") -> dict:
+def mapping_meta(region: str, isolation_weight: float | None, restarts: int, seed: int,
+                 config_f: bool = True, width: int = 4, latch_feedback: str = "autapse", *,
+                 isolation_in: float | None = None, isolation_out: float | None = None,
+                 echo_weight: float | None = None) -> dict:
     """Top-level save_mapping contract shared with the whole-brain bench."""
     if latch_feedback not in ("autapse", "dale_private", "dale_biased", "dale_refractory"):
         raise ValueError(f"unsupported latch_feedback: {latch_feedback!r}")
     if latch_feedback != "autapse" and not config_f:
         raise ValueError(f"{latch_feedback} latch_feedback requires configuration F")
+    wi, wo, we = isolation_weights(isolation_weight, isolation_in=isolation_in,
+                                  isolation_out=isolation_out, echo_weight=echo_weight)
     meta = {"builder": "build_adder_channel", "width": int(width), "ordered": True,
             "watchdog_hops": 100, "storage": "flipflop", "rate_robust": bool(config_f),
             "experimental_autapse": bool(config_f), "ordered_xor_oneshot": bool(config_f),
             "latch_feedback": str(latch_feedback),
-            "k_max": K_MAX, "isolation_weight": float(isolation_weight), "region": str(region),
+            "k_max": K_MAX, "isolation_weight": 0.0 if isolation_weight is None else float(isolation_weight),
+            "region": str(region),
+            "isolation_in": wi, "isolation_out": wo, "echo_weight": we,
             "restarts": int(restarts), "seed": int(seed)}
     if latch_feedback == "dale_private":
         meta["dale_feedback_version"] = DALE_FEEDBACK_VERSION
@@ -96,6 +138,7 @@ def host_exposure(m: MCNS, hosts, mask: np.ndarray, policy: Policy) -> dict:
                np.asarray(incoming.getnnz(axis=0)).ravel(), np.asarray(outgoing.getnnz(axis=1)).ravel())
     names = ("input_synapses", "output_synapses", "input_edges", "output_edges")
     return {"hosts": int(hosts.size),
+            **host_echo(A, hosts),
             "outside_hosts": {name: stats(v) for name, v in zip(names, whole)},
             "outside_region": {name: stats(v) for name, v in zip(names, outside)}}
 
@@ -114,9 +157,11 @@ def _counts(series, top: int | None = None) -> dict:
     return dict(items if top is None else items[:top])
 
 
-def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, restarts: int = 4,
+def run_one(m: MCNS, region: str, isolation_weight: float | None = None, n_cases: int = 50, restarts: int = 4,
             time_limit_s: float = 600.0, seed: int = 0, conditions: str = "AB", config_f: bool = True,
-            mapping_path: Path | None = None, width: int = 4, latch_feedback: str = "autapse") -> dict:
+            mapping_path: Path | None = None, width: int = 4, latch_feedback: str = "autapse", *,
+            isolation_in: float | None = None, isolation_out: float | None = None,
+            echo_weight: float | None = None) -> dict:
     """One regional placement and isolated A/B runs. Width is configurable for synthetic tests."""
     if not conditions or set(conditions) - set("AB"):
         raise ValueError("conditions must select A and/or B")
@@ -125,7 +170,10 @@ def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, re
     mask = region_mask(m.neurons, region)
     if not mask.any():
         raise ValueError(f"region {region!r} contains no neurons")
-    meta = mapping_meta(region, isolation_weight, restarts, seed, config_f, width, latch_feedback)
+    weights = dict(isolation_weight=isolation_weight, isolation_in=isolation_in,
+                   isolation_out=isolation_out, echo_weight=echo_weight)
+    meta = mapping_meta(region, isolation_weight, restarts, seed, config_f, width, latch_feedback,
+                        isolation_in=isolation_in, isolation_out=isolation_out, echo_weight=echo_weight)
     feedback_version = (
         {"dale_feedback_version": meta["dale_feedback_version"]}
         if latch_feedback == "dale_private" else
@@ -140,7 +188,7 @@ def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, re
     policy = Policy(k_max=K_MAX)
     t0 = time.monotonic()
     pl = place_netlist(net, m, policy=policy, restarts=restarts, time_limit_s=time_limit_s, seed=seed,
-                       isolation_weight=isolation_weight, allowed_hosts=mask, region=region, verbose=False)
+                       **weights, allowed_hosts=mask, region=region, verbose=False)
     search_seconds = time.monotonic() - t0
     if mapping_path is not None:
         mapping_path = Path(mapping_path)
@@ -167,8 +215,10 @@ def run_one(m: MCNS, region: str, isolation_weight: float, n_cases: int = 50, re
            "hosts": {"superclasses": _counts(m.neurons.iloc[hosts]["superclass"]),
                      "top_cell_types": _counts(m.neurons.iloc[hosts]["type"], 10)},
            "search_seconds": search_seconds, "git_commit": git_commit()}
-    print(f"[stage-h] {region}, w={isolation_weight}: carried {pl.carried}/{pl.edges}, "
-          f"placed {len(hosts)}/{net.n}, Profile 3 {out['profile3']['total']}, {search_seconds:.1f} s", flush=True)
+    print(f"[stage-h] {region}, in/out/echo={pl.isolation_in}/{pl.isolation_out}/{pl.echo_weight}: "
+          f"carried {pl.carried}/{pl.edges}, placed {len(hosts)}/{net.n}, "
+          f"Profile 3 {out['profile3']['total']}, echo {pl.host_echo_paths} paths via "
+          f"{pl.host_echo_neurons} non-hosts, {search_seconds:.1f} s", flush=True)
     selected = {k: v for k, v in conds.items() if k in conditions}
     fresh = run_h1_conditions(ch, m, pl, width=width, n_cases=n_cases, seed=seed, policy=policy, conditions=selected)
     _, words, expected = adder_cases(width, n_cases, seed)
@@ -223,21 +273,24 @@ def summarize(paths, table_path: Path) -> list[dict]:
     lines = ["A all-correct means every fresh and chained case is correct. Results show fresh / chained: "
              "correct/requested (wrong/fault/timeout/no ACCEPT; mean ACCEPT latency). Exposure is per host; "
              "outside input/output refers to all non-host neurons.", "",
-             "| Rank | Region | F | w | Pool | Placed / unplaced | Carried / designed (%) | P3 total / autapse / other | "
-             "Parasitic zeroed | Outside input syn mean / p90 / max | Outside output syn mean | "
+             "| Rank | Region | F | in / out / echo weights | Pool | Placed / unplaced | Carried / designed (%) | P3 total / autapse / other | "
+             "Parasitic zeroed | Outside input syn mean / p90 / max | Outside output syn mean / p90 / total | Echo paths / non-hosts | "
              "Outside in/out edges total | Beyond-region in/out syn mean | A | B | Search s | Restarts / seed | Git | Source |",
-             "|" + " --- |" * 19]
+             "|" + " --- |" * 20]
     for rank, r in enumerate(rows, 1):
         ex = r["exposure"]["outside_hosts"]
         regional = r["exposure"]["outside_region"]
         p3 = r["profile3"]
         pct = 100 * r["carried_edge_pairs"] / max(1, r["designed_edge_pairs"])
-        cells = [rank, r["region"], "yes" if r["config_f"] else "no", r["isolation_weight"], r["region_neurons"],
+        weight_cell = f"{r.get('isolation_in', r['isolation_weight'])} / {r.get('isolation_out', 0.25 * r['isolation_weight'])} / {r.get('echo_weight', 0.0)}"
+        cells = [rank, r["region"], "yes" if r["config_f"] else "no", weight_cell, r["region_neurons"],
                  f"{r['neurons_placed']} / {r['neurons_unplaced']}",
                  f"{r['carried_edge_pairs']} / {r['designed_edge_pairs']} ({pct:.1f}%)",
                  f"{p3['total']} / {p3['autapses']} / {p3['non_autapses']}", r["parasitic_edges_zeroed"],
                  f"{ex['input_synapses']['mean']:.1f} / {ex['input_synapses']['p90']:.1f} / {ex['input_synapses']['max']}",
-                 f"{ex['output_synapses']['mean']:.1f}", f"{ex['input_edges']['total']} / {ex['output_edges']['total']}",
+                 f"{ex['output_synapses']['mean']:.1f} / {ex['output_synapses']['p90']:.1f} / {ex['output_synapses']['total']}",
+                 f"{r['exposure'].get('host_echo_paths', 0)} / {r['exposure'].get('host_echo_neurons', 0)}",
+                 f"{ex['input_edges']['total']} / {ex['output_edges']['total']}",
                  f"{regional['input_synapses']['mean']:.1f} / {regional['output_synapses']['mean']:.1f}",
                  _result_cell(r, "A"), _result_cell(r, "B"), f"{r['search_seconds']:.1f}",
                  f"{r['restarts']} / {r['seed']}", (r.get("git_commit") or "unknown")[:12], r["source"]]
@@ -251,7 +304,11 @@ def summarize(paths, table_path: Path) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--region", choices=("all", *REGIONS), default="all")
-    ap.add_argument("--isolation-weight", type=float, default=0.0)
+    ap.add_argument("--isolation-weight", type=float, default=None,
+                    help="legacy input weight; output weight is one quarter (default: 0)")
+    ap.add_argument("--isolation-in", type=float, help="independent log input-exposure weight (default: 0)")
+    ap.add_argument("--isolation-out", type=float, help="independent log output-exposure weight (default: 0)")
+    ap.add_argument("--echo-weight", type=float, help="log self-echo weight (default: 0)")
     ap.add_argument("--cases", type=int, default=50)
     ap.add_argument("--out", type=Path)
     ap.add_argument("--mapping-out", type=Path)
@@ -283,9 +340,15 @@ def main() -> None:
         ap.error("placement requires --out and --mapping-out")
     if a.latch_feedback != "autapse" and a.no_config_f:
         ap.error(f"--latch-feedback {a.latch_feedback} requires configuration F")
+    try:
+        isolation_weights(a.isolation_weight, isolation_in=a.isolation_in,
+                          isolation_out=a.isolation_out, echo_weight=a.echo_weight)
+    except ValueError as exc:
+        ap.error(str(exc))
     m = load_mcns(a.data_dir) if a.data_dir is not None else load_mcns()
     out = run_one(m, a.region, a.isolation_weight, a.cases, a.restarts, a.time_limit, a.seed,
-                  a.conditions, not a.no_config_f, a.mapping_out, latch_feedback=a.latch_feedback)
+                  a.conditions, not a.no_config_f, a.mapping_out, latch_feedback=a.latch_feedback,
+                  isolation_in=a.isolation_in, isolation_out=a.isolation_out, echo_weight=a.echo_weight)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(out, indent=1))
     print(f"wrote {a.out} and {a.mapping_out}")

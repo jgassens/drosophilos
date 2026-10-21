@@ -80,11 +80,17 @@ class Placement:
     strategy: str = ""
     isolation_weight: float = 0.0
     exposure: dict = field(default_factory=dict)  # the hosts' anatomical synapses from / to neurons outside the circuit (exact)
-    objective: float = 0.0  # carried - isolation_weight * sum over hosts of (log1p(in_ext) + 0.25 * log1p(out_ext)) - cap * unplaced
+    objective: float = 0.0  # carried - weighted external log-exposure/self-echo - cap * unplaced
     ffpair_drivers: dict = field(default_factory=dict)  # flip-flop hosts: {"hosts": placed members, "with_driver": those with an excitatory input >= the loop threshold}
     proxy_readout: dict = field(default_factory=dict)  # flip-flop proxies: {"proxies": designed, "placed": on a host, "edges": designed edges out of a proxy, "carried": of those carried}
     allowed_hosts: int | None = None  # size of the caller's host pool; None means unrestricted
     region: str | None = None
+    isolation_in: float = 0.0
+    isolation_out: float = 0.0
+    echo_weight: float = 0.0
+    self_echo: dict = field(default_factory=dict)  # real host index -> two-step loops via X != host
+    host_echo_paths: int = 0
+    host_echo_neurons: int = 0
 
     def summary(self, net: Netlist) -> dict:
         ex = self.exposure
@@ -94,6 +100,9 @@ class Placement:
                 "missing_by_class": self.missing_by_class,
                 "parasitic_to_zero": self.parasitic, "seconds": round(self.seconds, 1), "strategy": self.strategy,
                 "isolation_weight": self.isolation_weight, "objective": round(self.objective, 3),
+                "isolation_in": self.isolation_in, "isolation_out": self.isolation_out,
+                "echo_weight": self.echo_weight, "self_echo": self.self_echo,
+                "host_echo_paths": self.host_echo_paths, "host_echo_neurons": self.host_echo_neurons,
                 "allowed_hosts": self.allowed_hosts, "region": self.region,
                 "external_in_edges": ex.get("in_edges", 0), "external_out_edges": ex.get("out_edges", 0),
                 "external_in_synapses": ex.get("in_total", 0), "external_out_synapses": ex.get("out_total", 0),
@@ -108,25 +117,74 @@ class Placement:
 OUT_EXPOSURE_WEIGHT = 0.25  # outputs into the surround count a quarter of inputs from it (inputs are what floods a host)
 
 
-def isolation_penalty(A: "_Anatomy", isolation_weight: float) -> np.ndarray:
-    """Per real neuron: isolation_weight * (log1p(input synapses) + 0.25 * log1p(output synapses)),
-    from the static anatomical totals (the circuit set is not known while the placement grows;
-    the correction for edges among hosts is small and the audit reports the exact figure). The
-    natural log makes isolation_weight = 1 mean that one carried designed edge (+1 in every
-    ranking score) is worth a factor e in a host's input synapse count."""
-    if isolation_weight == 0.0:
+def isolation_weights(isolation_weight: float | None = None, *, isolation_in: float | None = None,
+                      isolation_out: float | None = None, echo_weight: float | None = None) -> tuple[float, float, float]:
+    """Resolve legacy or independent weights; None distinguishes omitted from explicit zero.
+
+    Independent weights default to zero. Even an explicitly supplied legacy zero conflicts
+    with a new weight, so accidentally mixing the two interfaces cannot change a run.
+    """
+    if isolation_weight is not None:
+        if any(w is not None for w in (isolation_in, isolation_out, echo_weight)):
+            raise ValueError("isolation_weight cannot be combined with isolation_in, isolation_out or echo_weight")
+        return float(isolation_weight), OUT_EXPOSURE_WEIGHT * float(isolation_weight), 0.0
+    return tuple(float(w) if w is not None else 0.0 for w in (isolation_in, isolation_out, echo_weight))
+
+
+def isolation_penalty(A: "_Anatomy", isolation_weight: float | None = None, *,
+                      isolation_in: float | None = None, isolation_out: float | None = None,
+                      echo_weight: float | None = None) -> np.ndarray:
+    """Weighted log1p of anatomical input/output totals and self-echo per potential host.
+
+    The circuit set is unknown while placement grows; the audit reports exact outside-host
+    exposure. Legacy isolation_weight uses input weight w and output weight 0.25*w, keeping
+    its original evaluation order. A unit weight values a factor e in its count at one
+    carried designed edge (+1 in every ranking score). Self-echo is only computed if needed.
+    """
+    wi, wo, we = isolation_weights(isolation_weight, isolation_in=isolation_in,
+                                  isolation_out=isolation_out, echo_weight=echo_weight)
+    if wi == wo == we == 0.0:
         return np.zeros(A.n, np.float64)
-    return isolation_weight * (np.log1p(A.in_syn) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn))
+    if isolation_weight is not None:
+        # Preserve the legacy floating-point evaluation order exactly.
+        return isolation_weight * (np.log1p(A.in_syn) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn))
+    penalty = wi * np.log1p(A.in_syn) + wo * np.log1p(A.out_syn)
+    if we:
+        penalty += we * np.log1p(A.self_echo)
+    return penalty
 
 
-def penalty_cap(A: "_Anatomy", isolation_weight: float) -> float:
+def penalty_cap(A: "_Anatomy", isolation_weight: float | None = None, *,
+                isolation_in: float | None = None, isolation_out: float | None = None,
+                echo_weight: float | None = None) -> float:
     """The penalty charged for a designed neuron left unplaced: the noisiest real neuron's. The
     weight ranks hosts; it must never make "no host" the cheapest choice (an unplaced neuron
     becomes a synthetic one in the image, which is worse than any host), so every comparison
     between assignments that place different nodes charges the missing ones at this cap."""
-    if isolation_weight == 0.0:
+    wi, wo, we = isolation_weights(isolation_weight, isolation_in=isolation_in,
+                                  isolation_out=isolation_out, echo_weight=echo_weight)
+    if wi == wo == we == 0.0:
         return 0.0
-    return isolation_weight * (np.log1p(A.in_syn.max()) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn.max()))
+    if isolation_weight is not None:
+        return isolation_weight * (np.log1p(A.in_syn.max()) + OUT_EXPOSURE_WEIGHT * np.log1p(A.out_syn.max()))
+    return float(wi * np.log1p(A.in_syn.max()) + wo * np.log1p(A.out_syn.max())
+                 + (we * np.log1p(A.self_echo.max()) if we else 0.0))
+
+
+def host_echo(A: "_Anatomy", hosts: np.ndarray) -> dict:
+    """Weighted paths H -> X -> H, including returns to a different host; X must be outside H.
+
+    Sparse host-boundary slices and two length-n int64 vectors avoid forming C @ C.
+    Cost is O(nnz(C) + n) in the worst case, with no dense n-by-n allocation.
+    """
+    hosts = np.asarray(hosts, dtype=np.int64)
+    if not hosts.size:
+        return {"host_echo_paths": 0, "host_echo_neurons": 0}
+    leaving = np.asarray(A.C[hosts].sum(axis=0)).ravel().astype(np.int64)
+    returning = np.asarray(A.CT[:, hosts].sum(axis=1)).ravel().astype(np.int64)
+    leaving[hosts] = 0
+    paths = leaving * returning
+    return {"host_echo_paths": int(paths.sum()), "host_echo_neurons": int(np.count_nonzero(paths))}
 
 
 def exposure_of(A: "_Anatomy", hosts: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -206,6 +264,22 @@ class _Anatomy:
         # exposure: every neuron's anatomical in-degree and out-degree in synapses (all partners)
         self.in_syn = np.bincount(m.post, weights=m.count, minlength=self.n).astype(np.int64)
         self.out_syn = np.bincount(m.pre, weights=m.count, minlength=self.n).astype(np.int64)
+
+    @property
+    def self_echo(self) -> np.ndarray:
+        """sum_X!=h C[h,X] * C[X,h], independent of the eventual host set and of signs.
+
+        Computed lazily once per anatomy and cached across rankings, audits and restarts.
+        Sparse elementwise C * C.T (NOT matrix multiplication) intersects sorted edges:
+        O(nnz(C) + n) time/temporary space, plus an 8*n-byte cached vector. Cast before
+        multiplying so synapse products/sums cannot overflow int32. Autapses are excluded.
+        """
+        if "self_echo" not in self._memo:
+            counts = self.C.astype(np.int64)
+            loops = np.asarray(counts.multiply(counts.T).sum(axis=1)).ravel()
+            loops -= self.diagonal.astype(np.int64) ** 2
+            self._memo["self_echo"] = loops
+        return self._memo["self_echo"]
 
     def row(self, r: int, thr: int) -> np.ndarray:
         a, b = self.C.indptr[r], self.C.indptr[r + 1]
@@ -559,12 +633,16 @@ class _Search:
     def __init__(self, D: _Design, A: _Anatomy, rng: np.random.Generator, hub_first: bool, cand_cap: int,
                  chain_budget: int, max_backtracks: int, backtrack_depth: int, deadline: float,
                  mac_max: int = 0, order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0,
-                 isolation_weight: float = 0.0, allowed_hosts: np.ndarray | None = None):
+                 isolation_weight: float | None = None, allowed_hosts: np.ndarray | None = None, *,
+                 isolation_in: float | None = None, isolation_out: float | None = None,
+                 echo_weight: float | None = None):
         self.D, self.A, self.rng = D, A, rng
         self.allowed_hosts = allowed_hosts
-        self.iso_w = isolation_weight
-        self.iso_pen = isolation_penalty(A, isolation_weight)  # per real neuron; every ranking subtracts it
-        self.pen_unplaced = penalty_cap(A, isolation_weight)  # a node left out is charged the noisiest neuron's penalty
+        weights = dict(isolation_weight=isolation_weight, isolation_in=isolation_in,
+                       isolation_out=isolation_out, echo_weight=echo_weight)
+        self.iso_w = any(isolation_weights(**weights))
+        self.iso_pen = isolation_penalty(A, **weights)  # per real neuron; every ranking subtracts it
+        self.pen_unplaced = penalty_cap(A, **weights)  # missing nodes cost at least as much as any host
         self.hub_first, self.cand_cap, self.chain_budget = hub_first, cand_cap, chain_budget
         self.max_bt, self.bt_depth, self.deadline = max_backtracks, backtrack_depth, deadline
         self.mac_max = mac_max
@@ -1401,12 +1479,16 @@ class _Search:
 # audit
 # ----------------------------------------------------------------------------------------
 def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: float, outcome: dict, strategy: str,
-          policy: Policy, isolation_weight: float = 0.0) -> Placement:
+          policy: Policy, isolation_weight: float | None = None, *, isolation_in: float | None = None,
+          isolation_out: float | None = None, echo_weight: float | None = None) -> Placement:
     """A designed neuron can hold the same (src, dst) synapse twice (the netlist does not merge
     duplicates); a real anatomical edge carries both at once, so the audit works on distinct
     pairs with their quanta summed (the neuron's actual input to that anatomical edge), not on
     raw netlist rows -- else one anatomical edge is counted as two carried designed edges and
     the parasitic count is under-counted by the same amount."""
+    weights = dict(isolation_weight=isolation_weight, isolation_in=isolation_in,
+                   isolation_out=isolation_out, echo_weight=echo_weight)
+    wi, wo, we = isolation_weights(**weights)
     mapping = {int(d): int(r) for d, r in enumerate(real) if r >= 0}
     unplaced = [int(d) for d in range(D.n) if real[d] < 0]
     roles = net.roles
@@ -1443,13 +1525,22 @@ def audit(net: Netlist, D: _Design, A: _Anatomy, real: np.ndarray, seconds: floa
     placed = np.array(sorted(mapping.values()), dtype=np.int64)
     parasitic = int(A.C[placed][:, placed].nnz - carried) if placed.size else 0
     pl = Placement(mapping, unplaced, carried, missing, parasitic, seconds, edges=len(pairs), strategy=strategy,
-                   isolation_weight=isolation_weight)
+                   isolation_weight=0.0 if isolation_weight is None else isolation_weight,
+                   isolation_in=wi, isolation_out=wo, echo_weight=we)
     # exposure: what the rest of the brain can deliver to the hosts and receive from them (exact:
     # the anatomical totals less the synapses among the hosts), and the objective the search ranks by
     in_ext, out_ext, in_edges, out_edges = exposure_of(A, placed)
     pl.exposure = exposure_summary(in_ext, out_ext, in_edges, out_edges)
-    pl.objective = float(carried - isolation_weight * (np.log1p(in_ext) + OUT_EXPOSURE_WEIGHT * np.log1p(out_ext)).sum()
-                         - len(unplaced) * penalty_cap(A, isolation_weight))
+    pl.self_echo = {int(h): int(A.self_echo[h]) for h in placed}
+    echo = host_echo(A, placed)
+    pl.host_echo_paths, pl.host_echo_neurons = echo["host_echo_paths"], echo["host_echo_neurons"]
+    if isolation_weight is not None:
+        cost = isolation_weight * (np.log1p(in_ext) + OUT_EXPOSURE_WEIGHT * np.log1p(out_ext)).sum()
+    else:
+        cost = (wi * np.log1p(in_ext) + wo * np.log1p(out_ext)).sum()
+        if we:
+            cost += we * np.log1p(A.self_echo[placed]).sum()
+    pl.objective = float(carried - cost - len(unplaced) * penalty_cap(A, **weights))
     by_role: dict = {}
     for d in range(D.n):
         key = role_key(roles[d])
@@ -1510,8 +1601,9 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
                   max_backtracks: int = 8, backtrack_depth: int = 3, repair_rounds: int = 6, seed: int = 0,
                   strategies=("hub_last", "hub_first", "hub_last", "hub_last"), hard_hubs=(),
                   order: str = "mrv", reject_kills: bool = True, soft_w: float = 1.0, mac_max: int = 0,
-                  isolation_weight: float = 0.0, ff_driver: bool = True,
-                  allowed_hosts=None, region: str | None = None) -> Placement:
+                  isolation_weight: float | None = None, ff_driver: bool = True,
+                  allowed_hosts=None, region: str | None = None, *, isolation_in: float | None = None,
+                  isolation_out: float | None = None, echo_weight: float | None = None) -> Placement:
     """Motif-level placement with backtracking and forward checking (module docstring), then
     a large-neighbourhood repair. Runs up to `restarts` descents, cycling `strategies`, within
     `time_limit_s`; returns the placement that carries the most designed edges.
@@ -1532,6 +1624,14 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
     penalty of its hosts, minus that cap per unplaced neuron); at 0 (the default) this is the
     most edges carried, as before. Placement.exposure and summary report the hosts' external
     input / output synapses and edges (total, mean, max, p90).
+    Alternatively, `isolation_in`, `isolation_out`, and `echo_weight` independently weight
+    log1p(input synapses), log1p(output synapses), and log1p(self_echo). Omitted new weights
+    are zero. Giving any new weight together with isolation_weight raises ValueError.
+    With no weights, all are zero. Legacy weights keep their exact arithmetic and objective.
+    Rankings use anatomical totals; the objective uses exact outside-host input/output
+    exposure, as before. Self-echo always uses every other neuron (including other hosts).
+    `_Anatomy.self_echo` documents the cached sparse computation's cost; the final audit
+    also reports paths leaving any host and returning to any host via a non-host neuron.
     `ff_driver`: a flip-flop pair's hosts are drawn from real mutual inhibitory pairs whose
     members each have an excitatory input >= the loop threshold (the driver the designed bias
     stands in for; anatomically unnecessary since the bias is a parameter edit, but the pool
@@ -1541,6 +1641,9 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
     neurons may host the circuit; anatomy, parasitic accounting and exposure remain whole-brain.
     None preserves the unrestricted search. `region` names the pool in Placement.summary."""
     t0 = time.time()
+    weights = dict(isolation_weight=isolation_weight, isolation_in=isolation_in,
+                   isolation_out=isolation_out, echo_weight=echo_weight)
+    isolation_weights(**weights)  # reject conflicting interfaces before building anatomy
     host_mask = None
     if allowed_hosts is not None:
         pool = np.asarray(allowed_hosts)
@@ -1574,15 +1677,15 @@ def place_netlist(net: Netlist, m: MCNS, policy: Policy = Policy(), verbose: boo
         run_deadline = min(deadline, time.time() + per_run) if k < restarts - 1 else deadline
         S = _Search(D, A, rng, hub_first=(strategy == "hub_first"), cand_cap=cand_cap, chain_budget=chain_budget,
                     max_backtracks=max_backtracks, backtrack_depth=backtrack_depth, deadline=run_deadline,
-                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w, isolation_weight=isolation_weight,
-                    allowed_hosts=host_mask)
+                    mac_max=mac_max, order=order, reject_kills=reject_kills, soft_w=soft_w,
+                    allowed_hosts=host_mask, **weights)
         t1 = time.time()
         S.run()
         S.relaxed()
-        pre = audit(net, D, A, S.real, 0.0, S.outcome, "", policy, isolation_weight)
+        pre = audit(net, D, A, S.real, 0.0, S.outcome, "", policy, **weights)
         before = pre.carried
         gained = S.improve(rounds=repair_rounds)
-        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy, isolation_weight)
+        pl = audit(net, D, A, S.real, time.time() - t0, S.outcome, f"{strategy} seed {seed + k}", policy, **weights)
         pl.allowed_hosts = int(host_mask.sum()) if host_mask is not None else None
         pl.region = region
         pl.order_note = f"backtracks {S.backtracks}; {before} carried before repair, +{gained} repaired; descent {time.time() - t1:.1f} s"
