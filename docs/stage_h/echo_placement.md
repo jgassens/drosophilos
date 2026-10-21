@@ -138,7 +138,7 @@ python -m drosophilos.bench.h_echo_report \
 
 Each live cell gives correct/additions, then whole-window IN/OUT by absolute
 quanta / count. “Not measured” means no supplied live trial was scheduled for
-that setting; “not finished” identifies a scheduled trial whose file is absent.
+that setting.
 
 | Setting | Carried / designed | Host echo paths | Echo neurons | Published: correct/n; weight / count return | Calibrated: correct/n; weight / count return |
 | --- | --- | --- | --- | --- | --- |
@@ -147,7 +147,7 @@ that setting; “not finished” identifies a scheduled trial whose file is abse
 | out2 | 583/1516 | 376,731,713 | 35,609 | not measured | not measured |
 | out4 | 563/1516 | 304,813,484 | 37,345 | not measured | not measured |
 | out8 | 542/1516 | 285,033,288 | 36,076 | 0/50; 83.41% / 63.42% | 0/50; 3.37% / 1.87% |
-| echo1 | 554/1516 | 290,789,986 | 36,644 | not finished (G2 4048875) | 0/50; 1.49% / 0.72% |
+| echo1 | 554/1516 | 290,789,986 | 36,644 | 0/50; 62.38% / 52.72% | 0/50; 1.49% / 0.72% |
 | echo2 | 549/1516 | 372,123,843 | 41,113 | not measured | not measured |
 | echo4 | 531/1516 | 307,883,824 | 42,204 | not measured | not measured |
 
@@ -156,7 +156,7 @@ out8, carried edges fall from 809 to 542 while host echo paths fall from
 1,099,380,131 to 285,033,288 (about 1,099 million to 285 million). This search did
 not find echo-poor wiring that preserves baseline carry and restores computation.
 Every finished live trial, including published w0 (G2 4048871), is 0/50.
-The absent published echo1 file remains not finished, not a measured failure.
+Published echo1 (G2 4048875) is also 0/50, with all 50 additions incomplete.
 
 The strongest output penalty gives fewer host echo paths than any tested
 self-echo penalty: echo1 has 290,789,986, echo2 has 372,123,843, and echo4 has
@@ -175,6 +175,7 @@ and zero wrong accepted answers; failure often occurs before an answer is accept
 | out1 | cal | 2 | 48 | 0 | 0 |
 | out8 | pub | 0 | 0 | 49 | 1 |
 | out8 | cal | 0 | 30 | 20 | 0 |
+| echo1 | pub | 0 | 0 | 0 | 50 |
 | echo1 | cal | 0 | 50 | 0 | 0 |
 
 ## Controls
@@ -227,6 +228,7 @@ a tie. The JSON records the entire curve and the number used at every lag.
 | out1 | cal | 0.2005 | 0.2004 | 0.1639 | 0.1692 | 0.1716 | 0.2036 | 0.1543 | 0.1628 | 0.1656 | 10 / 0.2036 | 50 |
 | out8 | pub | 0.8413 | 0.8247 | 0.8285 | 0.8262 | 0.8307 | 0.8103 | 0.7716 | 0.6986 | 0.5748 | 0 / 0.8413 | 50 |
 | out8 | cal | 0.0407 | 0.0430 | 0.0380 | 0.0303 | 0.0327 | 0.0303 | 0.0317 | 0.0215 | 0.0369 | 1 / 0.0430 | 50 |
+| echo1 | pub | 0.6040 | 0.6139 | 0.6062 | 0.6093 | 0.6088 | 0.6129 | 0.5663 | 0.5659 | 0.4926 | 8 / 0.6143 | 50 |
 | echo1 | cal | 0.0374 | 0.0271 | 0.0333 | 0.0289 | 0.0262 | 0.0230 | -0.0113 | -0.0125 | -0.0073 | 0 / 0.0374 | 50 |
 
 ### Mean-subtracted correlation: counts
@@ -239,6 +241,7 @@ a tie. The JSON records the entire curve and the number used at every lag.
 | out1 | cal | 0.4735 | 0.4582 | 0.4263 | 0.4410 | 0.4497 | 0.4827 | 0.4157 | 0.4022 | 0.4123 | 10 / 0.4827 | 50 |
 | out8 | pub | 0.8566 | 0.8467 | 0.8471 | 0.8501 | 0.8511 | 0.8426 | 0.8039 | 0.7393 | 0.5985 | 0 / 0.8566 | 50 |
 | out8 | cal | 0.1430 | 0.1240 | 0.1270 | 0.1215 | 0.1222 | 0.1071 | 0.0913 | 0.0862 | 0.0860 | 0 / 0.1430 | 50 |
+| echo1 | pub | 0.6006 | 0.5963 | 0.5980 | 0.5976 | 0.6016 | 0.5987 | 0.5675 | 0.5553 | 0.4826 | 5 / 0.6016 | 50 |
 | echo1 | cal | 0.1400 | 0.1200 | 0.1497 | 0.1598 | 0.1213 | 0.1141 | 0.0748 | 0.0449 | 0.0298 | 3 / 0.1598 | 50 |
 
 All displayed lags use 50 additions in each finished run, in both units.
@@ -265,6 +268,7 @@ medians and valid sample counts are also retained in the JSON.
 | out1 | cal | 5 (5–7) | 50 | 2.38% | 5.44% | 1.08% | 3.66% | 49.99% |
 | out8 | pub | 3 (2–7) | 50 | 23.25% | 83.41% | 12.28% | 63.42% | 50.22% |
 | out8 | cal | 11 (5–14) | 50 | 0.93% | 3.37% | 0.60% | 1.87% | 77.35% |
+| echo1 | pub | 2 (2–3) | 50 | 18.72% | 62.38% | 13.64% | 52.72% | 45.35% |
 | echo1 | cal | 10 (8–11) | 50 | 0.59% | 1.49% | 0.32% | 0.72% | 94.57% |
 
 Echo1 calibrated has a median IN onset 10 ms after OUT and a median early
@@ -290,6 +294,7 @@ nonzero in every millisecond, as the measured zero-bin counts show:
 | out1 | cal | 320/58470 | 99.45% | 1 / 0 |
 | out8 | pub | 300/6026 | 95.02% | 0 / 0 |
 | out8 | cal | 568/60000 | 99.05% | 6 / 0 |
+| echo1 | pub | 301/60000 | 99.50% | 1 / 0 |
 | echo1 | cal | 350/60000 | 99.42% | 0 / 3 |
 
 The stored window is resolved on 1 ms bins. With the simulation's 0.1 ms steps,
@@ -318,7 +323,7 @@ A small return ratio, even one dominated by inhibition, is insufficient protecti
 
 These results cover region `all`, the listed penalty settings, the two surround
 weight settings, and seed 0. Only w0, out1, out8 and echo1 have scheduled live traces;
-the published echo1 trial is not finished in this snapshot. The controls
+all eight trials are finished in this snapshot. The controls
 test 10 additions per condition, except the earlier w0 sealed control with 5;
 they do not establish full live-suite performance. Controls were calibrated and
 silent, so their causal reading is not extended to externally driven surrounds
