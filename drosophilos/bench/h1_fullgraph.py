@@ -103,6 +103,8 @@ def adder_build_kwargs(mapping_meta: dict, *, width_override: int | None = None,
     Pre-contract mappings retain the original H1 build (4-bit ordered latch, watchdog 100),
     except that the older flip-flop mapping's top-level ``storage`` is intentionally honoured.
     An explicit CLI value can only confirm, never silently replace, a saved contract.
+    Optional isolation_in/isolation_out/echo_weight describe placement only; the explicit
+    builder-key whitelist below keeps them out of the rebuilt netlist, as for legacy weights.
     """
     meta = dict(mapping_meta)
     contract = "builder" in meta

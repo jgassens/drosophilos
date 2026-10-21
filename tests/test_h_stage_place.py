@@ -44,7 +44,7 @@ def test_mapping_meta_contract_keys_and_exact_types(config_f):
                 "storage": str, "rate_robust": bool, "experimental_autapse": bool,
                 "ordered_xor_oneshot": bool, "latch_feedback": str, "k_max": float, "isolation_weight": float,
                 "region": str, "restarts": int, "seed": int}
-    assert set(meta) == set(expected)
+    assert set(expected) <= set(meta) <= set(expected) | {"isolation_in", "isolation_out", "echo_weight"}
     assert all(type(meta[k]) is t for k, t in expected.items())
     assert meta["builder"] == "build_adder_channel" and meta["width"] == 4
     assert meta["ordered"] and meta["watchdog_hops"] == 100 and meta["storage"] == "flipflop"

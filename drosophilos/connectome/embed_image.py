@@ -304,6 +304,7 @@ MAPPING_META_KEYS = (
     "experimental_autapse", "ordered_xor_oneshot", "k_max", "isolation_weight",
     "region", "restarts", "seed", "latch_feedback", "dale_feedback_version",
     "dale_biased_version", "dale_refractory_version",
+    "isolation_in", "isolation_out", "echo_weight",
 )
 
 
