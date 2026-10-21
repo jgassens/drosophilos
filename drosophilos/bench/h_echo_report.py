@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -179,7 +180,8 @@ def build_report(place_dir: Path, fullgraph_dir: Path) -> dict:
                          "result": {**outcome_summary(data), "args": data["args"]}
                          if data is not None else None})
     return {"study": "LOCAL ECHO", "code_commit": "0b7b166",
-            "source_directories": {"place": str(place_dir), "fullgraph": str(fullgraph_dir)},
+            "source_directories": {"place": os.path.relpath(place_dir),
+                                   "fullgraph": os.path.relpath(fullgraph_dir)},
             "surrounds": {"pub": {"exc": 1, "inh": 1, "cap": None, "drive": "silent"},
                           "cal": {"exc": 0.25, "inh": 2, "cap": None, "drive": "silent"}},
             "analysis": {"bin_ms": 1, "max_lag_ms": 50, "early_window_ms": 20,
@@ -187,7 +189,12 @@ def build_report(place_dir: Path, fullgraph_dir: Path) -> dict:
                          "correlation": "Pearson per overlapping addition slice, equal addition mean; earliest peak tie",
                          "early_window": "OUT onset bin through onset+19 inclusive; truncate at addition end",
                          "undefined": "null; zero variance skipped separately at each lag",
-                         "stored_near_window_true_cutoff_ms": [19.1, 20.9]},
+                         "stored_near_window_true_cutoff_ms": [19.1, 19.9],
+                         "stored_near_window_rule": (
+                             "IN in bin t counts if any OUT is in bins [t-19, t]; "
+                             "with 1 ms bins and 0.1 ms steps, OUT-to-IN separations "
+                             "of 19.0 ms or less always count, 20.0 ms or more never "
+                             "count, and only 19.1-19.9 ms depends on bin alignment")},
             "placements": rows, "controls": controls}
 
 

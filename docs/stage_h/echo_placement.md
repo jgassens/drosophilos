@@ -125,12 +125,12 @@ for tag in echo1 out8; do
 done
 ```
 
-Rebuild the inventory locally without running simulations:
+Rebuild the inventory locally from the repository root without running simulations:
 
 ```sh
 python -m drosophilos.bench.h_echo_report \
-  --place-dir /Users/jeremiahgassensmith/programming/drosophilos/data/stage_h/place \
-  --fullgraph-dir /Users/jeremiahgassensmith/programming/drosophilos/data/stage_h/fullgraph \
+  --place-dir data/stage_h/place \
+  --fullgraph-dir data/stage_h/fullgraph \
   --out docs/stage_h/echo_placement.json
 ```
 
@@ -142,7 +142,7 @@ that setting; “not finished” identifies a scheduled trial whose file is abse
 
 | Setting | Carried / designed | Host echo paths | Echo neurons | Published: correct/n; weight / count return | Calibrated: correct/n; weight / count return |
 | --- | --- | --- | --- | --- | --- |
-| w0 | 809/1516 | 1,099,380,131 | 56,543 | not finished (G2 4048871) | 0/50; 12.45% / 4.91% |
+| w0 | 809/1516 | 1,099,380,131 | 56,543 | 0/50; 70.38% / 49.00% | 0/50; 12.45% / 4.91% |
 | out1 | 646/1516 | 406,703,946 | 37,424 | 0/50; 82.52% / 57.13% | 0/50; 5.44% / 3.66% |
 | out2 | 583/1516 | 376,731,713 | 35,609 | not measured | not measured |
 | out4 | 563/1516 | 304,813,484 | 37,345 | not measured | not measured |
@@ -155,8 +155,8 @@ The output penalty reduces structural echo by giving up real wiring: from w0 to
 out8, carried edges fall from 809 to 542 while host echo paths fall from
 1,099,380,131 to 285,033,288 (about 1,099 million to 285 million). This search did
 not find echo-poor wiring that preserves baseline carry and restores computation.
-Every finished live trial is 0/50. The absent published w0 and echo1 files remain
-not finished, not measured failures.
+Every finished live trial, including published w0 (G2 4048871), is 0/50.
+The absent published echo1 file remains not finished, not a measured failure.
 
 The strongest output penalty gives fewer host echo paths than any tested
 self-echo penalty: echo1 has 290,789,986, echo2 has 372,123,843, and echo4 has
@@ -169,6 +169,7 @@ and zero wrong accepted answers; failure often occurs before an answer is accept
 
 | Placement | Surround | Fault | No accept | Timeout | Incomplete |
 | --- | --- | --- | --- | --- | --- |
+| w0 | pub | 22 | 2 | 26 | 0 |
 | w0 | cal | 1 | 49 | 0 | 0 |
 | out1 | pub | 0 | 3 | 37 | 10 |
 | out1 | cal | 2 | 48 | 0 | 0 |
@@ -220,6 +221,7 @@ a tie. The JSON records the entire curve and the number used at every lag.
 
 | Placement | Surround | r(0 ms) | r(1 ms) | r(2 ms) | r(3 ms) | r(5 ms) | r(10 ms) | r(20 ms) | r(30 ms) | r(50 ms) | Peak ms / r | Additions used |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| w0 | pub | 0.6254 | 0.3332 | 0.5262 | 0.4461 | 0.5615 | 0.1702 | 0.6287 | -0.2239 | -0.2017 | 9 / 0.6814 | 50 |
 | w0 | cal | 0.0210 | 0.0180 | 0.0132 | 0.0074 | 0.0199 | 0.0202 | 0.0153 | 0.0121 | 0.0009 | 15 / 0.0251 | 50 |
 | out1 | pub | 0.5113 | 0.5687 | 0.4935 | 0.5798 | 0.5682 | 0.5363 | 0.4094 | 0.2827 | 0.0583 | 3 / 0.5798 | 50 |
 | out1 | cal | 0.2005 | 0.2004 | 0.1639 | 0.1692 | 0.1716 | 0.2036 | 0.1543 | 0.1628 | 0.1656 | 10 / 0.2036 | 50 |
@@ -231,6 +233,7 @@ a tie. The JSON records the entire curve and the number used at every lag.
 
 | Placement | Surround | r(0 ms) | r(1 ms) | r(2 ms) | r(3 ms) | r(5 ms) | r(10 ms) | r(20 ms) | r(30 ms) | r(50 ms) | Peak ms / r | Additions used |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| w0 | pub | 0.5263 | 0.4868 | 0.5055 | 0.5237 | 0.5509 | 0.4663 | 0.5612 | 0.1920 | 0.0088 | 9 / 0.5728 | 50 |
 | w0 | cal | 0.1197 | 0.0649 | 0.0882 | 0.0988 | 0.0925 | 0.0924 | 0.0553 | 0.0483 | 0.0228 | 0 / 0.1197 | 50 |
 | out1 | pub | 0.5985 | 0.6182 | 0.5966 | 0.6228 | 0.6194 | 0.6091 | 0.5255 | 0.4392 | 0.1725 | 3 / 0.6228 | 50 |
 | out1 | cal | 0.4735 | 0.4582 | 0.4263 | 0.4410 | 0.4497 | 0.4827 | 0.4157 | 0.4022 | 0.4123 | 10 / 0.4827 | 50 |
@@ -256,6 +259,7 @@ medians and valid sample counts are also retained in the JSON.
 
 | Placement | Surround | Onset median (min–max), ms | Onsets | Early weight | Whole weight | Early count | Whole count | IN inhibitory weight |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| w0 | pub | 2 (2–3) | 50 | 31.89% | 70.38% | 14.40% | 49.00% | 34.62% |
 | w0 | cal | 7 (7–9) | 50 | 2.19% | 12.45% | 1.36% | 4.91% | 55.89% |
 | out1 | pub | 2 (2–2) | 50 | 27.45% | 82.52% | 17.54% | 57.13% | 36.36% |
 | out1 | cal | 5 (5–7) | 50 | 2.38% | 5.44% | 1.08% | 3.66% | 49.99% |
@@ -280,6 +284,7 @@ nonzero in every millisecond, as the measured zero-bin counts show:
 
 | Placement | Surround | OUT zero bins / all bins | OUT-positive bins | Stored raw peak: weight / count, ms |
 | --- | --- | --- | --- | --- |
+| w0 | pub | 300/60000 | 99.50% | 0 / 0 |
 | w0 | cal | 345/60000 | 99.42% | 11 / 0 |
 | out1 | pub | 301/60000 | 99.50% | 1 / 1 |
 | out1 | cal | 320/58470 | 99.45% | 1 / 0 |
@@ -288,8 +293,9 @@ nonzero in every millisecond, as the measured zero-bin counts show:
 | echo1 | cal | 350/60000 | 99.42% | 0 / 3 |
 
 The stored window is resolved on 1 ms bins. With the simulation's 0.1 ms steps,
-the effective cutoff for an exact event separation varies from 19.1 to 20.9 ms
-with bin alignment; it is not an exact event-level 20 ms threshold. This
+an OUT-to-IN separation of 19.0 ms or less is always counted, 20.0 ms or more
+is never counted, and only 19.1-19.9 ms depends on where the events fall within
+their bins; it is not an exact event-level 20 ms threshold. This
 saturated fraction is retained for the record and is not used to infer timing.
 
 The stored `peak_lag_ms` uses an uncentred dot product summed across additions.
@@ -312,7 +318,7 @@ A small return ratio, even one dominated by inhibition, is insufficient protecti
 
 These results cover region `all`, the listed penalty settings, the two surround
 weight settings, and seed 0. Only w0, out1, out8 and echo1 have scheduled live traces;
-the published w0 and echo1 trials are not finished in this snapshot. The controls
+the published echo1 trial is not finished in this snapshot. The controls
 test 10 additions per condition, except the earlier w0 sealed control with 5;
 they do not establish full live-suite performance. Controls were calibrated and
 silent, so their causal reading is not extended to externally driven surrounds

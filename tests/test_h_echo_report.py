@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -103,3 +104,15 @@ def test_absent_live_files_are_null(tmp_path, monkeypatch):
     main()
     assert output.read_text() == first
     assert json.loads(first) == report
+
+
+def test_source_directories_stay_relative(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    output = Path("report.json")
+    monkeypatch.setattr("sys.argv", ["h_echo_report", "--place-dir", "data/place",
+                                    "--fullgraph-dir", "data/fullgraph", "--out", str(output)])
+    main()
+    expected = {"place": "data/place", "fullgraph": "data/fullgraph"}
+    assert json.loads(output.read_text())["source_directories"] == expected
+    assert build_report(tmp_path / "data/place", tmp_path / "data/fullgraph")[
+        "source_directories"] == expected
