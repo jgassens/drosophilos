@@ -33,7 +33,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-from .model import D_MAX, Params, Topology, broadcast_param
+from .model import D_MAX, ModelRules, Params, Topology, broadcast_param
 from .observe import Observer
 from .profile import Profiler
 
@@ -49,6 +49,7 @@ class FastSim:
         params: Params = Params(),
         n_nodes: int = 1,
         *,
+        rules: ModelRules = ModelRules(),
         V_th=None,
         bias=None,
         gain=1.0,
@@ -69,6 +70,8 @@ class FastSim:
         """``TorchSim``'s constructor plus: ``observer`` (default: a full-trace observer
         transferring every ``observe_every`` steps), ``graph_steps`` (K-step blocks; 0 = one
         eager step at a time), ``delivery`` ("auto" | "sparse" | "scatter")."""
+        rules.require_default("FastSim")
+        self.rules = rules
         self.topo = topo
         self.params = params
         self.B = int(n_nodes)

@@ -97,8 +97,10 @@ For step `s`, in this order, for every node in the batch:
    at `s` is applied at `s` (after threshold) and felt at `s + 1`.
 4. **reset** — for every neuron that spiked in this step: `V_i := V_reset`,
    `r_i := n_ref − 1` where `n_ref = round(t_ref/dt)` (22 for 2.2 ms). Integration is
-   suspended for steps `s+1 … s+n_ref−1` and resumes at step `s + n_ref`, which is exactly
-   when Brian2's `(unless refractory)` with `refractory = t_ref` resumes.
+   suspended for steps `s+1 … s+n_ref−1` and resumes at step `s + n_ref`. This is when
+   Brian2's `(unless refractory)` with `refractory = t_ref` resumes **V** integration.
+   The default project model still decays g and accepts arrivals during that hold;
+   Brian2's annotation on `dg/dt` instead freezes g and suppresses writes to it.
 5. **observe** — optional recording of `V`, `g`, `r` for selected neurons, after reset.
 
 Silenced neurons are removed from step 3(a) as sources and from steps 1–2 as targets of
@@ -135,3 +137,25 @@ Nodes form a batch dimension. Topology (`CSR` of `(j → i, d_ij)` and base quan
 by all nodes; per-node arrays hold state, parameter overrides (`V_th`, `b`, `silenced`, quanta
 overrides), and Profile 3 added synapses. Results for a node must not depend on which other
 nodes share the batch (tested).
+
+## 10. Opt-in integration-rule comparison (RefSim only)
+
+`ModelRules` is a frozen record separate from the biological constants in `Params`.
+The defaults preserve sections 1–9, including their floating-point operation order.
+`TorchSim` and `FastSim` reject every non-default rule with `NotImplementedError`.
+
+| Rule | Default | Opt-in effect |
+| --- | --- | --- |
+| `clear_g_on_spike` | False | Step 4 also sets g to zero, after delivery. |
+| `freeze_g_in_refractory` | False | Step 1 holds g when r>0; step 3 discards synaptic and external arrivals into g for neurons held at step start OR spiking in step 2. Brian2's thresholder marks new spikes refractory before its synapses slot, suppressing writes to `(unless refractory)` variables. |
+| `stim_target` | `"g"` | `"v"` delivers external integer quanta times w_unit and gain directly into V in step 3, only for active neurons. Recurrent synapses still target g. |
+| `stim_disables_refractory` | False | Calling `add_events` registers its targets immediately and permanently for this run with zero refractory period, including before the first event; it also releases an existing hold. |
+
+All four opt-in values together reproduce the relevant Shiu released rules.
+Arrivals discarded on a spike step stay discarded when clearing is off (M2). With
+`clear_g_on_spike` on (including M5), step 4 zeroes g after delivery regardless, so
+the final spike-step g cannot reveal this delivery boundary.
+External amplitude is independent of these rules: 100,000 quanta is 1718.75 mV, whereas Shiu's
+0.275 × 250 mV stimulus is 4000 quanta = 68.75 mV. Neither amplitude is a new default.
+Snapshots include the rules and registered stimulus targets; restoring with different
+rules is refused. Legacy snapshots without these fields mean default rules.
