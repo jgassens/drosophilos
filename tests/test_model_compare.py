@@ -208,3 +208,48 @@ def test_cli_passes_mcns_dir_and_reports_unavailable_real_conditions(tmp_path, m
     missing = [r for r in report["conditions"] if r["fixture"] == "F3_h0"]
     assert len(missing) == 6
     assert all(r["status"] == "not_run" and "PermissionError" in r["reason"] for r in missing)
+
+
+@pytest.mark.parametrize("caches", ["both", "edges_only", "neurons_only", "none"])
+def test_comparison_reads_mcns_without_writing_source(tmp_path, monkeypatch, caches):
+    import pandas as pd
+    from drosophilos.bench import model_compare
+    from drosophilos.connectome import mcns
+    from drosophilos.connectome.mcns_download import path_of
+
+    pd.DataFrame({"bodyId": [10, 20], "superclass": ["cb_intrinsic"] * 2,
+                  "statusLabel": ["Traced"] * 2}).to_feather(path_of("annotations", tmp_path))
+    pd.DataFrame({"body": [10, 20], "consensus_nt": ["acetylcholine", "gaba"],
+                  "predicted_nt": ["acetylcholine", "gaba"],
+                  "predicted_nt_confidence": [.9, .9],
+                  "celltype_predicted_nt": ["acetylcholine", "gaba"]}).to_feather(
+                      path_of("neurotransmitters", tmp_path))
+    pd.DataFrame({"pre": [10], "post": [20], "weight": [70]}).to_feather(
+        path_of("weights", tmp_path))
+    expected = mcns.load_mcns(data_dir=tmp_path)
+    edges = tmp_path / "mcns_v1.0_edges_minsyn1.npz"
+    neurons = tmp_path / "mcns_v1.0_neurons.parquet"
+    if caches in ("none", "neurons_only"):
+        edges.unlink()
+    if caches in ("none", "edges_only"):
+        neurons.unlink()
+    if caches == "both":
+        # Cache hits must work even when no raw data remain.
+        for key in ("annotations", "neurotransmitters", "weights"):
+            path_of(key, tmp_path).unlink()
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+
+    def forbidden_write(*args, **kwargs):
+        pytest.fail("comparison attempted to write a derived MCNS cache")
+
+    monkeypatch.setattr(np, "savez", forbidden_write)
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", forbidden_write)
+    tmp_path.chmod(0o555)
+    try:
+        actual = model_compare.load_mcns(data_dir=tmp_path)
+        assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+    finally:
+        tmp_path.chmod(0o755)
+    pd.testing.assert_frame_equal(actual.neurons, expected.neurons)
+    for field in ("pre", "post", "count"):
+        np.testing.assert_array_equal(getattr(actual, field), getattr(expected, field))

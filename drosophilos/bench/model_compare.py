@@ -14,10 +14,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
+from ..connectome import mcns
 from ..connectome.embed_h0 import Embedding, Policy, Targets, best_embedding, find_embeddings
 from ..connectome.h0_run import Transaction, isolated_topology
-from ..connectome.mcns import MCNS, load_mcns
+from ..connectome.mcns import MCNS
 from ..sim import ModelRules, Params, RefSim, Topology
 
 CONFIGS = {
@@ -32,6 +34,19 @@ PAIR_QUANTA = 2300
 FORCE_QUANTA = 100_000
 SHIU_QUANTA = 4000
 RATES = (2, 10, 50)
+
+
+def load_mcns(*, data_dir: Path) -> MCNS:
+    """Read existing caches or derive in memory, never cache into the source."""
+    cache_path = data_dir / "mcns_v1.0_edges_minsyn1.npz"
+    neurons_path = data_dir / "mcns_v1.0_neurons.parquet"
+    try:
+        # Read directly: cache=True could write if a file disappeared after a check.
+        with np.load(cache_path) as edges:
+            neurons = pd.read_parquet(neurons_path)
+            return MCNS(neurons, edges["pre"], edges["post"], edges["count"], min_syn=1)
+    except FileNotFoundError:
+        return mcns.load_mcns(data_dir=data_dir, cache=False)
 
 
 @dataclass

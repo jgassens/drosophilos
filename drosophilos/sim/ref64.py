@@ -128,8 +128,9 @@ class RefSim:
                 np.add.at(self.ring, (slot, node_arr, neur_arr), q_arr)
         due = self.ring[slot]
         if self.rules.freeze_g_in_refractory:
-            # Brian2 also gates synaptic writes; arrivals during a hold are lost.
-            due = np.where(held, 0, due)
+            # Brian2's thresholder marks new spikes refractory before synapses.
+            # Both existing holds and this step's spikes discard writes to g.
+            due = np.where(held | spk, 0, due)
         g = g + self.w_unit * self.gain * due.astype(np.float64)
         self.ring[slot] = 0
         g[self.silenced] = 0.0

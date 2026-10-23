@@ -147,12 +147,15 @@ The defaults preserve sections 1–9, including their floating-point operation o
 | Rule | Default | Opt-in effect |
 | --- | --- | --- |
 | `clear_g_on_spike` | False | Step 4 also sets g to zero, after delivery. |
-| `freeze_g_in_refractory` | False | Step 1 holds g when r>0; step 3 discards arrivals into g for those held neurons, as Brian2's `(unless refractory)` does. |
+| `freeze_g_in_refractory` | False | Step 1 holds g when r>0; step 3 discards synaptic and external arrivals into g for neurons held at step start OR spiking in step 2. Brian2's thresholder marks new spikes refractory before its synapses slot, suppressing writes to `(unless refractory)` variables. |
 | `stim_target` | `"g"` | `"v"` delivers external integer quanta times w_unit and gain directly into V in step 3, only for active neurons. Recurrent synapses still target g. |
 | `stim_disables_refractory` | False | Calling `add_events` registers its targets immediately and permanently for this run with zero refractory period, including before the first event; it also releases an existing hold. |
 
-All four opt-in values together reproduce the relevant Shiu released rules. External
-amplitude is independent of these rules: 100,000 quanta is 1718.75 mV, whereas Shiu's
+All four opt-in values together reproduce the relevant Shiu released rules.
+Arrivals discarded on a spike step stay discarded when clearing is off (M2). With
+`clear_g_on_spike` on (including M5), step 4 zeroes g after delivery regardless, so
+the final spike-step g cannot reveal this delivery boundary.
+External amplitude is independent of these rules: 100,000 quanta is 1718.75 mV, whereas Shiu's
 0.275 × 250 mV stimulus is 4000 quanta = 68.75 mV. Neither amplitude is a new default.
 Snapshots include the rules and registered stimulus targets; restoring with different
 rules is refused. Legacy snapshots without these fields mean default rules.

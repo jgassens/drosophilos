@@ -47,6 +47,62 @@ or the 0/50 live placed-adder results were stimulation artefacts. Those were who
 runs and are not repeated here. In particular, the silent-surround adder failures cannot
 be attributed to sensory event amplitude by this experiment.
 
+## Review correction relative to 5908413
+
+Freeze-only M2 now rejects synaptic and external arrivals on the postsynaptic
+neuron's own spike step, in addition to arrivals during an existing refractory hold.
+The new Brian2 boundary test was run against the unchanged parent 5908413 before
+fixing ref64: **both cases failed**, with g = **88.35397347 mV** in ref64 versus
+**19.60397347 mV** in Brian2 (an erroneous **+68.75 mV** arrival). Both now pass.
+M5's clear-g reset follows delivery, which hid this boundary in the earlier parity test.
+
+The full bounded campaign was rerun against the same real MCNS directory. **Every
+M0 and M5 condition is exactly unchanged**, verified by equality of the complete
+JSON condition objects. M1/M3/M4, fixture topology hashes, selected bodyIds and the
+F1 factorial appendix are also unchanged. Only M2 measurements change; the following
+list names all 26 changed displayed numbers (deltas use the displayed precision).
+The JSON's `review_correction.changes` additionally lists every changed unrounded
+value, including per-neuron/per-replica arrays, calibration trials and search timing,
+with its path, previous value, corrected value and numeric delta. A `null` delta
+means one endpoint is absent (no spike/latency), rather than a numeric value.
+F1's only unrounded change is a sampled M2 50-Hz calibration trial at 12,499 quanta:
+260 → 247.4 Hz (−12.6 Hz); the selected amplitude and displayed F1 results stay the
+same. The search-time metadata changed from 2.0 to 2.2 s (+0.2 s).
+
+| measurement (M2 only) | published quantity | previous | corrected | delta |
+| --- | --- | --- | --- | --- |
+| P_A: single event, 100 ms / F3_h0 / M2 | spikes | 96 | 98 | +2 |
+| P_A: single event, 100 ms / F3_h0 / M2 | mean Hz/neuron | 64 | 65.33 | +1.33 |
+| P_A: single event, 100 ms / F3_h0 / M2 | last off spike ms | 93* | 92.8* | -0.2 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F2_pair / M2 | spikes | 145.94 | 137.38 | -8.56 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F2_pair / M2 | mean Hz/neuron | 121.62 | 114.48 | -7.14 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F2_pair / M2 | target drive Hz | 107.13 | 104.6 | -2.53 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F3_h0 / M2 | spikes | 192.6 | 189.66 | -2.94 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F3_h0 / M2 | mean Hz/neuron | 21.4 | 21.07 | -0.33 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F3_h0 / M2 | target drive Hz | 108.07 | 111.4 | +3.33 |
+| P_B: 2-Hz drive, 300 ms on + 300 ms off / F3_h0 / M2 | last off spike ms | 299.9* | 299.8* | -0.1 |
+| Released stimulus amplitude control / F3_h0 / M2 | 68.75-mV target drive Hz | 83.67 | 81.4 | -2.27 |
+| Released stimulus amplitude control / F3_h0 / M2 | spikes in 600 ms | 123 | 154.66 | +31.66 |
+| P_C: probe responsiveness / F2_pair / M2 | spikes | 208.88 | 197.58 | -11.3 |
+| P_C: probe responsiveness / F2_pair / M2 | mean Hz/neuron | 174.07 | 164.65 | -9.42 |
+| P_C: probe responsiveness / F2_pair / M2 | probe response fraction | 0.68 | 0.64 | -0.04 |
+| P_C: probe responsiveness / F2_pair / M2 | latency ms | 0.29 | 0.17 | -0.12 |
+| P_C: probe responsiveness / F3_h0 / M2 | spikes | 283.18 | 284.1 | +0.92 |
+| P_C: probe responsiveness / F3_h0 / M2 | mean Hz/neuron | 31.46 | 31.57 | +0.11 |
+| P_C: probe responsiveness / F3_h0 / M2 | probe response fraction | 0.52 | 0.58 | +0.06 |
+| P_C: probe responsiveness / F3_h0 / M2 | latency ms | 0.1 | 0.18 | +0.08 |
+| P_D: F1-matched 10-Hz input / F3_h0 / M2 | actual target Hz | 283 | 277.5 | -5.5 |
+| P_D: F1-matched 10-Hz input / F3_h0 / M2 | spikes / 1.3 s | 773 | 734 | -39 |
+| P_D: F1-matched 10-Hz input / F3_h0 / M2 | max abs(g) at stop mV | 254.7 | 187.36 | -67.34 |
+| P_D: F1-matched 10-Hz input / F3_h0 / M2 | last off spike ms | 299* | 299.6* | +0.6 |
+| P_D: matched-amplitude probe responsiveness / F3_h0 / M2 | F1-matched probe fraction | 0.3 | 1 | +0.7 |
+| P_D: matched-amplitude probe responsiveness / F3_h0 / M2 | F1-matched latency ms | 1.53 | 0.76 | -0.77 |
+
+The comparison now reads existing NPZ/Parquet caches directly and falls back to
+`load_mcns(cache=False)` when either is missing. It does not create derived files
+in `--mcns-dir`; cache-hit and both partial-cache/missing-cache paths are tested
+with cache writes forbidden and the source directory read-only.
+
 ## Configurations and fixtures
 
 All constants are the unchanged `Params` defaults: dt 0.1 ms, E_L/reset −52 mV,
@@ -139,7 +195,7 @@ calibration trials.
 | F2_pair | M5_shiu | 1 | 5 | 0 | 0 |
 | F3_h0 | M0_current | 49 | 32.67 | 1718.75 | 94.8* |
 | F3_h0 | M1_clear_g | 18 | 12 | 1718.75 | 90.1* |
-| F3_h0 | M2_freeze_g | 96 | 64 | 1718.75 | 93* |
+| F3_h0 | M2_freeze_g | 98 | 65.33 | 1718.75 | 92.8* |
 | F3_h0 | M3_stim_v | 36 | 24 | 0 | 93.1* |
 | F3_h0 | M4_stim_norefrac | 103 | 68.67 | 1718.75 | 38.5 |
 | F3_h0 | M5_shiu | 18 | 12 | 0 | 90.1* |
@@ -160,13 +216,13 @@ clearing g produces 48. V stimulation leaves no synaptic reservoir on F1.
 | F1_single | M5_shiu | 0.6 | 1 | 2 | 0 | — |
 | F2_pair | M0_current | 48.86 | 40.72 | 40 | 645.07 | 299.7* |
 | F2_pair | M1_clear_g | 0.6 | 0.5 | 2 | 21.7 | — |
-| F2_pair | M2_freeze_g | 145.94 | 121.62 | 107.13 | 1618.66 | 299.9* |
+| F2_pair | M2_freeze_g | 137.38 | 114.48 | 104.6 | 1618.66 | 299.9* |
 | F2_pair | M3_stim_v | 0.6 | 0.5 | 2 | 21.7 | — |
 | F2_pair | M4_stim_norefrac | 149 | 124.17 | 179.67 | 682.3 | 299.9* |
 | F2_pair | M5_shiu | 0.6 | 0.5 | 2 | 21.7 | — |
 | F3_h0 | M0_current | 121.74 | 13.53 | 74.53 | 645.07 | 299.9* |
 | F3_h0 | M1_clear_g | 51.24 | 5.69 | 29.33 | 62.24 | 299.8* |
-| F3_h0 | M2_freeze_g | 192.6 | 21.4 | 108.07 | 1618.66 | 299.9* |
+| F3_h0 | M2_freeze_g | 189.66 | 21.07 | 111.4 | 1618.66 | 299.8* |
 | F3_h0 | M3_stim_v | 112.36 | 12.48 | 60.4 | 102.13 | 299.7* |
 | F3_h0 | M4_stim_norefrac | 61.8 | 6.87 | 111.8 | 887.26 | 33.6 |
 | F3_h0 | M5_shiu | 51.24 | 5.69 | 29.33 | 62.24 | 299.8* |
@@ -196,7 +252,7 @@ is the released-stimulus comparison; M5 at 1718.75 mV isolates rules at project 
 | F2_pair | M5_shiu | 2 | 0.6 | — |
 | F3_h0 | M0_current | 60.53 | 112.5 | 299.8* |
 | F3_h0 | M1_clear_g | 28.67 | 50.88 | 299.8* |
-| F3_h0 | M2_freeze_g | 83.67 | 123 | 299.9* |
+| F3_h0 | M2_freeze_g | 81.4 | 154.66 | 299.9* |
 | F3_h0 | M3_stim_v | 60.4 | 112.36 | 299.7* |
 | F3_h0 | M4_stim_norefrac | 44.47 | 36 | 62.1 |
 | F3_h0 | M5_shiu | 29.33 | 51.24 | 299.8* |
@@ -216,13 +272,13 @@ include the probe and all 600 ms; the latency averages only responding replicas.
 | F1_single | M5_shiu | 1.6 | 2.67 | 1 | 0.1 | 50.1 |
 | F2_pair | M0_current | 80.94 | 67.45 | 1 | 0.16 | 299.9* |
 | F2_pair | M1_clear_g | 1.6 | 1.33 | 1 | 0.1 | 50.1 |
-| F2_pair | M2_freeze_g | 208.88 | 174.07 | 0.68 | 0.29 | 299.9* |
+| F2_pair | M2_freeze_g | 197.58 | 164.65 | 0.64 | 0.17 | 299.9* |
 | F2_pair | M3_stim_v | 1.6 | 1.33 | 1 | 0.1 | 50.1 |
 | F2_pair | M4_stim_norefrac | 257.7 | 214.75 | 1 | 0.1 | 299.6* |
 | F2_pair | M5_shiu | 1.6 | 1.33 | 1 | 0.1 | 50.1 |
 | F3_h0 | M0_current | 171.46 | 19.05 | 1 | 0.47 | 299.8* |
 | F3_h0 | M1_clear_g | 71.1 | 7.9 | 0.98 | 0.26 | 299.2* |
-| F3_h0 | M2_freeze_g | 283.18 | 31.46 | 0.52 | 0.1 | 299.9* |
+| F3_h0 | M2_freeze_g | 284.1 | 31.57 | 0.58 | 0.18 | 299.9* |
 | F3_h0 | M3_stim_v | 154.12 | 17.12 | 0.72 | 0.1 | 299.9* |
 | F3_h0 | M4_stim_norefrac | 164.46 | 18.27 | 1 | 0.13 | 90.8 |
 | F3_h0 | M5_shiu | 71.08 | 7.9 | 0.98 | 0.1 | 299.7* |
@@ -314,7 +370,7 @@ actual recurrent target rate. The 2- and 50-Hz controls are also retained in the
 | F2_pair | M5_shiu | 410 | 10 | 10 | 21.7 | — |
 | F3_h0 | M0_current | 2986 | 206.5 | 542.9 | 117.49 | 299.9* |
 | F3_h0 | M1_clear_g | 3000 | 91.5 | 239.3 | 61 | 299.5* |
-| F3_h0 | M2_freeze_g | 2979 | 283 | 773 | 254.7 | 299* |
+| F3_h0 | M2_freeze_g | 2979 | 277.5 | 734 | 187.36 | 299.6* |
 | F3_h0 | M3_stim_v | 410 | 206.4 | 542.5 | 104.47 | 299.5* |
 | F3_h0 | M4_stim_norefrac | 2981 | 130 | 315 | 19.03 | — |
 | F3_h0 | M5_shiu | 410 | 95.5 | 242.4 | 56.31 | 299.7* |
@@ -345,7 +401,7 @@ subthreshold amplitude does not demonstrate loss of responsiveness at matched fi
 | F2_pair | M5_shiu | 1 | 0.1 | 1 | 0.1 |
 | F3_h0 | M0_current | 0 | — | 1 | 2.1 |
 | F3_h0 | M1_clear_g | 0 | — | 1 | 4.18 |
-| F3_h0 | M2_freeze_g | 0 | — | 0.3 | 1.53 |
+| F3_h0 | M2_freeze_g | 0 | — | 1 | 0.76 |
 | F3_h0 | M3_stim_v | 0.1 | 0.1 | 0.5 | 0.1 |
 | F3_h0 | M4_stim_norefrac | 0 | — | 1 | 4.8 |
 | F3_h0 | M5_shiu | 0.1 | 0.1 | 1 | 0.1 |
