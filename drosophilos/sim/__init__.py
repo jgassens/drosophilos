@@ -1,6 +1,6 @@
 """Spiking simulators. `schedule.md` in this directory is the normative model."""
 
-from .model import D_MAX, QUANTA_PER_SYNAPSE, Params, Topology
+from .model import D_MAX, QUANTA_PER_SYNAPSE, ModelRules, Params, Topology
 from .trace import SpikeTrace
 from .ref64 import RefSim
 from .lif_torch import TorchSim
@@ -11,6 +11,7 @@ __all__ = [
     "D_MAX",
     "QUANTA_PER_SYNAPSE",
     "Params",
+    "ModelRules",
     "Topology",
     "SpikeTrace",
     "RefSim",

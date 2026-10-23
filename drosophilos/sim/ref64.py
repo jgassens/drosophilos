@@ -11,7 +11,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from .model import D_MAX, Params, Topology, broadcast_param
+from .model import D_MAX, ModelRules, Params, Topology, broadcast_param
 from .trace import SpikeTrace
 
 
@@ -22,6 +22,7 @@ class RefSim:
         params: Params = Params(),
         n_nodes: int = 1,
         *,
+        rules: ModelRules = ModelRules(),
         V_th=None,
         bias=None,
         gain=1.0,
@@ -31,6 +32,7 @@ class RefSim:
     ):
         self.topo = topo
         self.params = params
+        self.rules = rules
         self.B = int(n_nodes)
         self.n = int(topo.n)
         self.L = D_MAX + 1
@@ -55,6 +57,7 @@ class RefSim:
         self.V = np.full((B, n), params.E_L, dtype=np.float64)
         self.g = np.zeros((B, n), dtype=np.float64)
         self.r = np.zeros((B, n), dtype=np.int32)
+        self.stimulated = np.zeros((B, n), dtype=bool)
         self.ring = np.zeros((self.L, B, n), dtype=np.int64)
         self.step_index = 0
 
@@ -76,6 +79,11 @@ class RefSim:
             raise ValueError("steps, neurons, quanta must have equal length")
         if len(steps) and (steps.min() < self.step_index):
             raise ValueError("cannot schedule events in the past")
+        if self.rules.stim_disables_refractory:
+            # Shiu sets rfc=0 on input targets before the run. Scheduling registers
+            # those targets immediately, including when their first event is later.
+            self.stimulated[node, neurons] = True
+            self.r[node, neurons] = 0
         for s in np.unique(steps):
             m = steps == s
             self._events[int(s)].append((np.full(m.sum(), node, np.int64), neurons[m], quanta[m]))
@@ -92,7 +100,7 @@ class RefSim:
         Vn = P.E_L + self.bias + (V - P.E_L - self.bias) * self.a + g * self.k
         V = np.where(active, Vn, V)
         V[held] = P.V_reset
-        g = g * self.c
+        g = np.where(held, g, g * self.c) if self.rules.freeze_g_in_refractory else g * self.c
         V[self.silenced] = P.E_L
         g[self.silenced] = 0.0
         r = r.copy()
@@ -114,16 +122,30 @@ class RefSim:
                 q = self.topo.quanta[syn] if self.quanta is None else self.quanta[b_rep, syn]
                 at = (s + self.topo.delay[syn]) % self.L
                 np.add.at(self.ring, (at, b_rep, self.topo.dst[syn]), q.astype(np.int64))
-        for node_arr, neur_arr, q_arr in self._events.pop(s, ()):
-            np.add.at(self.ring, (slot, node_arr, neur_arr), q_arr)
+        events = self._events.pop(s, ())
+        if self.rules.stim_target == "g":
+            for node_arr, neur_arr, q_arr in events:
+                np.add.at(self.ring, (slot, node_arr, neur_arr), q_arr)
         due = self.ring[slot]
+        if self.rules.freeze_g_in_refractory:
+            # Brian2 also gates synaptic writes; arrivals during a hold are lost.
+            due = np.where(held, 0, due)
         g = g + self.w_unit * self.gain * due.astype(np.float64)
         self.ring[slot] = 0
         g[self.silenced] = 0.0
+        if self.rules.stim_target == "v":
+            external = np.zeros_like(due)
+            for node_arr, neur_arr, q_arr in events:
+                np.add.at(external, (node_arr, neur_arr), q_arr)
+            V += np.where(active, self.w_unit * self.gain * external.astype(np.float64), 0.0)
 
         # 4. reset
         V[spk] = P.V_reset
         r[spk] = self.n_ref - 1
+        if self.rules.clear_g_on_spike:
+            g[spk] = 0.0
+        if self.rules.stim_disables_refractory:
+            r[self.stimulated] = 0
 
         # 5. observe
         self.V, self.g, self.r = V, g, r
@@ -167,6 +189,8 @@ class RefSim:
     def snapshot(self) -> dict:
         return {
             "step_index": self.step_index,
+            "rules": self.rules,
+            "stimulated": self.stimulated.copy(),
             "V": self.V.copy(),
             "g": self.g.copy(),
             "r": self.r.copy(),
@@ -180,6 +204,9 @@ class RefSim:
         }
 
     def restore(self, snap: dict) -> None:
+        if snap.get("rules", ModelRules()) != self.rules:
+            raise ValueError("snapshot ModelRules differ from this simulator")
+        self.stimulated = snap.get("stimulated", np.zeros_like(self.stimulated)).copy()
         self.step_index = int(snap["step_index"])
         self.V = snap["V"].copy()
         self.g = snap["g"].copy()

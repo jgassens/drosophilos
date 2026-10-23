@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
@@ -12,6 +13,29 @@ import numpy as np
 D_MAX = 100
 #: One anatomical synapse expressed in integer weight quanta (schedule.md §4).
 QUANTA_PER_SYNAPSE = 16
+
+
+@dataclass(frozen=True)
+class ModelRules:
+    """Integration choices, separate from the versioned biological constants."""
+
+    clear_g_on_spike: bool = False
+    freeze_g_in_refractory: bool = False
+    stim_target: Literal["g", "v"] = "g"
+    stim_disables_refractory: bool = False
+
+    def __post_init__(self):
+        if self.stim_target not in ("g", "v"):
+            raise ValueError("stim_target must be 'g' or 'v'")
+
+    def require_default(self, backend: str) -> None:
+        changed = [f.name for f in dataclasses.fields(self)
+                   if getattr(self, f.name) != getattr(ModelRules(), f.name)]
+        if changed:
+            raise NotImplementedError(
+                f"{backend} supports only default ModelRules; non-default "
+                f"{', '.join(changed)} requires RefSim"
+            )
 
 
 @dataclass(frozen=True)

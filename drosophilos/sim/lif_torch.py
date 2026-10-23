@@ -12,7 +12,7 @@ from collections import defaultdict
 import numpy as np
 import torch
 
-from .model import D_MAX, Params, Topology, broadcast_param
+from .model import D_MAX, ModelRules, Params, Topology, broadcast_param
 from .profile import Profiler
 from .trace import SpikeTrace
 
@@ -24,6 +24,7 @@ class TorchSim:
         params: Params = Params(),
         n_nodes: int = 1,
         *,
+        rules: ModelRules = ModelRules(),
         V_th=None,
         bias=None,
         gain=1.0,
@@ -37,6 +38,8 @@ class TorchSim:
         stray_seed: int | None = None,
         profiler: Profiler | None = None,
     ):
+        rules.require_default("TorchSim")
+        self.rules = rules
         self.topo = topo
         self.params = params
         self.B = int(n_nodes)
