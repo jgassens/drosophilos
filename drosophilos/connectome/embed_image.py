@@ -440,9 +440,12 @@ def _scale_surround(base: Topology, quanta: np.ndarray, eligible: np.ndarray,
 
 @dataclass(frozen=True)
 class _AttributionInput:
+    """Internal loaded scores; callers should obtain these through `load_attribution`."""
+
     path: Path
     recorded_rules: ModelRules | None
     arrays: dict[str, np.ndarray]
+    admitted_rules: ModelRules | None = None  # Run rules at load time, not file provenance.
 
 
 def load_attribution(path: Path | _AttributionInput, rules: ModelRules) -> _AttributionInput:
@@ -450,6 +453,7 @@ def load_attribution(path: Path | _AttributionInput, rules: ModelRules) -> _Attr
 
     The CLI loads before MCNS so bad provenance fails cheaply. Topology consumers use
     this same loader, including when handed the CLI's already loaded scores.
+    Unknown provenance warns on file load and permits reuse only under the admitted rules.
     """
     if isinstance(path, _AttributionInput):
         loaded = path
@@ -472,11 +476,19 @@ def load_attribution(path: Path | _AttributionInput, rules: ModelRules) -> _Attr
                     raise ValueError(f"Invalid attribution model_rules metadata in {path}: {recorded!r}")
                 recorded_rules = ModelRules(**recorded)
             arrays = {key: saved[key] for key in ("pre_bodyId", "post_bodyId", "score") if key in saved}
-        loaded = _AttributionInput(Path(path), recorded_rules, arrays)
+        loaded = _AttributionInput(Path(path), recorded_rules, arrays, admitted_rules=rules)
     if loaded.recorded_rules is not None and loaded.recorded_rules != rules:
         raise ValueError(f"Attribution model rules mismatch in {loaded.path}: "
                          f"recorded rules {dataclasses.asdict(loaded.recorded_rules)}; "
                          f"current run rules {dataclasses.asdict(rules)}")
+    if loaded.recorded_rules is None:
+        if loaded.admitted_rules is None:
+            raise ValueError(f"Attribution provenance is unknown in {loaded.path}: "
+                             "input has not been admitted under any rules; use load_attribution with a file path")
+        if loaded.admitted_rules != rules:
+            raise ValueError(f"Attribution model rules mismatch in {loaded.path}: provenance is unknown; "
+                             f"admitted rules {dataclasses.asdict(loaded.admitted_rules)}; "
+                             f"current run rules {dataclasses.asdict(rules)}")
     return loaded
 
 

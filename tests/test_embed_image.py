@@ -923,3 +923,63 @@ def test_full_graph_attribution_malformed_rules(tmp_path, metadata):
         full_graph_topology(m, Params(), image, attribution_in=path, cut_inputs_by="attribution",
                             cut_inputs_frac=.25)
     assert str(path) in str(exc.value)
+
+
+@pytest.mark.parametrize("rules_kwargs", [{}, {"clear_g_on_spike": True, "freeze_g_in_refractory": True,
+                                             "stim_target": "v", "stim_disables_refractory": True}])
+def test_full_graph_rejects_constructed_unlabelled_attribution(tmp_path, rules_kwargs):
+    from drosophilos.connectome.embed_image import _AttributionInput, full_graph_topology
+    from drosophilos.sim.model import ModelRules
+
+    m, image, path = _attribution_rules_fixture(tmp_path, {})
+    with np.load(path, allow_pickle=False) as saved:
+        loaded = _AttributionInput(path, None, {key: saved[key] for key in saved.files})
+    with pytest.raises(ValueError, match="provenance is unknown") as exc:
+        full_graph_topology(m, Params(), image, attribution_in=loaded, cut_inputs_by="attribution",
+                            cut_inputs_frac=.25, rules=ModelRules(**rules_kwargs))
+    assert str(path) in str(exc.value)
+    assert "load_attribution" in str(exc.value)
+
+
+@pytest.mark.parametrize("admit_shiu", [False, True])
+@pytest.mark.parametrize("fraction", [0, .25])
+def test_full_graph_rejects_legacy_attribution_reused_across_rules(tmp_path, recwarn, admit_shiu, fraction):
+    from dataclasses import asdict
+    from drosophilos.connectome.embed_image import full_graph_topology, load_attribution
+    from drosophilos.sim.model import ModelRules
+
+    current, shiu = ModelRules(), ModelRules(True, True, "v", True)
+    admitted_rules, run_rules = (shiu, current) if admit_shiu else (current, shiu)
+    m, image, path = _attribution_rules_fixture(tmp_path, {})
+    loaded = load_attribution(path, admitted_rules)
+    assert loaded.recorded_rules is None
+    assert len(recwarn.list) == 1
+    with pytest.raises(ValueError, match="model rules mismatch") as exc:
+        full_graph_topology(m, Params(), image, attribution_in=loaded, cut_inputs_by="attribution",
+                            cut_inputs_frac=fraction, rules=run_rules)
+    message = str(exc.value)
+    assert str(path) in message
+    assert "provenance is unknown" in message
+    assert f"admitted rules {asdict(admitted_rules)}" in message
+    assert f"current run rules {asdict(run_rules)}" in message
+    assert len(recwarn.list) == 1
+
+
+@pytest.mark.parametrize("shiu", [False, True])
+def test_full_graph_legacy_attribution_reuse_warns_only_on_load(tmp_path, recwarn, shiu):
+    from drosophilos.connectome.embed_image import full_graph_topology, load_attribution
+    from drosophilos.sim.model import ModelRules
+
+    rules = ModelRules(True, True, "v", True) if shiu else ModelRules()
+    m, image, path = _attribution_rules_fixture(tmp_path, {})
+    loaded = load_attribution(path, rules)
+    assert len(recwarn.list) == 1
+    assert "provenance is unknown" in str(recwarn.list[0].message)
+    for fraction in (.25, 1):
+        # Equal rule values from a separate object must also be compatible.
+        reused = load_attribution(loaded, ModelRules(**vars(rules)))
+        fg = full_graph_topology(m, Params(), image, attribution_in=reused, cut_inputs_by="attribution",
+                                 cut_inputs_frac=fraction, rules=rules)
+        assert fg.counts["inputs_cut_edges"] >= 1
+        assert _edge_weights(fg.topology)[5, 0] == 0
+    assert len(recwarn.list) == 1
