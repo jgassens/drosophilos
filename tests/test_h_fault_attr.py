@@ -1,18 +1,19 @@
 """Fault attribution on tiny synthetic circuits only; never load real MCNS data."""
 
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from test_embed_image import _placed_latch_relay
 
-from drosophilos.bench.h_fault_attr import IncomingAttribution, failure_point
+from drosophilos.bench.h_fault_attr import IncomingAttribution, failure_point, validate_attribution_rules
 from drosophilos.connectome.embed_image import build_image, full_graph_topology
 from drosophilos.connectome.mcns import MCNS
 from drosophilos.protocol.handshake import build_channel
 from drosophilos.protocol.run import TxRecord
-from drosophilos.sim.model import Params
+from drosophilos.sim.model import ModelRules, Params
 from drosophilos.sim.ref64 import RefSim
 from drosophilos.sim.trace import SpikeTrace
 
@@ -44,6 +45,36 @@ def boundary_fixture():
     image = build_image(net, m, pl, policy)
     fg = full_graph_topology(m, params, image)
     return m, fg, net.roles, params, (a, b, c, unused), (u, v)
+
+
+@pytest.mark.parametrize("changes", [{}, {"clear_g_on_spike": True},
+                                   {"freeze_g_in_refractory": True}, {"stim_target": "v"},
+                                   {"stim_disables_refractory": True}])
+def test_saved_rule_values_round_trip_and_each_switch_is_checked(tmp_path, changes):
+    m, fg, roles, params, _, _ = boundary_fixture()
+    rules = ModelRules(**changes)
+    attr = IncomingAttribution(m, fg, roles, 2, params, rules=rules)
+    path = tmp_path / "scores.npz"
+    attr.save(path)
+    with np.load(path, allow_pickle=False) as saved:
+        assert saved["model_rules"].shape == ()
+        assert json.loads(saved["model_rules"].item()) == asdict(rules)
+        assert saved["score"].tolist() == attr.score.tolist()
+    validate_attribution_rules(path, rules)
+    if changes:
+        with pytest.raises(ValueError, match="model rules mismatch") as exc:
+            validate_attribution_rules(path, ModelRules())
+        assert str(asdict(rules)) in str(exc.value)
+        assert str(asdict(ModelRules())) in str(exc.value)
+
+
+@pytest.mark.parametrize("metadata", ["not JSON", "{}", "null",
+                                      json.dumps(asdict(ModelRules()) | {"clear_g_on_spike": 1})])
+def test_malformed_recorded_rules_are_rejected(tmp_path, metadata):
+    path = tmp_path / "scores.npz"
+    np.savez_compressed(path, model_rules=metadata)
+    with pytest.raises(ValueError, match="Invalid attribution model_rules metadata"):
+        validate_attribution_rules(path, ModelRules())
 
 
 def test_scores_only_delivered_in_window_and_aggregate_types_once_per_failure(tmp_path):

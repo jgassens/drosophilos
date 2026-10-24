@@ -20,7 +20,7 @@ from ..connectome import mcns_download
 from ..connectome.embed_image import (Image, full_graph_topology, surround_events,
                                       surround_populations, validate_surround_settings)
 from ..connectome.mcns import MCNS, load_mcns
-from ..sim.model import Params, Topology
+from ..sim.model import ModelRules, Params, Topology
 from ..sim.ref64 import RefSim
 
 MCNS_NEURONS = 166_700
@@ -31,6 +31,13 @@ REST_MS = 200
 POINT_RATE_HZ = 213
 P4_OFF_MS = 200
 P4_SEED = 0
+
+# Shared by the two whole-brain CLIs. Keep the values explicit: shiu is report M5.
+MODEL_RULE_PRESETS = {
+    "current": ModelRules(),
+    "shiu": ModelRules(clear_g_on_spike=True, freeze_g_in_refractory=True,
+                       stim_target="v", stim_disables_refractory=True),
+}
 
 
 def parse_grid(value: str) -> list[dict]:
@@ -163,14 +170,15 @@ class ActivityMetrics:
 
 def simulate_protocol(topology: Topology, params: Params, *, drive_ms: int, total_ms: int,
                       events=None, sources=(), superclasses=None, driven_sensory=(),
-                      readout_neurons=(), readout_groups=None) -> dict:
+                      readout_neurons=(), readout_groups=None,
+                      rules: ModelRules = ModelRules()) -> dict:
     """Run fresh, reducing and dropping trace batches each step.
 
     Point sources are clamped to one spike on each rounded 1/213-s tick during drive.
     Clearing source current and resetting voltage between ticks prevents the very large
     H0 forcing pulse from generating extra source spikes. After drive they evolve freely.
     """
-    sim = RefSim(topology, params)
+    sim = RefSim(topology, params, rules=rules)
     metrics = ActivityMetrics(topology.n, params, drive_ms, total_ms, driven_sensory)
     if events is not None and len(events[0]):
         sim.add_events(0, *events)
@@ -237,7 +245,8 @@ def p4_populations(m: MCNS) -> tuple[dict[str | None, np.ndarray], np.ndarray, d
 
 
 def responsiveness_protocol(m: MCNS, topology: Topology, params: Params, *,
-                            rate: float = 100, drive_ms: int = 300) -> dict:
+                            rate: float = 100, drive_ms: int = 300,
+                            rules: ModelRules = ModelRules()) -> dict:
     """P4: each labellar-bristle type, then all together; no other external drive."""
     populations, mn9, groups = p4_populations(m)
     drives = []
@@ -247,7 +256,7 @@ def responsiveness_protocol(m: MCNS, topology: Topology, params: Params, *,
         result = simulate_protocol(topology, params, drive_ms=drive_ms,
                                    total_ms=drive_ms + P4_OFF_MS, events=events,
                                    driven_sensory=sensory, readout_neurons=mn9,
-                                   readout_groups=groups)
+                                   readout_groups=groups, rules=rules)
         drives.append({"type": label, "driven_neurons": int(len(sensory)),
                        "forcing_events": int(len(events[0])),
                        "mn9": [{"body_id": int(body), **counts}
@@ -269,13 +278,15 @@ def responsiveness_protocol(m: MCNS, topology: Topology, params: Params, *,
 def calibrate_config(m: MCNS, base: Topology, params: Params, config: dict, *, rate: float = 2,
                      n_sources: int = 1, seeds=(0, 1, 2), sensory_seed: int = 0,
                      p4: bool = False, p4_only: bool = False,
-                     p4_rate: float = 100, p4_ms: int = 300) -> dict:
+                     p4_rate: float = 100, p4_ms: int = 300,
+                     rules: ModelRules = ModelRules()) -> dict:
     fg = full_graph_topology(m, params, empty_image(), base=base, **config)
     record = {"schema": "surround_calibration_v1", "settings": config, "connectome": m.version,
-              "params": dataclasses.asdict(params), "full_graph_counts": fg.counts}
+              "params": dataclasses.asdict(params), "full_graph_counts": fg.counts,
+              "model_rules": dataclasses.asdict(rules)}
     if p4 or p4_only:
         record["P4_responsiveness"] = responsiveness_protocol(m, fg.topology, params,
-                                                            rate=p4_rate, drive_ms=p4_ms)
+                                                            rate=p4_rate, drive_ms=p4_ms, rules=rules)
     if p4_only:
         return record
     sensory = surround_populations(m)["sensory"]
@@ -286,18 +297,18 @@ def calibrate_config(m: MCNS, base: Topology, params: Params, config: dict, *, r
                              np.random.default_rng(sensory_seed), rate_hz=rate)
     p1 = simulate_protocol(fg.topology, params, drive_ms=DRIVE_MS, total_ms=DRIVE_MS + OFF_MS,
                            events=events, superclasses=m.neurons["superclass"].to_numpy(),
-                           driven_sensory=sensory)
+                           driven_sensory=sensory, rules=rules)
     p1.update(seed=sensory_seed, rate_hz=rate, sensory_neurons=int(len(sensory)),
               forcing_events=int(len(events[0])))
     p2 = []
     for seed in seeds:
         sources = np.random.default_rng(seed).choice(candidates, n_sources, replace=False)
         result = simulate_protocol(fg.topology, params, drive_ms=DRIVE_MS, total_ms=DRIVE_MS + OFF_MS,
-                                    sources=sources)
+                                    sources=sources, rules=rules)
         result.update(seed=int(seed), source_body_ids=m.bodies_of(sources).astype(int).tolist(),
                       source_rate_hz=POINT_RATE_HZ)
         p2.append(result)
-    p3 = simulate_protocol(fg.topology, params, drive_ms=0, total_ms=REST_MS)
+    p3 = simulate_protocol(fg.topology, params, drive_ms=0, total_ms=REST_MS, rules=rules)
     p3["any_activity"] = bool(p3["total_spikes"])
     record.update(P1_sensory=p1, P2_point_sources=p2, P3_rest=p3)
     return record
@@ -305,6 +316,8 @@ def calibrate_config(m: MCNS, base: Topology, params: Params, config: dict, *, r
 
 def parse(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--model-rules", choices=tuple(MODEL_RULE_PRESETS), default="current",
+                        help="integration rules: historical current (default) or released Shiu M5")
     parser.add_argument("--grid", default="exc=1;inh=1;cap=none",
                         help="Cartesian axes, e.g. 'exc=1,0.5;inh=1,2;cap=none,500'")
     parser.add_argument("--rate", type=float, default=2, help="P1 sensory drive Hz")
@@ -337,6 +350,7 @@ def parse(argv=None):
 def run(args) -> int:
     """Load MCNS and its anatomical topology once; stream a grid to disk, flushing per config."""
     params = Params()
+    rules = MODEL_RULE_PRESETS[args.model_rules]
     m = load_mcns()
     base = m.topology(params)
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -345,7 +359,7 @@ def run(args) -> int:
             record = calibrate_config(m, base, params, config, rate=args.rate, n_sources=args.n_sources,
                                       seeds=args.seeds, sensory_seed=args.sensory_seed,
                                       p4=args.p4, p4_only=args.p4_only,
-                                      p4_rate=args.p4_rate, p4_ms=args.p4_ms)
+                                      p4_rate=args.p4_rate, p4_ms=args.p4_ms, rules=rules)
             out.write(json.dumps(record, separators=(",", ":"), allow_nan=False) + "\n")
             out.flush()
             print(f"[surround-calib] {index + 1}/{len(args.configs)} {config}", flush=True)
