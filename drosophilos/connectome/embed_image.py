@@ -46,12 +46,13 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 import math
 from pathlib import Path
+import warnings
 
 import numpy as np
 import scipy.sparse as sp
 
 from ..lib.netlist import Netlist
-from ..sim.model import QUANTA_PER_SYNAPSE, Params, Topology
+from ..sim.model import QUANTA_PER_SYNAPSE, ModelRules, Params, Topology
 from ..sim.ref64 import RefSim
 from ..sim.trace import SpikeTrace
 from .embed_h0 import Policy
@@ -437,13 +438,55 @@ def _scale_surround(base: Topology, quanta: np.ndarray, eligible: np.ndarray,
             "surround_rounding": "nearest integer quantum, ties to even"}
 
 
+@dataclass(frozen=True)
+class _AttributionInput:
+    path: Path
+    recorded_rules: ModelRules | None
+    arrays: dict[str, np.ndarray]
+
+
+def load_attribution(path: Path | _AttributionInput, rules: ModelRules) -> _AttributionInput:
+    """Read and validate scores once; reuse a loaded input only with compatible rules.
+
+    The CLI loads before MCNS so bad provenance fails cheaply. Topology consumers use
+    this same loader, including when handed the CLI's already loaded scores.
+    """
+    if isinstance(path, _AttributionInput):
+        loaded = path
+    else:
+        with np.load(path, allow_pickle=False) as saved:
+            recorded_rules = None
+            if "model_rules" not in saved:
+                warnings.warn(f"Attribution file {path} has no model_rules metadata; provenance is unknown "
+                              "and compatibility with the current run cannot be checked.",
+                              RuntimeWarning, stacklevel=2)
+            else:
+                try:
+                    recorded = json.loads(saved["model_rules"].item())
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f"Invalid attribution model_rules metadata in {path}") from exc
+                expected = dataclasses.asdict(rules)
+                if (not isinstance(recorded, dict) or recorded.keys() != expected.keys()
+                        or any(type(recorded[key]) is not type(value) for key, value in expected.items())
+                        or recorded["stim_target"] not in ("g", "v")):
+                    raise ValueError(f"Invalid attribution model_rules metadata in {path}: {recorded!r}")
+                recorded_rules = ModelRules(**recorded)
+            arrays = {key: saved[key] for key in ("pre_bodyId", "post_bodyId", "score") if key in saved}
+        loaded = _AttributionInput(Path(path), recorded_rules, arrays)
+    if loaded.recorded_rules is not None and loaded.recorded_rules != rules:
+        raise ValueError(f"Attribution model rules mismatch in {loaded.path}: "
+                         f"recorded rules {dataclasses.asdict(loaded.recorded_rules)}; "
+                         f"current run rules {dataclasses.asdict(rules)}")
+    return loaded
+
+
 def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: bool = False, zero_inputs: bool = False,
                         base: Topology | None = None, cut_outputs_frac: float = 0.0,
                         cut_inputs_frac: float = 0.0, cut_inputs_by: str = "synapses",
-                        attribution_in: Path | None = None,
+                        attribution_in: Path | _AttributionInput | None = None,
                         cut_inputs_from_types: Collection[str] | None = None,
                         surround_scale_exc: float = 1.0, surround_scale_inh: float = 1.0,
-                        surround_input_cap: float | None = None) -> FullGraph:
+                        surround_input_cap: float | None = None, *, rules: ModelRules = ModelRules()) -> FullGraph:
     """The whole MCNS topology (`m.topology(params)`, or `base` if the caller already has it)
     with the image's edits applied in place, as h0_run.full_topology does for H0's circuit:
 
@@ -464,6 +507,8 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
       cut_inputs_by="attribution"  rank inputs by descending score from an h_fault_attr NPZ,
                  then synapse count, then (post, pre). Missing scores are zero. BodyIds identify
                  pairs across runs; foreign pairs, duplicate pairs and invalid scores are rejected.
+                 Recorded model rules must match `rules` (current rules by default); legacy
+                 files without provenance warn and proceed.
       cut_inputs_from_types  zero every incoming anatomical edge whose outside presynaptic
                  MCNS neuron has one of these exact ``type`` strings.  This is exclusive with
                  input fractions and ``zero_inputs``.
@@ -499,6 +544,7 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
         raise ValueError("cut_inputs_by must be synapses or attribution")
     if (cut_inputs_by == "attribution") != (attribution_in is not None):
         raise ValueError("cut_inputs_by=attribution requires attribution_in (and vice versa)")
+    attribution_data = load_attribution(attribution_in, rules) if attribution_in is not None else None
     base = base if base is not None else m.topology(params)
     if base.n != m.n:
         raise ValueError("base topology is not the connectome's")
@@ -554,8 +600,7 @@ def full_graph_topology(m: MCNS, params: Params, image: Image, zero_outputs: boo
         counts = np.abs(base.quanta[edges]).astype(np.int64) // QUANTA_PER_SYNAPSE
         scores = None
         if attribution:
-            with np.load(attribution_in, allow_pickle=False) as saved:
-                pre, post, score = (saved[key] for key in ("pre_bodyId", "post_bodyId", "score"))
+            pre, post, score = (attribution_data.arrays[key] for key in ("pre_bodyId", "post_bodyId", "score"))
             if any(a.ndim != 1 for a in (pre, post, score)) or not (len(pre) == len(post) == len(score)):
                 raise ValueError("attribution arrays must be equal-length vectors")
             if not np.issubdtype(pre.dtype, np.integer) or not np.issubdtype(post.dtype, np.integer):

@@ -842,3 +842,84 @@ def test_simulate_channel_powers_on_a_flipflop_channel():
     image = SimpleNamespace(topology=ch.net.topology())  # the netlist itself as the "image"
     res = simulate_channel(ch, image, [1, 2, 3], [1, 2, 3], fresh_each=False, max_steps_per_tx=8000)
     assert res["correct"] == 3 and res["faults"] == 0, {k: v for k, v in res.items() if k != "records"}
+
+
+def _attribution_rules_fixture(tmp_path, metadata):
+    """Six neurons, three incoming edges; the scored weak edge must be cut first."""
+    m, image = _surround_fixture()
+    path = tmp_path / "rules-scores.npz"
+    np.savez_compressed(path, pre_bodyId=np.array([15]), post_bodyId=np.array([10]),
+                        score=np.array([100]), **metadata)
+    return m, image, path
+
+
+@pytest.mark.parametrize("preset,explicit", [("current", False), ("current", True), ("shiu", True)])
+def test_full_graph_attribution_matching_rules(tmp_path, recwarn, preset, explicit):
+    import json
+    from dataclasses import asdict
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.sim.model import ModelRules
+
+    rules = ModelRules() if preset == "current" else ModelRules(True, True, "v", True)
+    m, image, path = _attribution_rules_fixture(tmp_path, {"model_rules": json.dumps(asdict(rules))})
+    kwargs = {"rules": rules} if explicit else {}
+    fg = full_graph_topology(m, Params(), image, attribution_in=path, cut_inputs_by="attribution",
+                             cut_inputs_frac=.25, **kwargs)
+    assert fg.counts["inputs_cut_edges"] == 1
+    assert _edge_weights(fg.topology)[5, 0] == 0
+    assert _edge_weights(fg.topology)[4, 0] != 0
+    assert not recwarn.list
+
+
+@pytest.mark.parametrize("recorded,run", [
+    ({"clear_g_on_spike": True, "freeze_g_in_refractory": True, "stim_target": "v",
+      "stim_disables_refractory": True}, None),  # Shiu must fail with the API default.
+    ({}, {"clear_g_on_spike": True}),
+    ({"freeze_g_in_refractory": True}, {}),
+    ({"stim_target": "v"}, {}),
+    ({"stim_disables_refractory": True}, {}),
+])
+@pytest.mark.parametrize("fraction", [0, .25])
+def test_full_graph_attribution_mismatched_rules(tmp_path, recorded, run, fraction):
+    import json
+    from dataclasses import asdict
+    from drosophilos.connectome.embed_image import full_graph_topology
+    from drosophilos.sim.model import ModelRules
+
+    recorded_rules = ModelRules(**recorded)
+    run_rules = ModelRules(**(run or {}))
+    m, image, path = _attribution_rules_fixture(tmp_path, {"model_rules": json.dumps(asdict(recorded_rules))})
+    kwargs = {} if run is None else {"rules": run_rules}
+    with pytest.raises(ValueError, match="model rules mismatch") as exc:
+        full_graph_topology(m, Params(), image, attribution_in=path, cut_inputs_by="attribution",
+                            cut_inputs_frac=fraction, **kwargs)
+    assert str(path) in str(exc.value)
+    assert f"recorded rules {asdict(recorded_rules)}" in str(exc.value)
+    assert f"current run rules {asdict(run_rules)}" in str(exc.value)
+
+
+def test_full_graph_attribution_absent_rules_warn_once_and_cut(tmp_path):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    m, image, path = _attribution_rules_fixture(tmp_path, {})
+    with pytest.warns(RuntimeWarning, match="provenance is unknown") as caught:
+        fg = full_graph_topology(m, Params(), image, attribution_in=path, cut_inputs_by="attribution",
+                                 cut_inputs_frac=.25)
+    assert len(caught) == 1
+    assert str(path) in str(caught[0].message)
+    assert fg.counts["inputs_cut_edges"] == 1
+    assert _edge_weights(fg.topology)[5, 0] == 0
+
+
+@pytest.mark.parametrize("metadata", ["not JSON", "{}", "null", '[1, 2]',
+                                      np.array(["{}", "{}"]), np.array({"stim_target": "g"}, dtype=object),
+                                      '{"clear_g_on_spike": 1, "freeze_g_in_refractory": false, '
+                                      '"stim_target": "g", "stim_disables_refractory": false}'])
+def test_full_graph_attribution_malformed_rules(tmp_path, metadata):
+    from drosophilos.connectome.embed_image import full_graph_topology
+
+    m, image, path = _attribution_rules_fixture(tmp_path, {"model_rules": metadata})
+    with pytest.raises(ValueError, match="Invalid attribution model_rules metadata") as exc:
+        full_graph_topology(m, Params(), image, attribution_in=path, cut_inputs_by="attribution",
+                            cut_inputs_frac=.25)
+    assert str(path) in str(exc.value)

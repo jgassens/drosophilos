@@ -12,37 +12,19 @@ be passed to full_graph_topology(attribution_in=...). Compact JSON is a report, 
 from __future__ import annotations
 
 import json
-import warnings
 from dataclasses import asdict
 from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
 
+from ..connectome.embed_image import load_attribution
 from ..sim.model import ModelRules
 
 
 def validate_attribution_rules(path: Path, rules: ModelRules) -> None:
     """Refuse scores from different integration rules; allow unlabelled legacy files."""
-    expected = asdict(rules)
-    with np.load(path, allow_pickle=False) as saved:
-        if "model_rules" not in saved:
-            warnings.warn(f"Attribution file {path} has no model_rules metadata; provenance is unknown "
-                          "and compatibility with the current run cannot be checked.",
-                          RuntimeWarning, stacklevel=2)
-            return
-        try:
-            recorded = json.loads(saved["model_rules"].item())
-        except (ValueError, TypeError) as exc:
-            raise ValueError(f"Invalid attribution model_rules metadata in {path}") from exc
-    # Partial or malformed provenance is not an unlabelled legacy artifact.
-    if (not isinstance(recorded, dict) or recorded.keys() != expected.keys()
-            or any(type(recorded[key]) is not type(value) for key, value in expected.items())
-            or recorded["stim_target"] not in ("g", "v")):
-        raise ValueError(f"Invalid attribution model_rules metadata in {path}: {recorded!r}")
-    if recorded != expected:
-        raise ValueError(f"Attribution model rules mismatch in {path}: "
-                         f"recorded rules {recorded}; current run rules {expected}")
+    load_attribution(path, rules)
 
 
 def failure_point(ch, rec, trace, reference, reference_rec, end_step: int) -> dict | None:

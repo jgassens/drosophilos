@@ -81,14 +81,14 @@ import numpy as np
 
 from ..connectome.embed_h0 import Policy
 from ..connectome.embed_image import (CircuitView, adder_cases, all_missing, boundary_envelope_ms, build_image,
-                                      full_graph_topology, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
+                                      full_graph_topology, load_attribution, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
                                       tally, trace_since, underlying, power_on, validate_surround_settings)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
 from ..sim.model import ModelRules, Params
 from ..sim.ref64 import RefSim
-from .h_fault_attr import IncomingAttribution, failure_point, validate_attribution_rules
+from .h_fault_attr import IncomingAttribution, failure_point
 from .h_surround_calib import MODEL_RULE_PRESETS
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
@@ -309,8 +309,9 @@ class EchoTrace:
 def run(args) -> dict:
     params = Params()
     rules = MODEL_RULE_PRESETS[args.model_rules]
-    if getattr(args, "attribution_in", None) is not None:
-        validate_attribution_rules(args.attribution_in, rules)
+    attribution_in = getattr(args, "attribution_in", None)
+    if attribution_in is not None:
+        attribution_in = load_attribution(attribution_in, rules)
     max_steps = int(round(args.max_ms / params.dt))
     t_start = time.time()
     mapping_meta = load_mapping_meta(args.mapping)
@@ -323,7 +324,7 @@ def run(args) -> dict:
     fg = full_graph_topology(m, params, img, zero_outputs=args.outputs_zeroed, zero_inputs=args.inputs_zeroed,
                              cut_outputs_frac=args.cut_outputs_frac, cut_inputs_frac=args.cut_inputs_frac,
                              cut_inputs_by=getattr(args, "cut_inputs_by", "synapses"),
-                             attribution_in=getattr(args, "attribution_in", None),
+                             attribution_in=attribution_in, rules=rules,
                              cut_inputs_from_types=getattr(args, "cut_inputs_from_types", None),
                              surround_scale_exc=getattr(args, "surround_scale_exc", 1.0),
                              surround_scale_inh=getattr(args, "surround_scale_inh", 1.0),

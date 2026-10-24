@@ -223,3 +223,27 @@ def test_h1_attribution_npz_provenance(tmp_path, monkeypatch, recwarn, preset, l
     assert record["model_rules"] == expected
     assert record["full_graph_counts"]["inputs_cut_edges"] == 2
     assert record["full_graph_counts"]["inputs_cut_synapses"] == 5
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_h1_attribution_is_read_once_and_legacy_warns_once(tmp_path, monkeypatch, recwarn, legacy):
+    setup_h1(monkeypatch)
+    path = tmp_path / "scores.npz"
+    metadata = {} if legacy else {"model_rules": json.dumps(CURRENT)}
+    np.savez_compressed(path, pre_bodyId=np.empty(0, np.int64), post_bodyId=np.empty(0, np.int64),
+                        score=np.empty(0, np.int64), **metadata)
+    original_load = np.load
+    reads = []
+
+    def counted_load(file, *args, **kwargs):
+        reads.append(file)
+        return original_load(file, *args, **kwargs)
+
+    monkeypatch.setattr(np, "load", counted_load)
+    record = h1.run(h1.parse(H1_FLAGS + ["--cut-inputs-by", "attribution", "--attribution-in", str(path),
+                                       "--cut-inputs-frac", "1"]))
+    assert reads == [path]
+    assert record["full_graph_counts"]["inputs_cut_edges"] == 2
+    assert len(recwarn.list) == int(legacy)
+    if legacy:
+        assert "provenance is unknown" in str(recwarn.list[0].message)
