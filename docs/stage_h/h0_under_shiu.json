@@ -1,0 +1,2291 @@
+{
+  "schema_version": 1,
+  "source": "/Users/jeremiahgassensmith/programming/drosophilos/data/mcns",
+  "graph": {
+    "n_neurons": 166700,
+    "n_edges": 25582938,
+    "total_synapses": 124177617,
+    "min_syn": 1,
+    "sha256": "b08a0dc0044f60e2df5a50603cc943f2bbae716fccc1fa3abfb2061db22100d6"
+  },
+  "params": {
+    "dt": 0.1,
+    "E_L": -52.0,
+    "V_th": -45.0,
+    "V_reset": -52.0,
+    "tau_m": 20.0,
+    "tau_s": 5.0,
+    "t_ref": 2.2,
+    "w_syn": 0.275,
+    "default_delay_ms": 1.8
+  },
+  "model_rules": {
+    "clear_g_on_spike": true,
+    "freeze_g_in_refractory": true,
+    "stim_target": "v",
+    "stim_disables_refractory": true
+  },
+  "original_policy": {
+    "profile": 2,
+    "k_max": 4.0,
+    "loop_margin": 1.4,
+    "and_fraction": 0.65,
+    "or_margin": 2.0,
+    "reset_factor": 1.5,
+    "reset_both_members": true,
+    "zero_parasitic": true,
+    "excitatory_nt": [
+      "acetylcholine"
+    ],
+    "inhibitory_nt": [
+      "gaba",
+      "glutamate"
+    ]
+  },
+  "retuned_policy": {
+    "profile": 2,
+    "k_max": 4.0,
+    "loop_margin": 1.4,
+    "and_fraction": 0.65,
+    "or_margin": 1.5,
+    "reset_factor": 1.5,
+    "reset_both_members": true,
+    "zero_parasitic": true,
+    "excitatory_nt": [
+      "acetylcholine"
+    ],
+    "inhibitory_nt": [
+      "gaba",
+      "glutamate"
+    ]
+  },
+  "original_targets": {
+    "needed_single": 2586.0434707264194,
+    "needed_rate": 382.8363636363636,
+    "period_steps": 47,
+    "loop": 3621,
+    "and_in": 249,
+    "or_in": 766,
+    "completion": 3621,
+    "reset": -5432
+  },
+  "m5_targets_original_margins": {
+    "needed_single": 2586.0434707264194,
+    "needed_rate": 863.418181818182,
+    "period_steps": 106,
+    "loop": 3621,
+    "and_in": 562,
+    "or_in": 1727,
+    "completion": 3621,
+    "reset": -5432
+  },
+  "retuned_targets": {
+    "needed_single": 2586.0434707264194,
+    "needed_rate": 863.418181818182,
+    "period_steps": 106,
+    "loop": 3621,
+    "and_in": 562,
+    "or_in": 1296,
+    "completion": 3621,
+    "reset": -5432
+  },
+  "protocol": {
+    "drive_quanta": 410,
+    "drive_mv": 7.046875000000001,
+    "t_data_ms": 5,
+    "b_offset_ms": 0,
+    "observation_ms": 150,
+    "completion_limit_ms_exclusive": 60,
+    "reset_quiet_tail_ms": 30,
+    "external_targets": "selected operand rail drivers only; no external reset"
+  },
+  "tier_a": {
+    "body_ids": [
+      10643,
+      10864,
+      10881,
+      11127,
+      11429,
+      14160,
+      14210,
+      26764,
+      32461,
+      37111,
+      512079,
+      520816,
+      523040,
+      523983,
+      555296
+    ],
+    "policy_audit": {
+      "valid": true,
+      "k_max": 4.0,
+      "required_multiplier": 3.650201612903226,
+      "physical_edges": 26,
+      "listed_edges": 26,
+      "edges": [
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10864,
+          "count": 161,
+          "quanta": 3621,
+          "required_multiplier": 1.405667701863354,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10864,
+          "post_body_id": 32461,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 11127,
+          "count": 66,
+          "quanta": 3621,
+          "required_multiplier": 3.428977272727273,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11127,
+          "post_body_id": 523040,
+          "count": 122,
+          "quanta": 3621,
+          "required_multiplier": 1.8550204918032787,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 10643,
+          "count": 98,
+          "quanta": 3621,
+          "required_multiplier": 2.3093112244897958,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10643,
+          "post_body_id": 26764,
+          "count": 211,
+          "quanta": 3621,
+          "required_multiplier": 1.0725710900473933,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 555296,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 555296,
+          "post_body_id": 37111,
+          "count": 92,
+          "quanta": 3621,
+          "required_multiplier": 2.4599184782608696,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10881,
+          "count": 27,
+          "quanta": 562,
+          "required_multiplier": 1.3009259259259258,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 10881,
+          "count": 151,
+          "quanta": 562,
+          "required_multiplier": 0.2326158940397351,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 512079,
+          "count": 64,
+          "quanta": 1296,
+          "required_multiplier": 1.265625,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 512079,
+          "count": 24,
+          "quanta": 1296,
+          "required_multiplier": 3.375,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10881,
+          "post_body_id": 11429,
+          "count": 65,
+          "quanta": 3621,
+          "required_multiplier": 3.481730769230769,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 512079,
+          "post_body_id": 11429,
+          "count": 70,
+          "quanta": 3621,
+          "required_multiplier": 3.2330357142857142,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14160,
+          "count": 82,
+          "quanta": 3621,
+          "required_multiplier": 2.7599085365853657,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14210,
+          "count": 218,
+          "quanta": 3621,
+          "required_multiplier": 1.0381307339449541,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 10864,
+          "count": 163,
+          "quanta": -5432,
+          "required_multiplier": 2.0828220858895707,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 32461,
+          "count": 254,
+          "quanta": -5432,
+          "required_multiplier": 1.3366141732283465,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 520816,
+          "count": 63,
+          "quanta": 3621,
+          "required_multiplier": 3.5922619047619047,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 523983,
+          "count": 62,
+          "quanta": 3621,
+          "required_multiplier": 3.650201612903226,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 11127,
+          "count": 166,
+          "quanta": -5432,
+          "required_multiplier": 2.0451807228915664,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 523040,
+          "count": 207,
+          "quanta": -5432,
+          "required_multiplier": 1.6400966183574879,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 10643,
+          "count": 127,
+          "quanta": -5432,
+          "required_multiplier": 2.673228346456693,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 26764,
+          "count": 230,
+          "quanta": -5432,
+          "required_multiplier": 1.4760869565217392,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 37111,
+          "count": 205,
+          "quanta": -5432,
+          "required_multiplier": 1.6560975609756097,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 555296,
+          "count": 113,
+          "quanta": -5432,
+          "required_multiplier": 3.004424778761062,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        }
+      ]
+    },
+    "original_policy_audit": {
+      "topology_note": "Historical isolated topology: repeated entries sum; the historical full-graph builder overwrites repeated entries.",
+      "valid": false,
+      "k_max": 4.0,
+      "required_multiplier": 7.300403225806452,
+      "physical_edges": 26,
+      "listed_edges": 30,
+      "edges": [
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10864,
+          "count": 161,
+          "quanta": 3621,
+          "required_multiplier": 1.405667701863354,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10864,
+          "post_body_id": 32461,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 11127,
+          "count": 66,
+          "quanta": 3621,
+          "required_multiplier": 3.428977272727273,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11127,
+          "post_body_id": 523040,
+          "count": 122,
+          "quanta": 3621,
+          "required_multiplier": 1.8550204918032787,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 10643,
+          "count": 98,
+          "quanta": 3621,
+          "required_multiplier": 2.3093112244897958,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10643,
+          "post_body_id": 26764,
+          "count": 211,
+          "quanta": 3621,
+          "required_multiplier": 1.0725710900473933,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 555296,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 555296,
+          "post_body_id": 37111,
+          "count": 92,
+          "quanta": 3621,
+          "required_multiplier": 2.4599184782608696,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10881,
+          "count": 27,
+          "quanta": 249,
+          "required_multiplier": 0.5763888888888888,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 10881,
+          "count": 151,
+          "quanta": 249,
+          "required_multiplier": 0.10306291390728477,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 512079,
+          "count": 64,
+          "quanta": 766,
+          "required_multiplier": 0.748046875,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 512079,
+          "count": 24,
+          "quanta": 766,
+          "required_multiplier": 1.9947916666666667,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10881,
+          "post_body_id": 11429,
+          "count": 65,
+          "quanta": 3621,
+          "required_multiplier": 3.481730769230769,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 512079,
+          "post_body_id": 11429,
+          "count": 70,
+          "quanta": 3621,
+          "required_multiplier": 3.2330357142857142,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14160,
+          "count": 82,
+          "quanta": 7242,
+          "required_multiplier": 5.5198170731707314,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": false
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14210,
+          "count": 218,
+          "quanta": 7242,
+          "required_multiplier": 2.0762614678899083,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 10864,
+          "count": 163,
+          "quanta": -5432,
+          "required_multiplier": 2.0828220858895707,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 32461,
+          "count": 254,
+          "quanta": -5432,
+          "required_multiplier": 1.3366141732283465,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 520816,
+          "count": 63,
+          "quanta": 7242,
+          "required_multiplier": 7.184523809523809,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": false
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 523983,
+          "count": 62,
+          "quanta": 7242,
+          "required_multiplier": 7.300403225806452,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": false
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 11127,
+          "count": 166,
+          "quanta": -5432,
+          "required_multiplier": 2.0451807228915664,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 523040,
+          "count": 207,
+          "quanta": -5432,
+          "required_multiplier": 1.6400966183574879,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 10643,
+          "count": 127,
+          "quanta": -5432,
+          "required_multiplier": 2.673228346456693,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 26764,
+          "count": 230,
+          "quanta": -5432,
+          "required_multiplier": 1.4760869565217392,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 37111,
+          "count": 205,
+          "quanta": -5432,
+          "required_multiplier": 1.6560975609756097,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 555296,
+          "count": 113,
+          "quanta": -5432,
+          "required_multiplier": 3.004424778761062,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        }
+      ]
+    },
+    "m5_original_margins_audit": {
+      "valid": false,
+      "k_max": 4.0,
+      "required_multiplier": 4.497395833333333,
+      "physical_edges": 26,
+      "listed_edges": 26,
+      "edges": [
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10864,
+          "count": 161,
+          "quanta": 3621,
+          "required_multiplier": 1.405667701863354,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10864,
+          "post_body_id": 32461,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 11127,
+          "count": 66,
+          "quanta": 3621,
+          "required_multiplier": 3.428977272727273,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11127,
+          "post_body_id": 523040,
+          "count": 122,
+          "quanta": 3621,
+          "required_multiplier": 1.8550204918032787,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 10643,
+          "count": 98,
+          "quanta": 3621,
+          "required_multiplier": 2.3093112244897958,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 10643,
+          "post_body_id": 26764,
+          "count": 211,
+          "quanta": 3621,
+          "required_multiplier": 1.0725710900473933,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 555296,
+          "count": 107,
+          "quanta": 3621,
+          "required_multiplier": 2.115070093457944,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 555296,
+          "post_body_id": 37111,
+          "count": 92,
+          "quanta": 3621,
+          "required_multiplier": 2.4599184782608696,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 32461,
+          "post_body_id": 10881,
+          "count": 27,
+          "quanta": 562,
+          "required_multiplier": 1.3009259259259258,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523040,
+          "post_body_id": 10881,
+          "count": 151,
+          "quanta": 562,
+          "required_multiplier": 0.2326158940397351,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 26764,
+          "post_body_id": 512079,
+          "count": 64,
+          "quanta": 1727,
+          "required_multiplier": 1.6865234375,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 37111,
+          "post_body_id": 512079,
+          "count": 24,
+          "quanta": 1727,
+          "required_multiplier": 4.497395833333333,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": false
+        },
+        {
+          "pre_body_id": 10881,
+          "post_body_id": 11429,
+          "count": 65,
+          "quanta": 3621,
+          "required_multiplier": 3.481730769230769,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 512079,
+          "post_body_id": 11429,
+          "count": 70,
+          "quanta": 3621,
+          "required_multiplier": 3.2330357142857142,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14160,
+          "count": 82,
+          "quanta": 3621,
+          "required_multiplier": 2.7599085365853657,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 14210,
+          "count": 218,
+          "quanta": 3621,
+          "required_multiplier": 1.0381307339449541,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 10864,
+          "count": 163,
+          "quanta": -5432,
+          "required_multiplier": 2.0828220858895707,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 32461,
+          "count": 254,
+          "quanta": -5432,
+          "required_multiplier": 1.3366141732283465,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 520816,
+          "count": 63,
+          "quanta": 3621,
+          "required_multiplier": 3.5922619047619047,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 11429,
+          "post_body_id": 523983,
+          "count": 62,
+          "quanta": 3621,
+          "required_multiplier": 3.650201612903226,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 11127,
+          "count": 166,
+          "quanta": -5432,
+          "required_multiplier": 2.0451807228915664,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 523040,
+          "count": 207,
+          "quanta": -5432,
+          "required_multiplier": 1.6400966183574879,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 520816,
+          "post_body_id": 10643,
+          "count": 127,
+          "quanta": -5432,
+          "required_multiplier": 2.673228346456693,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14210,
+          "post_body_id": 26764,
+          "count": 230,
+          "quanta": -5432,
+          "required_multiplier": 1.4760869565217392,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 523983,
+          "post_body_id": 37111,
+          "count": 205,
+          "quanta": -5432,
+          "required_multiplier": 1.6560975609756097,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        },
+        {
+          "pre_body_id": 14160,
+          "post_body_id": 555296,
+          "count": 113,
+          "quanta": -5432,
+          "required_multiplier": 3.004424778761062,
+          "anatomical_edge": true,
+          "sign_preserved": true,
+          "within_bound": true
+        }
+      ]
+    },
+    "roles": {
+      "32461": "loop_a1_driver",
+      "10864": "loop_a1_partner",
+      "523040": "loop_b1_driver",
+      "11127": "loop_b1_partner",
+      "26764": "loop_a0_driver",
+      "10643": "loop_a0_partner",
+      "37111": "loop_b0_driver",
+      "555296": "loop_b0_partner",
+      "10881": "and_y1",
+      "512079": "or_y0",
+      "11429": "completion",
+      "14160": "reset_b0_0",
+      "14210": "reset_a0_0",
+      "520816": "reset_a0_1",
+      "523983": "reset_b0_1"
+    },
+    "parasitic_edges_zeroed": 107,
+    "M0_original": [
+      {
+        "a": 0,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 22.8,
+        "reset_ok": true,
+        "ready_latency_ms": 26.900000000000002,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 4,
+          "loop_a0_partner": 4,
+          "loop_b0_driver": 4,
+          "loop_b0_partner": 4,
+          "and_y1": 0,
+          "or_y0": 2,
+          "completion": 2,
+          "reset_b0_0": 4,
+          "reset_a0_0": 4,
+          "reset_a0_1": 4,
+          "reset_b0_1": 4
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 32,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [
+            85,
+            172,
+            236,
+            292
+          ],
+          "loop_a0_partner": [
+            138,
+            207,
+            265,
+            319
+          ],
+          "loop_b0_driver": [
+            85,
+            172,
+            236,
+            292
+          ],
+          "loop_b0_partner": [
+            138,
+            207,
+            265,
+            319
+          ],
+          "and_y1": [],
+          "or_y0": [
+            225,
+            323
+          ],
+          "completion": [
+            278,
+            357
+          ],
+          "reset_b0_0": [
+            310,
+            366,
+            402,
+            463
+          ],
+          "reset_a0_0": [
+            310,
+            366,
+            402,
+            463
+          ],
+          "reset_a0_1": [
+            310,
+            366,
+            402,
+            463
+          ],
+          "reset_b0_1": [
+            310,
+            366,
+            402,
+            463
+          ]
+        },
+        "trace_sha256": "9a4b3ba917140eccaabd71ed06f61bb4bf6155901dee96fb9ce39f68ccc69fa1"
+      },
+      {
+        "a": 0,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 36.9,
+        "reset_ok": true,
+        "ready_latency_ms": 41.7,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 7,
+          "loop_b1_partner": 7,
+          "loop_a0_driver": 7,
+          "loop_a0_partner": 7,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 0,
+          "or_y0": 1,
+          "completion": 1,
+          "reset_b0_0": 2,
+          "reset_a0_0": 2,
+          "reset_a0_1": 2,
+          "reset_b0_1": 2
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 28,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443
+          ],
+          "loop_b1_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467
+          ],
+          "loop_a0_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443
+          ],
+          "loop_a0_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467
+          ],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [],
+          "or_y0": [
+            366
+          ],
+          "completion": [
+            419
+          ],
+          "reset_b0_0": [
+            451,
+            507
+          ],
+          "reset_a0_0": [
+            451,
+            507
+          ],
+          "reset_a0_1": [
+            451,
+            507
+          ],
+          "reset_b0_1": [
+            451,
+            507
+          ]
+        },
+        "trace_sha256": "12a07f68faf4ebc43d52e73e1757f3f2af62eca44410b791aef69737ae86e9a1"
+      },
+      {
+        "a": 1,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 36.9,
+        "reset_ok": true,
+        "ready_latency_ms": 41.7,
+        "spikes_per_role": {
+          "loop_a1_driver": 7,
+          "loop_a1_partner": 7,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 7,
+          "loop_b0_partner": 7,
+          "and_y1": 0,
+          "or_y0": 1,
+          "completion": 1,
+          "reset_b0_0": 2,
+          "reset_a0_0": 2,
+          "reset_a0_1": 2,
+          "reset_b0_1": 2
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 28,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443
+          ],
+          "loop_a1_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467
+          ],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443
+          ],
+          "loop_b0_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467
+          ],
+          "and_y1": [],
+          "or_y0": [
+            366
+          ],
+          "completion": [
+            419
+          ],
+          "reset_b0_0": [
+            451,
+            507
+          ],
+          "reset_a0_0": [
+            451,
+            507
+          ],
+          "reset_a0_1": [
+            451,
+            507
+          ],
+          "reset_b0_1": [
+            451,
+            507
+          ]
+        },
+        "trace_sha256": "4f8dcf36434ddae537630db1089e0f2d26ef0640007eb0f3020d9cdad1554351"
+      },
+      {
+        "a": 1,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": true,
+        "fired_y1": true,
+        "fired_y0": false,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 56.300000000000004,
+        "reset_ok": true,
+        "ready_latency_ms": 60.800000000000004,
+        "spikes_per_role": {
+          "loop_a1_driver": 11,
+          "loop_a1_partner": 11,
+          "loop_b1_driver": 11,
+          "loop_b1_partner": 11,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 1,
+          "or_y0": 0,
+          "completion": 1,
+          "reset_b0_0": 2,
+          "reset_a0_0": 2,
+          "reset_a0_1": 2,
+          "reset_b0_1": 2
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 44,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443,
+            491,
+            539,
+            587,
+            634
+          ],
+          "loop_a1_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467,
+            515,
+            563,
+            611,
+            658
+          ],
+          "loop_b1_driver": [
+            85,
+            172,
+            236,
+            292,
+            344,
+            394,
+            443,
+            491,
+            539,
+            587,
+            634
+          ],
+          "loop_b1_partner": [
+            138,
+            207,
+            265,
+            319,
+            370,
+            419,
+            467,
+            515,
+            563,
+            611,
+            658
+          ],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [
+            560
+          ],
+          "or_y0": [],
+          "completion": [
+            613
+          ],
+          "reset_b0_0": [
+            645,
+            701
+          ],
+          "reset_a0_0": [
+            645,
+            701
+          ],
+          "reset_a0_1": [
+            645,
+            701
+          ],
+          "reset_b0_1": [
+            645,
+            701
+          ]
+        },
+        "trace_sha256": "ffc4575081bd14180d422ff043f1bd184ef538834ce57fc638c40ea06f43c575"
+      }
+    ],
+    "M5_stale": [
+      {
+        "a": 0,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 21.900000000000002,
+        "reset_ok": true,
+        "ready_latency_ms": 26.6,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 3,
+          "loop_a0_partner": 3,
+          "loop_b0_driver": 3,
+          "loop_b0_partner": 3,
+          "and_y1": 0,
+          "or_y0": 1,
+          "completion": 1,
+          "reset_b0_0": 1,
+          "reset_a0_0": 1,
+          "reset_a0_1": 1,
+          "reset_b0_1": 1
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 12,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 8,
+          "discarded": 2,
+          "discarded_fraction": 0.25
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [
+            51,
+            157,
+            263
+          ],
+          "loop_a0_partner": [
+            104,
+            210,
+            316
+          ],
+          "loop_b0_driver": [
+            51,
+            157,
+            263
+          ],
+          "loop_b0_partner": [
+            104,
+            210,
+            316
+          ],
+          "and_y1": [],
+          "or_y0": [
+            216
+          ],
+          "completion": [
+            269
+          ],
+          "reset_b0_0": [
+            301
+          ],
+          "reset_a0_0": [
+            301
+          ],
+          "reset_a0_1": [
+            301
+          ],
+          "reset_b0_1": [
+            301
+          ]
+        },
+        "trace_sha256": "edeaa824c363cc504da7fa88544c483ad34525d07f6818406931284889ef0a49"
+      },
+      {
+        "a": 0,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": false,
+        "completion": false,
+        "correct": false,
+        "completion_latency_ms": null,
+        "reset_ok": false,
+        "ready_latency_ms": null,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 14,
+          "loop_b1_partner": 14,
+          "loop_a0_driver": 14,
+          "loop_a0_partner": 14,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 0,
+          "or_y0": 0,
+          "completion": 0,
+          "reset_b0_0": 0,
+          "reset_a0_0": 0,
+          "reset_a0_1": 0,
+          "reset_b0_1": 0
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": false,
+        "loop_arrivals": {
+          "total": 54,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 0,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_b1_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "loop_a0_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_a0_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [],
+          "or_y0": [],
+          "completion": [],
+          "reset_b0_0": [],
+          "reset_a0_0": [],
+          "reset_a0_1": [],
+          "reset_b0_1": []
+        },
+        "trace_sha256": "d05cebdab5f9469f36bd9d34513731fc07b72807edfdcbbad6950939306c56d5"
+      },
+      {
+        "a": 1,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": false,
+        "completion": false,
+        "correct": false,
+        "completion_latency_ms": null,
+        "reset_ok": false,
+        "ready_latency_ms": null,
+        "spikes_per_role": {
+          "loop_a1_driver": 14,
+          "loop_a1_partner": 14,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 14,
+          "loop_b0_partner": 14,
+          "and_y1": 0,
+          "or_y0": 0,
+          "completion": 0,
+          "reset_b0_0": 0,
+          "reset_a0_0": 0,
+          "reset_a0_1": 0,
+          "reset_b0_1": 0
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": false,
+        "loop_arrivals": {
+          "total": 54,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 0,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_a1_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_b0_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "and_y1": [],
+          "or_y0": [],
+          "completion": [],
+          "reset_b0_0": [],
+          "reset_a0_0": [],
+          "reset_a0_1": [],
+          "reset_b0_1": []
+        },
+        "trace_sha256": "21b8ddbbc467a3e934d1f92b40275dcf3c50cb69fc6a5a3df25cb406786ba53c"
+      },
+      {
+        "a": 1,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": true,
+        "fired_y1": false,
+        "fired_y0": false,
+        "completion": false,
+        "correct": false,
+        "completion_latency_ms": null,
+        "reset_ok": false,
+        "ready_latency_ms": null,
+        "spikes_per_role": {
+          "loop_a1_driver": 14,
+          "loop_a1_partner": 14,
+          "loop_b1_driver": 14,
+          "loop_b1_partner": 14,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 0,
+          "or_y0": 0,
+          "completion": 0,
+          "reset_b0_0": 0,
+          "reset_a0_0": 0,
+          "reset_a0_1": 0,
+          "reset_b0_1": 0
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": false,
+        "loop_arrivals": {
+          "total": 54,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 0,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_a1_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "loop_b1_driver": [
+            51,
+            157,
+            263,
+            369,
+            475,
+            581,
+            687,
+            793,
+            899,
+            1005,
+            1111,
+            1217,
+            1323,
+            1429
+          ],
+          "loop_b1_partner": [
+            104,
+            210,
+            316,
+            422,
+            528,
+            634,
+            740,
+            846,
+            952,
+            1058,
+            1164,
+            1270,
+            1376,
+            1482
+          ],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [],
+          "or_y0": [],
+          "completion": [],
+          "reset_b0_0": [],
+          "reset_a0_0": [],
+          "reset_a0_1": [],
+          "reset_b0_1": []
+        },
+        "trace_sha256": "c06da0bc8b0444a887b83a571de2a683dab8bbf38bab630ba9ff4de987198c69"
+      }
+    ],
+    "transactions": [
+      {
+        "a": 0,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 15.8,
+        "reset_ok": true,
+        "ready_latency_ms": 21.3,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 3,
+          "loop_a0_partner": 2,
+          "loop_b0_driver": 3,
+          "loop_b0_partner": 2,
+          "and_y1": 0,
+          "or_y0": 2,
+          "completion": 2,
+          "reset_b0_0": 2,
+          "reset_a0_0": 2,
+          "reset_a0_1": 2,
+          "reset_b0_1": 2
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 10,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [
+            51,
+            157,
+            263
+          ],
+          "loop_a0_partner": [
+            104,
+            210
+          ],
+          "loop_b0_driver": [
+            51,
+            157,
+            263
+          ],
+          "loop_b0_partner": [
+            104,
+            210
+          ],
+          "and_y1": [],
+          "or_y0": [
+            155,
+            367
+          ],
+          "completion": [
+            208,
+            420
+          ],
+          "reset_b0_0": [
+            261,
+            473
+          ],
+          "reset_a0_0": [
+            261,
+            473
+          ],
+          "reset_a0_1": [
+            261,
+            473
+          ],
+          "reset_b0_1": [
+            261,
+            473
+          ]
+        },
+        "trace_sha256": "5cae0709f89dc259f6500adad77a116e763cdcc14eb5ef9979395a26bf4ba77f"
+      },
+      {
+        "a": 0,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 29.8,
+        "reset_ok": true,
+        "ready_latency_ms": 31.900000000000002,
+        "spikes_per_role": {
+          "loop_a1_driver": 0,
+          "loop_a1_partner": 0,
+          "loop_b1_driver": 4,
+          "loop_b1_partner": 3,
+          "loop_a0_driver": 4,
+          "loop_a0_partner": 3,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 0,
+          "or_y0": 1,
+          "completion": 1,
+          "reset_b0_0": 1,
+          "reset_a0_0": 1,
+          "reset_a0_1": 1,
+          "reset_b0_1": 1
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 14,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 8,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [],
+          "loop_a1_partner": [],
+          "loop_b1_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_b1_partner": [
+            104,
+            210,
+            316
+          ],
+          "loop_a0_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_a0_partner": [
+            104,
+            210,
+            316
+          ],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [],
+          "or_y0": [
+            295
+          ],
+          "completion": [
+            348
+          ],
+          "reset_b0_0": [
+            401
+          ],
+          "reset_a0_0": [
+            401
+          ],
+          "reset_a0_1": [
+            401
+          ],
+          "reset_b0_1": [
+            401
+          ]
+        },
+        "trace_sha256": "e7b434447d6b8637fbcba044411ec34899d930e4f1af9721cff78273e4e589e2"
+      },
+      {
+        "a": 1,
+        "b": 0,
+        "offset_ms": 0.0,
+        "expect_y1": false,
+        "fired_y1": false,
+        "fired_y0": true,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 29.8,
+        "reset_ok": true,
+        "ready_latency_ms": 31.900000000000002,
+        "spikes_per_role": {
+          "loop_a1_driver": 4,
+          "loop_a1_partner": 3,
+          "loop_b1_driver": 0,
+          "loop_b1_partner": 0,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 4,
+          "loop_b0_partner": 3,
+          "and_y1": 0,
+          "or_y0": 1,
+          "completion": 1,
+          "reset_b0_0": 1,
+          "reset_a0_0": 1,
+          "reset_a0_1": 1,
+          "reset_b0_1": 1
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 14,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 8,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_a1_partner": [
+            104,
+            210,
+            316
+          ],
+          "loop_b1_driver": [],
+          "loop_b1_partner": [],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_b0_partner": [
+            104,
+            210,
+            316
+          ],
+          "and_y1": [],
+          "or_y0": [
+            295
+          ],
+          "completion": [
+            348
+          ],
+          "reset_b0_0": [
+            401
+          ],
+          "reset_a0_0": [
+            401
+          ],
+          "reset_a0_1": [
+            401
+          ],
+          "reset_b0_1": [
+            401
+          ]
+        },
+        "trace_sha256": "9846e197b269b7c49d332eccb1f3eb2922b42784dca8f5fd46c066e774ab41d3"
+      },
+      {
+        "a": 1,
+        "b": 1,
+        "offset_ms": 0.0,
+        "expect_y1": true,
+        "fired_y1": true,
+        "fired_y0": false,
+        "completion": true,
+        "correct": true,
+        "completion_latency_ms": 33.2,
+        "reset_ok": true,
+        "ready_latency_ms": 37.2,
+        "spikes_per_role": {
+          "loop_a1_driver": 4,
+          "loop_a1_partner": 4,
+          "loop_b1_driver": 4,
+          "loop_b1_partner": 4,
+          "loop_a0_driver": 0,
+          "loop_a0_partner": 0,
+          "loop_b0_driver": 0,
+          "loop_b0_partner": 0,
+          "and_y1": 1,
+          "or_y0": 0,
+          "completion": 1,
+          "reset_b0_0": 1,
+          "reset_a0_0": 1,
+          "reset_a0_1": 1,
+          "reset_b0_1": 1
+        },
+        "surround_spikes": 0,
+        "surround_neurons_recruited": 0,
+        "passes_existing_checks": true,
+        "loop_arrivals": {
+          "total": 16,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "reset_arrivals": {
+          "total": 8,
+          "discarded": 0,
+          "discarded_fraction": 0.0
+        },
+        "spike_steps_by_role": {
+          "loop_a1_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_a1_partner": [
+            104,
+            210,
+            316,
+            422
+          ],
+          "loop_b1_driver": [
+            51,
+            157,
+            263,
+            369
+          ],
+          "loop_b1_partner": [
+            104,
+            210,
+            316,
+            422
+          ],
+          "loop_a0_driver": [],
+          "loop_a0_partner": [],
+          "loop_b0_driver": [],
+          "loop_b0_partner": [],
+          "and_y1": [
+            329
+          ],
+          "or_y0": [],
+          "completion": [
+            382
+          ],
+          "reset_b0_0": [
+            435
+          ],
+          "reset_a0_0": [
+            435
+          ],
+          "reset_a0_1": [
+            435
+          ],
+          "reset_b0_1": [
+            435
+          ]
+        },
+        "trace_sha256": "51387f136c91be95e673536581f59b0b71294e1f8283a0b5ddf1a0dd5b347c39"
+      }
+    ],
+    "pass": true
+  },
+  "diagnosis": {
+    "M5_stale": {
+      "duration_ms": 1000.0,
+      "threshold_mv": -45.0,
+      "inputs": {
+        "1": {
+          "driver_spikes": 94,
+          "last_driver_spike_ms": 990.9000000000001,
+          "driver_final_50ms_spikes": 4,
+          "steady_period_steps": 106,
+          "gate_spikes": 0,
+          "first_gate_latency_ms": null,
+          "gate_max_recorded_v_mv": -49.8890685383922,
+          "or_gate_spikes": 0,
+          "or_first_gate_latency_ms": null,
+          "or_gate_max_recorded_v_mv": -45.50613052372891
+        },
+        "2": {
+          "driver_spikes": 94,
+          "last_driver_spike_ms": 990.9000000000001,
+          "driver_final_50ms_spikes": 4,
+          "steady_period_steps": 106,
+          "gate_spikes": 0,
+          "first_gate_latency_ms": null,
+          "gate_max_recorded_v_mv": -47.7781370767846,
+          "or_gate_spikes": 47,
+          "or_first_gate_latency_ms": 16.6,
+          "or_gate_max_recorded_v_mv": -45.001354817613944
+        }
+      }
+    },
+    "M5_retuned": {
+      "duration_ms": 1000.0,
+      "threshold_mv": -45.0,
+      "inputs": {
+        "1": {
+          "driver_spikes": 94,
+          "last_driver_spike_ms": 990.9000000000001,
+          "driver_final_50ms_spikes": 4,
+          "steady_period_steps": 106,
+          "gate_spikes": 0,
+          "first_gate_latency_ms": null,
+          "gate_max_recorded_v_mv": -47.23556834769667,
+          "or_gate_spikes": 31,
+          "or_first_gate_latency_ms": 24.5,
+          "or_gate_max_recorded_v_mv": -45.03110782462062
+        },
+        "2": {
+          "driver_spikes": 94,
+          "last_driver_spike_ms": 990.9000000000001,
+          "driver_final_50ms_spikes": 4,
+          "steady_period_steps": 106,
+          "gate_spikes": 31,
+          "first_gate_latency_ms": 27.900000000000002,
+          "gate_max_recorded_v_mv": -45.0023681194845,
+          "or_gate_spikes": 47,
+          "or_first_gate_latency_ms": 10.5,
+          "or_gate_max_recorded_v_mv": -45.00436902300486
+        }
+      }
+    }
+  },
+  "verdict": "Tier A PASS: the same anatomical H0 computes AND under M5 after bounded retuning.",
+  "tier_b": {
+    "status": "not_run",
+    "reason": "Tier A passed"
+  }
+}
