@@ -81,10 +81,12 @@ choice without a real-data parameter sweep.
 **Shared reset-drive edges are counted physically.** The historical emitter lists
 each completion→inhibitory edge once per rail served. In this H0 circuit, four
 entries are repeats: 30 listed designed entries describe 26 physical connections.
-The old simulator sums those entries, giving an effective 7242 quanta on each
-shared drive, up to **7.3004032258×** anatomical weight. The original results are
-reproduced unchanged as historical controls, but that aggregate exceeds the
-present task's bound. The retuned circuit emits each shared physical drive once,
+In the historical isolated topology, the old simulator sums those entries, giving an
+effective 7242 quanta on each shared drive, up to **7.3004032258×** anatomical
+weight. The historical full-graph builder instead overwrites repeated entries on the
+same anatomical edge, so that aggregate does not form there. The original results
+are reproduced unchanged as historical controls, but that isolated aggregate exceeds
+the present task's bound. The retuned circuit emits each shared physical drive once,
 at 3621 quanta. This reduces actual reset drive and is part of the reported
 retuning. The largest resulting multiplier is 3621/(62×16) = **3.6502016129×** on
 11429 → 523983. The default historical emitter remains unchanged.

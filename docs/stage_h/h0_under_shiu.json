@@ -387,6 +387,7 @@
       ]
     },
     "original_policy_audit": {
+      "topology_note": "Historical isolated topology: repeated entries sum; the historical full-graph builder overwrites repeated entries.",
       "valid": false,
       "k_max": 4.0,
       "required_multiplier": 7.300403225806452,
