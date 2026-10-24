@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import scipy.sparse as sp
 
-from ..sim.model import QUANTA_PER_SYNAPSE, Params
+from ..sim.model import QUANTA_PER_SYNAPSE, ModelRules, Params
 from .mcns import MCNS
 
 
@@ -48,8 +48,13 @@ class Policy:
         return int(math.ceil(abs(q) / (self.k_max * QUANTA_PER_SYNAPSE)))
 
 
-def peak_response(params: Params, horizon_ms: float = 60.0) -> tuple[float, float]:
-    """(peak V excursion per mV of g jump, time-to-peak ms) under the discrete update."""
+def peak_response(params: Params, horizon_ms: float = 60.0, *,
+                  rules: ModelRules = ModelRules()) -> tuple[float, float]:
+    """Subthreshold response to a designed synaptic g jump, independent of rules.
+
+    No spike/reset or refractory hold occurs in this linear response. External
+    stimulation's target (V versus g) therefore does not enter this calculation.
+    """
     a, c, k = params.constants()
     V, g = 0.0, 1.0
     best, t_best = 0.0, 0.0
@@ -61,18 +66,19 @@ def peak_response(params: Params, horizon_ms: float = 60.0) -> tuple[float, floa
     return best, t_best
 
 
-def needed_quanta(params: Params) -> float:
+def needed_quanta(params: Params, *, rules: ModelRules = ModelRules()) -> float:
     """Quanta of a single synchronous input that just reaches threshold at its peak."""
-    peak, _ = peak_response(params)
+    peak, _ = peak_response(params, rules=rules)
     gap = params.V_th - params.E_L
     return gap / peak / params.w_unit
 
 
-def loop_period_steps(params: Params, loop_quanta: int) -> tuple[int, float]:
+def loop_period_steps(params: Params, loop_quanta: int, *,
+                      rules: ModelRules = ModelRules()) -> tuple[int, float]:
     """Simulate one isolated 2-neuron loop; return (steady period in steps, first-spike latency ms)."""
     from .._loop_probe import probe_loop  # local import to avoid a sim<->connectome import cycle at load
 
-    return probe_loop(params, loop_quanta)
+    return probe_loop(params, loop_quanta, rules=rules)
 
 
 @dataclass
@@ -87,11 +93,14 @@ class Targets:
     reset: int  # negative, per hit member
 
     @classmethod
-    def from_policy(cls, params: Params, policy: Policy) -> "Targets":
-        nq = needed_quanta(params)
+    def from_policy(cls, params: Params, policy: Policy, *,
+                    rules: ModelRules = ModelRules()) -> "Targets":
+        nq = needed_quanta(params, rules=rules)
         loop = int(math.ceil(policy.loop_margin * nq))
-        period, _ = loop_period_steps(params, loop)
+        period, _ = loop_period_steps(params, loop, rules=rules)
         # mean drive of a periodic train: g_mean = q * w_unit * tau_s / P ; V settles at E_L + g_mean
+        # This is a target-setting estimate, not a threshold certificate: ripple,
+        # spike resets and dropped refractory arrivals still require simulation.
         gap = params.V_th - params.E_L
         needed_rate = gap * (period * params.dt) / (params.w_unit * params.tau_s)
         return cls(
@@ -167,6 +176,8 @@ def find_embeddings(
     max_solutions: int = 200,
     time_limit_s: float = 300.0,
     verbose: bool = True,
+    *,
+    rules: ModelRules = ModelRules(),
 ) -> tuple[list[Embedding], dict]:
     """Enumerate complete Profile 2 embeddings of the H0 circuit.
 
@@ -175,7 +186,7 @@ def find_embeddings(
     several inhibitory neurons may share one member (their count is the relay overhead).
     """
     t0 = time.time()
-    tg = Targets.from_policy(params, policy)
+    tg = Targets.from_policy(params, policy, rules=rules)
     c_loop, c_and, c_or = policy.req_count(tg.loop), policy.req_count(tg.and_in), policy.req_count(tg.or_in)
     c_e = policy.req_count(tg.completion)
     cap = policy.k_max * QUANTA_PER_SYNAPSE  # quanta available per anatomical synapse

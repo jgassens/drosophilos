@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from .sim.model import Params, Topology
+from .sim.model import ModelRules, Params, Topology
 from .sim.ref64 import RefSim
 
 
-def probe_loop(params: Params, loop_quanta: int, n_steps: int = 3000) -> tuple[int, float]:
+def probe_loop(params: Params, loop_quanta: int, n_steps: int = 3000, *,
+               rules: ModelRules = ModelRules()) -> tuple[int, float]:
     d = params.default_delay_steps
     topo = Topology.from_edges(2, [0, 1], [1, 0], [loop_quanta, loop_quanta], [d, d])
-    sim = RefSim(topo, params)
+    sim = RefSim(topo, params, rules=rules)
     sim.add_events(0, [50], [0], [loop_quanta])
     sim.run(n_steps)
     st = sim.trace.neuron_steps(0)

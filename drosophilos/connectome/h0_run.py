@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..sim.model import QUANTA_PER_SYNAPSE, Params, Topology
+from ..sim.model import QUANTA_PER_SYNAPSE, ModelRules, Params, Topology
 from ..sim.ref64 import RefSim
 from ..sim.trace import SpikeTrace
 from .embed_h0 import Embedding, Policy, Targets, best_embedding, find_embeddings
@@ -76,6 +76,7 @@ class Transaction:
     offset_steps: int = 0  # b's DATA relative to a's
     n_steps: int = 1500  # 150 ms
     t_data: int = 50
+    drive_quanta: int | None = None  # None preserves the historical targets.loop stimulus
 
 
 def run_transaction(
@@ -87,14 +88,17 @@ def run_transaction(
     targets: Targets,
     background=None,  # (neuron indices in topo, rate_hz, rng)
     burst=None,  # (neuron indices in topo, step)
+    *,
+    rules: ModelRules = ModelRules(),
 ) -> dict:
-    sim = RefSim(topo, params)
+    sim = RefSim(topo, params, rules=rules)
     rails = {"a1": tx.a == 1, "a0": tx.a == 0, "b1": tx.b == 1, "b0": tx.b == 0}
     for rail, on in rails.items():
         if on:
             u = idx[emb.loops[rail][0]]
             t = tx.t_data + (tx.offset_steps if rail.startswith("b") else 0)
-            sim.add_events(0, [t], [u], [targets.loop])
+            drive = targets.loop if tx.drive_quanta is None else tx.drive_quanta
+            sim.add_events(0, [t], [u], [drive])
     big = 100_000  # forces a spike on the next step (schedule.md implication)
     if background is not None:
         neurons, rate_hz, rng = background
