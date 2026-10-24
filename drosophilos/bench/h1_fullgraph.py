@@ -72,6 +72,7 @@ These scores describe temporal association; testing the cut ladder measures shie
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -79,14 +80,16 @@ from pathlib import Path
 import numpy as np
 
 from ..connectome.embed_h0 import Policy
-from ..connectome.embed_image import (adder_cases, all_missing, boundary_envelope_ms, build_image, circuit_sim,
+from ..connectome.embed_image import (CircuitView, adder_cases, all_missing, boundary_envelope_ms, build_image,
                                       full_graph_topology, load_mapping, load_mapping_meta, run_words, surround_events, surround_populations,
                                       tally, trace_since, underlying, power_on, validate_surround_settings)
 from ..connectome.mcns import load_mcns
 from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
-from ..sim.model import Params
+from ..sim.model import ModelRules, Params
+from ..sim.ref64 import RefSim
 from .h_fault_attr import IncomingAttribution, failure_point
+from .h_surround_calib import MODEL_RULE_PRESETS
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
 BURST_N = 1000  # h0_run: rng.choice(exc_all, 1000)
@@ -165,14 +168,23 @@ def top_recruited(m, trace, circuit: np.ndarray, k: int = 8) -> list:
              "spikes": int(cnts[j])} for j in top]
 
 
-def make_sims(ch, isolated_topology, full_topology, full_index_map, params: Params):
+def make_sims(ch, isolated_topology, full_topology, full_index_map, params: Params, *,
+              rules: ModelRules = ModelRules()):
     """Make the paired H1 simulators, including their one-time channel power-on pulse.
 
     Kept separate so the small synthetic regression can exercise the same fresh and chained
     simulator setup as the whole-brain driver.
     """
-    sim_iso = circuit_sim(isolated_topology, params)
-    sim_full = circuit_sim(full_topology, params, full_index_map)
+    # embed_image.circuit_sim does not yet accept rules. Construct here so rules are
+    # installed before any events (including power-on) register stimulated neurons.
+    # Integration follow-up: circuit_sim(..., *, rules=ModelRules()) should forward
+    # rules to RefSim, after which these constructions can use that shared factory.
+    sim_iso = RefSim(isolated_topology, params, rules=rules)
+    sim_full = RefSim(full_topology, params, rules=rules)
+    if full_index_map is not None:
+        index_map = np.asarray(full_index_map, np.int64)
+        if len(index_map) != full_topology.n or not np.array_equal(index_map, np.arange(full_topology.n)):
+            sim_full = CircuitView(sim_full, index_map)
     power_on(ch, sim_iso)
     power_on(ch, sim_full)
     return sim_iso, sim_full
@@ -296,6 +308,7 @@ class EchoTrace:
 
 def run(args) -> dict:
     params = Params()
+    rules = MODEL_RULE_PRESETS[args.model_rules]
     max_steps = int(round(args.max_ms / params.dt))
     t_start = time.time()
     mapping_meta = load_mapping_meta(args.mapping)
@@ -337,7 +350,7 @@ def run(args) -> dict:
         if sim_iso is None or not args.chained:
             # run_words receives made simulators and therefore does not add this itself.
             # Each simulator gets exactly one designed-index power-on pulse.
-            sim_iso, sim_full = make_sims(ch, img.topology, fg.topology, fg.index_map, params)
+            sim_iso, sim_full = make_sims(ch, img.topology, fg.topology, fg.index_map, params, rules=rules)
         usim = underlying(sim_full)
         t0 = time.time()
         r_iso, re_iso, _ = run_words(ch, sim_iso, [w], [x], params, max_steps)
@@ -370,7 +383,8 @@ def run(args) -> dict:
                    "no_accept" if rec.accept_step is None and rec.status not in ("fault", "timeout") else rec.status)
         accept_ms = (rec.accept_step - rec.load_step) * params.dt if rec.accept_step is not None else None
         cycle_ms = (rec.ready_step - rec.load_step) * params.dt if rec.ready_step is not None else None
-        row = {"k": k, "a": a, "b": b, "cin": c, "expected": x, "decoded": rec.decoded, "status": rec.status, "outcome": outcome,
+        row = {"model_rules": dataclasses.asdict(rules),
+               "k": k, "a": a, "b": b, "cin": c, "expected": x, "decoded": rec.decoded, "status": rec.status, "outcome": outcome,
                "accept_ms": accept_ms, "cycle_ms": cycle_ms, "load_step": int(rec.load_step), "end_step": int(end),
                "fault_spikes": int(rec.fault_spikes), "timeout_spikes": int(rec.timeout_spikes),
                "circuit_spikes": re_full[0]["circuit_spikes"], "isolated": {
@@ -407,6 +421,7 @@ def run(args) -> dict:
     summary["max_exc_per_ms"] = max((r["envelope"]["max_exc_per_ms"] for r in additions), default=0)
     summary["max_inh_per_ms"] = max((r["envelope"]["max_inh_per_ms"] for r in additions), default=0)
     out = {"args": vars(args) | {"mapping": str(args.mapping), "out": str(args.out)},
+           "model_rules": dataclasses.asdict(rules),
            "mapping_meta": mapping_meta, "build_options": {"builder": "build_adder_channel", **build_options}, "params": params.__dict__,
            "image_counts": img.counts, "full_graph_counts": fg.counts,
            "surround": {"kind": args.surround, "rate_hz": args.rate, "driven_neurons": int(len(driven)),
@@ -435,6 +450,8 @@ def run(args) -> dict:
 
 def parse(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--model-rules", choices=tuple(MODEL_RULE_PRESETS), default="current",
+                    help="integration rules: historical current (default) or released Shiu M5")
     ap.add_argument("--n-cases", type=int, default=50)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--surround", choices=("silent", "poisson", "burst"), default="silent")
