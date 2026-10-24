@@ -88,7 +88,7 @@ from ..lib.adder import build_adder_channel
 from ..protocol.latch import DALE_BIASED_VERSION, DALE_FEEDBACK_VERSION, DALE_REFRACTORY_VERSION
 from ..sim.model import ModelRules, Params
 from ..sim.ref64 import RefSim
-from .h_fault_attr import IncomingAttribution, failure_point
+from .h_fault_attr import IncomingAttribution, failure_point, validate_attribution_rules
 from .h_surround_calib import MODEL_RULE_PRESETS
 
 DEFAULT_MAPPING = Path(__file__).resolve().parents[2] / "docs" / "h1_placement_mapping.json"
@@ -309,6 +309,8 @@ class EchoTrace:
 def run(args) -> dict:
     params = Params()
     rules = MODEL_RULE_PRESETS[args.model_rules]
+    if getattr(args, "attribution_in", None) is not None:
+        validate_attribution_rules(args.attribution_in, rules)
     max_steps = int(round(args.max_ms / params.dt))
     t_start = time.time()
     mapping_meta = load_mapping_meta(args.mapping)
@@ -327,7 +329,7 @@ def run(args) -> dict:
                              surround_scale_inh=getattr(args, "surround_scale_inh", 1.0),
                              surround_input_cap=getattr(args, "surround_input_cap", None))
     attr_window = getattr(args, "attribute", None)
-    attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params) if attr_window is not None else None
+    attribution = IncomingAttribution(m, fg, ch.net.roles, attr_window, params, rules=rules) if attr_window is not None else None
     hosts = fg.index_map[img.real >= 0]
     echo = EchoTrace(fg.topology, hosts, m.n, params) if getattr(args, "echo_trace", False) else None
     pops = surround_populations(m, exclude=hosts)

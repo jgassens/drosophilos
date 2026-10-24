@@ -183,3 +183,43 @@ def test_h1_rules_apply_before_power_on_in_designed_indices(index_map):
         assert actual.trace.events["neuron"].tolist() == [target]
         assert sim.trace.events["neuron"].tolist() == [0]
         assert not actual.g.any()  # the power-on event entered V, never g
+
+
+@pytest.mark.parametrize("preset", ["current", "shiu"])
+@pytest.mark.parametrize("load_case", ["matching", "mismatched", "absent"])
+def test_h1_attribution_npz_provenance(tmp_path, monkeypatch, recwarn, preset, load_case):
+    setup_h1(monkeypatch)
+    path = tmp_path / "scores.npz"
+    # No --out: the NPZ must carry provenance even when it is the only saved result.
+    h1.run(h1.parse(H1_FLAGS + ["--model-rules", preset, "--attribute", "20",
+                               "--attribution-out", str(path)]))
+    expected = CURRENT if preset == "current" else SHIU
+    with np.load(path, allow_pickle=False) as saved:
+        assert json.loads(saved["model_rules"].item()) == expected
+        legacy_arrays = {key: saved[key] for key in saved.files if key != "model_rules"}
+    if load_case == "absent":
+        np.savez_compressed(path, **legacy_arrays)
+    run_preset = ("shiu" if preset == "current" else "current") if load_case == "mismatched" else preset
+    args = h1.parse(H1_FLAGS + ["--model-rules", run_preset, "--cut-inputs-by", "attribution",
+                               "--attribution-in", str(path), "--cut-inputs-frac", "1"])
+    if load_case == "mismatched":
+        # Refuse before any dataset load or simulation.
+        monkeypatch.setattr(h1, "load_mcns", lambda: pytest.fail("loaded brain before checking rules"))
+        with pytest.raises(ValueError, match="model rules mismatch") as exc:
+            h1.run(args)
+        message = str(exc.value)
+        assert str(path) in message
+        assert f"recorded rules {expected}" in message
+        assert f"current run rules {SHIU if run_preset == 'shiu' else CURRENT}" in message
+        assert not recwarn.list
+        return
+    if load_case == "absent":
+        with pytest.warns(RuntimeWarning, match="provenance is unknown") as caught:
+            record = h1.run(args)
+        assert str(path) in str(caught[0].message)
+    else:
+        record = h1.run(args)
+        assert not recwarn.list
+    assert record["model_rules"] == expected
+    assert record["full_graph_counts"]["inputs_cut_edges"] == 2
+    assert record["full_graph_counts"]["inputs_cut_synapses"] == 5

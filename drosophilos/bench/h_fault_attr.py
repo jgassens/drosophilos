@@ -4,16 +4,45 @@ Scores are temporal associations, not causal estimates. A delivery is a source s
 on an embedded edge of delay d, arriving at s+d; only arrivals in [failure-W, failure)
 count. Weight is signed embedded quanta, and score is delivered spikes * abs(weight).
 Only a short source-spike tail survives between chained additions; no traces are saved.
-The compressed NPZ contains full numeric per-edge arrays keyed by endpoint bodyIds and can
+The compressed NPZ contains full per-edge arrays keyed by endpoint bodyIds, plus model-rule
+provenance as a scalar JSON string (no pickle), and can
 be passed to full_graph_topology(attribution_in=...). Compact JSON is a report, not a cut file.
 """
 
 from __future__ import annotations
 
+import json
+import warnings
+from dataclasses import asdict
 from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
+
+from ..sim.model import ModelRules
+
+
+def validate_attribution_rules(path: Path, rules: ModelRules) -> None:
+    """Refuse scores from different integration rules; allow unlabelled legacy files."""
+    expected = asdict(rules)
+    with np.load(path, allow_pickle=False) as saved:
+        if "model_rules" not in saved:
+            warnings.warn(f"Attribution file {path} has no model_rules metadata; provenance is unknown "
+                          "and compatibility with the current run cannot be checked.",
+                          RuntimeWarning, stacklevel=2)
+            return
+        try:
+            recorded = json.loads(saved["model_rules"].item())
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid attribution model_rules metadata in {path}") from exc
+    # Partial or malformed provenance is not an unlabelled legacy artifact.
+    if (not isinstance(recorded, dict) or recorded.keys() != expected.keys()
+            or any(type(recorded[key]) is not type(value) for key, value in expected.items())
+            or recorded["stim_target"] not in ("g", "v")):
+        raise ValueError(f"Invalid attribution model_rules metadata in {path}: {recorded!r}")
+    if recorded != expected:
+        raise ValueError(f"Attribution model rules mismatch in {path}: "
+                         f"recorded rules {recorded}; current run rules {expected}")
 
 
 def failure_point(ch, rec, trace, reference, reference_rec, end_step: int) -> dict | None:
@@ -64,10 +93,11 @@ def failure_point(ch, rec, trace, reference, reference_rec, end_step: int) -> di
 class IncomingAttribution:
     """One O(incoming edges + recent source spikes) accumulator for an entire bench run."""
 
-    def __init__(self, m, fg, roles, window_ms: float, params):
+    def __init__(self, m, fg, roles, window_ms: float, params, *, rules: ModelRules = ModelRules()):
         if not np.isfinite(window_ms) or window_ms <= 0:
             raise ValueError("attribute window must be finite and positive")
         self.window_ms = float(window_ms)
+        self.rules = rules
         # Integer arrival steps in [T-W/dt, T) are exactly [T-floor(W/dt), T).
         self.window_steps = int(Fraction(str(window_ms)) / Fraction(str(params.dt)))
         topo = fg.topology
@@ -177,10 +207,11 @@ class IncomingAttribution:
                 "by_superclass": tables["superclass"]}
 
     def save(self, path: Path) -> None:
-        """Compressed numeric arrays only; exact path (no implicit .npz suffix)."""
+        """Compressed arrays and authoritative rule values; exact path, no implicit suffix."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as out:
             np.savez_compressed(out, pre_bodyId=self.pre_body, post_bodyId=self.post_body,
                                 score=self.score, weight=self.weight, synapses=self.synapses,
-                                deliveries=self.deliveries, failures=self.edge_failures)
+                                deliveries=self.deliveries, failures=self.edge_failures,
+                                model_rules=json.dumps(asdict(self.rules)))
